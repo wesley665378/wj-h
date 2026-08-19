@@ -13,6 +13,8 @@ interface BusinessUnitProfitRankingTableProps {
   resources: MiningResource[];
   transactions: InternalTransaction[];
   currentUser?: User;
+  startDate?: string;
+  endDate?: string;
 }
 
 export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingTableProps> = ({
@@ -22,6 +24,8 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
   auditLogs,
   resources,
   transactions,
+  startDate,
+  endDate,
 }) => {
   // 默认折叠，领导/用户点击展开才可见
   const [isExpanded, setIsExpanded] = useState(false);
@@ -35,9 +39,11 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
       users,
       auditLogs,
       resources,
-      transactions
+      transactions,
+      startDate,
+      endDate
     );
-  }, [businessUnits, selectedMonth, users, auditLogs, resources, transactions]);
+  }, [businessUnits, selectedMonth, users, auditLogs, resources, transactions, startDate, endDate]);
 
   // 将扁平数组按经营单元聚合成对（便于渲染 rowSpan）
   const pairedRows = useMemo(() => {
@@ -82,7 +88,7 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
                 经营单元盈利排名榜
               </h3>
               <span className="px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200/60 rounded-full text-[10px] font-black uppercase tracking-wider">
-                月份: {selectedMonth}
+                筛选: {startDate && endDate ? `${startDate} 至 ${endDate}` : selectedMonth}
               </span>
             </div>
             <p className="text-slate-400 text-xs font-bold mt-1">

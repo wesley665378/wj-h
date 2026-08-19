@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, ValueCreationLog, InternalTransaction, MiningResource, AuditStatus, TransactionStatus, RefineCategory } from '../types';
 import { Card, Badge } from '../src/components/UI';
-import { getLocalMonthString, getLocalDateString, resolveLogBusinessMonth, resolveLogBusinessDate, formatSubmissionDate, formatSubmissionTime, isDateInRange } from '../src/utils/dateUtils';
+import { getLocalMonthString, getLocalDateString, resolveLogBusinessMonth, resolveLogBusinessDate, formatSubmissionDate, formatSubmissionTime, isDateInRange, isLogInFilter } from '../src/utils/dateUtils';
 import { calculateHistoricalNetValue, getUserSalaryByMonth } from '../src/utils/business';
 import { aggregateUserMonthMetrics, calculateBonusAllocation } from '../src/utils/bonusAllocation';
 import { fetchDistributionData } from '../src/services/api';
@@ -56,13 +56,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
 
   // 按维度模式过滤的当前活跃日志
   const activeLogs = useMemo(() => {
-    if (startDate && endDate) {
-      return myUnifiedLogs.filter(l => isDateInRange(l.resolvedDate, startDate, endDate));
-    } else if (selectedMonth) {
-      return myUnifiedLogs.filter(l => l.resolvedMonth === selectedMonth);
-    } else {
-      return myUnifiedLogs;
-    }
+    return myUnifiedLogs.filter(l => isLogInFilter(l, selectedMonth, startDate, endDate));
   }, [myUnifiedLogs, selectedMonth, startDate, endDate]);
 
   // 包汇总计算（按净值口径）

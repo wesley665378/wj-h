@@ -19,6 +19,7 @@ import {
   formatSubmissionDate,
   formatSubmissionTime,
   isDateInRange,
+  isLogInFilter,
 } from '../src/utils/dateUtils';
 import { formatAmount } from '../src/utils/formatters';
 import { InfoTip } from '../src/components/InfoTip';
@@ -372,11 +373,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       });
     }
     
-    if (filterStartDate && filterEndDate) {
-      list = list.filter(t => isDateInRange(t.businessDate || resolveLogBusinessDate(t), filterStartDate, filterEndDate));
-    } else if (filterMonth) {
-      list = list.filter(t => t.month === filterMonth || resolveLogBusinessMonth(t) === filterMonth);
-    }
+    list = list.filter(t => isLogInFilter(t, filterMonth, filterStartDate, filterEndDate));
     
     return list;
   }, [transactions, currentUser.center, isAdmin, users, filterMonth, filterStartDate, filterEndDate]);
@@ -386,14 +383,11 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       if (t.type !== TransactionType.Resource) return false;
       const matchesMiningId = !filterMiningId || t.miningId === filterMiningId;
       const matchesType = !filterType || (filterType === '收款' ? (t.revenueAmount || 0) > 0 : (t.valueAmount || 0) > 0);
-      const matchesRange = filterStartDate && filterEndDate
-        ? isDateInRange(t.businessDate || resolveLogBusinessDate(t), filterStartDate, filterEndDate)
-        : true;
-      const matchesMonth = matchesRange ? true : (!filterMonth || t.month === filterMonth || resolveLogBusinessMonth(t) === filterMonth);
+      const matchesRangeAndMonth = isLogInFilter(t, filterMonth, filterStartDate, filterEndDate);
       const matchesDate = (!filterDateRange.start || t.timestamp >= new Date(filterDateRange.start).getTime()) &&
                           (!filterDateRange.end || t.timestamp <= new Date(filterDateRange.end).getTime());
       const isRelated = isAdmin || t.senderId === currentUser.id || t.receiverId === currentUser.id;
-      return matchesMiningId && matchesType && matchesMonth && matchesRange && matchesDate && isRelated && t.status === TransactionStatus.Verified;
+      return matchesMiningId && matchesType && matchesRangeAndMonth && matchesDate && isRelated && t.status === TransactionStatus.Verified;
     }).sort((a, b) => b.timestamp - a.timestamp);
   }, [transactions, filterMiningId, filterType, filterDateRange, currentUser.id, isAdmin, filterMonth, filterStartDate, filterEndDate]);
 

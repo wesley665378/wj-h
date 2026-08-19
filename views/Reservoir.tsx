@@ -8,7 +8,7 @@ import {
   sumIncomeProductionPackage,
 } from '../src/utils/reconcileMiningFromLogs';
 import { getUserSalaryByMonth } from '../src/utils/business';
-import { getLocalMonthString, resolveLogBusinessMonth, resolveLogBusinessDate, isDateInRange } from '../src/utils/dateUtils';
+import { getLocalMonthString, resolveLogBusinessMonth, resolveLogBusinessDate, isDateInRange, isLogInFilter } from '../src/utils/dateUtils';
 import { Users, Droplets, ShieldCheck, Download, Activity } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { motion } from 'motion/react';
@@ -237,13 +237,8 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
 
   // 1. 数据过滤：支持业务月份与自定义起止日区间
   const filteredLogs = useMemo(() => {
-    return logs.filter(l => {
-      if (startDate && endDate) {
-        return isDateInRange(resolveLogBusinessDate(l), startDate, endDate);
-      }
-      return resolveLogBusinessMonth(l) === effectiveMonth;
-    });
-  }, [logs, effectiveMonth, startDate, endDate]);
+    return logs.filter(l => isLogInFilter(l, selectedMonth, startDate, endDate));
+  }, [logs, selectedMonth, startDate, endDate]);
   
   const fhId = `FH-${effectiveMonth}`;
   const fhctzRecord = transactions.find(t => t.id === fhId && t.status === TransactionStatus.Verified);
@@ -327,70 +322,42 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
 
       {/* 统筹池全盘概览 */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="p-8 rounded-[2.5rem] bg-gradient-to-br from-slate-900 to-slate-800 text-white border-none shadow-2xl relative overflow-hidden group">
-          <div className="absolute top-0 right-0 p-6 opacity-[0.1] group-hover:scale-150 transition-transform duration-700 pointer-events-none text-6xl">🌊</div>
-          <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] mb-2">经营单元流入</p>
-          <h4 className="text-4xl font-black tracking-tighter mb-4 font-mono">
+        <Card className="p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] bg-white border border-slate-100 shadow-md">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">经营单元流入</p>
+          <h4 className="text-4xl font-black tracking-tighter font-mono text-slate-900">
             {Math.round(platformCoordinationInflow).toLocaleString()}
           </h4>
-          <div className="flex items-center text-[10px] font-bold text-slate-400">
-            <span className="mr-2">基准:</span>
-            <span className="text-slate-200">已确权收款包({Math.round(totalConfirmedRevenuePackage).toLocaleString()}) × 20%</span>
-          </div>
         </Card>
 
-        <Card className="p-8 rounded-[2.5rem] bg-white border border-slate-100 shadow-xl relative group">
-          <div className="absolute top-0 right-0 p-6 opacity-[0.05] group-hover:scale-150 transition-transform duration-700 pointer-events-none text-6xl">⚡</div>
+        <Card className="p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] bg-white border border-slate-100 shadow-md">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">全盘刚性薪资包</p>
-          <h4 className="text-4xl font-black tracking-tighter mb-4 font-mono text-slate-900">
+          <h4 className="text-4xl font-black tracking-tighter font-mono text-slate-900">
             {Math.round(totalRigidSalary).toLocaleString()}
           </h4>
-          <div className="flex items-center text-[10px] font-bold text-slate-400">
-            <Users className="w-3 h-3 mr-1" />
-            <span>在职专家刚性工资之和</span>
-          </div>
         </Card>
 
-        <Card className={`p-8 rounded-[2.5rem] border shadow-xl relative group ${totalSupplement > 0 ? 'bg-amber-50 border-amber-100' : 'bg-white border-slate-100'}`}>
-          <div className="absolute top-0 right-0 p-6 opacity-[0.05] group-hover:scale-150 transition-transform duration-700 pointer-events-none text-6xl">🛡️</div>
+        <Card className="p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] bg-white border border-slate-100 shadow-md">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">全盘统筹补足额</p>
-          <div className="flex items-baseline space-x-2">
-            <h4 className={`text-4xl font-black tracking-tighter mb-4 font-mono ${totalSupplement > 0 ? 'text-amber-600' : 'text-slate-900'}`}>
-              {Math.round(fhctzRecord ? fhctzRecord.amount : totalSupplement).toLocaleString()}
-            </h4>
-            {fhctzRecord && (
-               <span className="px-2 py-0.5 bg-emerald-500 text-white text-[8px] font-black rounded-full uppercase tracking-tighter mb-5">已落库</span>
-            )}
-          </div>
-          <div className="flex items-center text-[10px] font-bold text-slate-400">
-            <ShieldCheck className="w-3 h-3 mr-1" />
-            <span>{totalSupplement > 0 ? '统筹池预计需补足' : '收产包已覆盖刚性'}</span>
-          </div>
+          <h4 className="text-4xl font-black tracking-tighter font-mono text-slate-900">
+            {Math.round(fhctzRecord ? fhctzRecord.amount : totalSupplement).toLocaleString()}
+          </h4>
         </Card>
       </div>
 
       {/* 消耗积分全盘总览 */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card className="p-8 rounded-[2.5rem] bg-white border border-slate-100 shadow-xl relative group overflow-hidden">
-          <div className="absolute top-0 right-0 p-6 opacity-[0.05] group-hover:scale-150 transition-transform duration-700 pointer-events-none text-6xl">🔥</div>
-          <p className="text-[10px] font-black text-rose-500 uppercase tracking-[0.2em] mb-2">C 类已确权/入库消耗积分</p>
-          <h4 className="text-4xl font-black text-slate-800 tracking-tighter mb-4 font-mono">
+        <Card className="p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] bg-white border border-slate-100 shadow-md">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">C 类已确权/入库消耗积分</p>
+          <h4 className="text-4xl font-black tracking-tighter font-mono text-slate-900">
             {Math.round(totalCPoints).toLocaleString()}
           </h4>
-          <div className="flex items-center text-[10px] font-bold text-slate-400">
-            <span>当前月份或日期区间内，已确权或入库的 C 类消耗积分合计</span>
-          </div>
         </Card>
 
-        <Card className="p-8 rounded-[2.5rem] bg-white border border-slate-100 shadow-xl relative group overflow-hidden">
-          <div className="absolute top-0 right-0 p-6 opacity-[0.05] group-hover:scale-150 transition-transform duration-700 pointer-events-none text-6xl">⚡</div>
-          <p className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.2em] mb-2">B2 类已确权/入库消耗积分</p>
-          <h4 className="text-4xl font-black text-slate-800 tracking-tighter mb-4 font-mono">
+        <Card className="p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] bg-white border border-slate-100 shadow-md">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">B2 类已确权/入库消耗积分</p>
+          <h4 className="text-4xl font-black tracking-tighter font-mono text-slate-900">
             {Math.round(totalB2Points).toLocaleString()}
           </h4>
-          <div className="flex items-center text-[10px] font-bold text-slate-400">
-            <span>当前月份或日期区间内，已确权或入库的 B2 消耗积分合计</span>
-          </div>
         </Card>
       </div>
 
@@ -521,6 +488,8 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
         resources={resources}
         transactions={transactions}
         currentUser={currentUser}
+        startDate={startDate}
+        endDate={endDate}
       />
     </div>
   );

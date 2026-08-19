@@ -48,16 +48,37 @@ export function getLocalMonthString(input?: Date | number | string): string {
  */
 export function resolveLogBusinessMonth(log?: { month?: string; businessDate?: string; timestamp?: number | string | Date } | null): string {
   if (!log) return getLocalMonthString();
-  if (log.month && typeof log.month === 'string' && log.month.trim() !== '') {
-    return log.month.trim().slice(0, 7);
-  }
   if (log.businessDate && typeof log.businessDate === 'string' && log.businessDate.trim() !== '') {
     return log.businessDate.trim().slice(0, 7);
+  }
+  if (log.month && typeof log.month === 'string' && log.month.trim() !== '') {
+    return log.month.trim().slice(0, 7);
   }
   if (log.timestamp) {
     return getLocalMonthString(log.timestamp);
   }
   return getLocalMonthString();
+}
+
+/**
+ * 统一过滤逻辑：判断日志是否落在筛选范围
+ */
+export function isLogInFilter(
+  log?: { month?: string; businessDate?: string; timestamp?: number | string | Date } | null,
+  filterMonth?: string,
+  filterStartDate?: string,
+  filterEndDate?: string
+): boolean {
+  if (!log) return false;
+  if (filterStartDate || filterEndDate) {
+    const bDate = resolveLogBusinessDate(log);
+    return isDateInRange(bDate, filterStartDate, filterEndDate);
+  }
+  if (filterMonth) {
+    const bMonth = resolveLogBusinessMonth(log);
+    return bMonth === filterMonth;
+  }
+  return true;
 }
 
 /**

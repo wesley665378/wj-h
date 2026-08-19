@@ -37,6 +37,7 @@ import {
   formatSubmissionDate,
   formatSubmissionTime,
   isDateInRange,
+  isLogInFilter,
 } from "../src/utils/dateUtils";
 import { formatAmount } from "../src/utils/formatters";
 import { InfoTip } from "../src/components/InfoTip";
@@ -111,13 +112,7 @@ const Auditing: React.FC<AuditingProps> = ({
 
   // 根据选择的月份或业务日区间过滤日志
   const monthlyLogs = useMemo(() => {
-    return logs.filter((log) => {
-      if (startDate && endDate) {
-        return isDateInRange(resolveLogBusinessDate(log), startDate, endDate);
-      }
-      const logMonth = resolveLogBusinessMonth(log);
-      return logMonth === selectedMonth;
-    });
+    return logs.filter((log) => isLogInFilter(log, selectedMonth, startDate, endDate));
   }, [logs, selectedMonth, startDate, endDate]);
 
   // 1. 收款确权待办任务（收款类，来自价值创造组件）

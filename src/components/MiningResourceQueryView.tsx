@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { 
   MiningResource, 
   ValueCreationLog, 
@@ -13,6 +13,8 @@ import { deriveProjectStatus } from '../utils/projectStatus';
 import { calculateSingleResourceQuadrants } from '../utils/purification';
 import { calculateHistoricalNetValue } from '../utils/business';
 import * as XLSX from 'xlsx';
+import { BusinessDateFilter } from './BusinessDateFilter';
+import { isLogInFilter, getLocalMonthString } from '../utils/dateUtils';
 
 export const normalizeMiningId = (id: string | undefined | null): string => {
   return (id || '').trim().toLowerCase();
@@ -47,6 +49,10 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
   managedUsers = [],
   onClose,
 }) => {
+  const [filterMonth, setFilterMonth] = useState<string>(() => getLocalMonthString());
+  const [filterStartDate, setFilterStartDate] = useState<string>('');
+  const [filterEndDate, setFilterEndDate] = useState<string>('');
+
   const normQueryId = useMemo(() => normalizeMiningId(resource.id), [resource.id]);
 
   // 全量矿山关联流水 (含普通产出与动态消耗)
@@ -93,7 +99,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
   // 权计算
   const cWeightRev = initialRev > 0 ? Math.max(0, (initialRev - totalC) / initialRev) : 1;
   const cWeightVal = initialVal > 0 ? Math.max(0, (initialVal - totalC) / initialVal) : 1;
-  const b2Weight = initialVal > 0 ? Math.max(0, (initialVal - totalC - totalB2) / initialVal) : 1;
+  const b2Weight = initialVal > 0 ? Math.max(0, (initialVal - totalB2) / initialVal) : 1;
 
   // 收款轨/产值轨进度四格 (与创造页同矿四格同源：用 jzcz 流水聚合，禁止只读矿山 JSON confirmed*)
   const quadrants = useMemo(() => {
@@ -105,7 +111,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
   // 收款行：仅 status 已确权；待确权收款不进列表、不进收款包汇总
   // 产值行：已确权，或（待确权且 confirmationType==='联动确权'）；普通待确权产值不进列表、不进产兑包
   const jzczRows = useMemo(() => {
-    return logs.filter(l => {
+    let list = logs.filter(l => {
       if (normalizeMiningId(l.miningId) !== normQueryId) return false;
       if (l.costCategory || (l as any).consumptionType || l.confirmationType === '手动确权') return false;
 
@@ -117,8 +123,10 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
       if (isRev) return isConfirmed;
       if (isVal) return isConfirmed || (isPending && l.confirmationType === '联动确权');
       return false;
-    }).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-  }, [logs, normQueryId]);
+    });
+    list = list.filter(l => isLogInFilter(l, filterMonth, filterStartDate, filterEndDate));
+    return list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  }, [logs, normQueryId, filterMonth, filterStartDate, filterEndDate]);
 
   // 价值创造汇总包
   const { totalRevenuePackage, totalValuePackage, totalCombinedPackage } = useMemo(() => {
@@ -156,16 +164,18 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
         }
       }
     });
-    return Array.from(map.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-  }, [dtcbLogs, logs, normQueryId]);
+    let list = Array.from(map.values());
+    list = list.filter(l => isLogInFilter(l, filterMonth, filterStartDate, filterEndDate));
+    return list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  }, [dtcbLogs, logs, normQueryId, filterMonth, filterStartDate, filterEndDate]);
 
   // 【4 内部交易 nbjy】
   // transactions 中 miningId 精确命中本矿，含各状态（含已驳回）
   const nbjyRows = useMemo(() => {
-    return transactions
-      .filter(t => normalizeMiningId(t.miningId) === normQueryId)
-      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-  }, [transactions, normQueryId]);
+    let list = transactions.filter(t => normalizeMiningId(t.miningId) === normQueryId);
+    list = list.filter(t => isLogInFilter(t, filterMonth, filterStartDate, filterEndDate));
+    return list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  }, [transactions, normQueryId, filterMonth, filterStartDate, filterEndDate]);
 
   // 导出 Excel (多 Sheet，无货币符号，金额整数)
   const handleExportExcel = () => {
@@ -310,6 +320,37 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
             </button>
           )}
         </div>
+      </div>
+
+      {/* 关联流水范围筛选 */}
+      <div className="bg-white p-4 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-2 text-slate-700 font-bold text-xs">
+          <span>📅</span>
+          <span>筛选关联流水范围：</span>
+          <span className="text-blue-600 font-mono font-black bg-blue-50 px-2 py-0.5 rounded">
+            {filterStartDate && filterEndDate ? `${filterStartDate} 至 ${filterEndDate}` : filterMonth}
+          </span>
+        </div>
+        <BusinessDateFilter
+          month={filterStartDate || filterEndDate ? '' : filterMonth}
+          onMonthChange={(m) => {
+            setFilterMonth(m);
+            setFilterStartDate('');
+            setFilterEndDate('');
+          }}
+          startDate={filterStartDate}
+          endDate={filterEndDate}
+          onDateRangeChange={(s, e) => {
+            setFilterStartDate(s);
+            setFilterEndDate(e);
+            setFilterMonth('');
+          }}
+          onClear={() => {
+            setFilterMonth(getLocalMonthString());
+            setFilterStartDate('');
+            setFilterEndDate('');
+          }}
+        />
       </div>
 
       {/* 【1 矿山主档】 */}

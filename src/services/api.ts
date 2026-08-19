@@ -48,6 +48,7 @@ export const syncWorkspace = async (payload: {
   miningResources?: any[];
   valueEfficiencySnapshots?: any[];
   acceptanceRecords?: any[];
+  businessUnits?: any[];
 }): Promise<any> => {
   const response = await fetch(`${API_BASE}/api/workspace/sync`, {
     method: 'POST',

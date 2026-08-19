@@ -281,7 +281,7 @@ export const checkUserPermission = (user: User, menuId: string): boolean => {
     return RANK_CONFIG[rank].defaultPermissions.includes(menuId);
   }
 
-  if (menuId === 'kanban') return true;
+  if (menuId === 'kanban' || menuId === 'instructions') return true;
 
   return false;
 };

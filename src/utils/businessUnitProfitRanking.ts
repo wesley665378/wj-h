@@ -1,7 +1,7 @@
 import { ValueCreationLog, MiningResource, AuditStatus, RefineCategory, User, InternalTransaction, TransactionStatus, Role } from '../../types';
 import { resolveLogPackageNet } from './reconcileMiningFromLogs';
 import { getUserSalaryByMonth } from './business';
-import { resolveLogBusinessMonth } from './dateUtils';
+import { resolveLogBusinessMonth, isDateInRange, resolveLogBusinessDate } from './dateUtils';
 
 export interface UnitRankingRow {
   unitName: string;
@@ -78,7 +78,10 @@ export function computeUnitSingleMonth(
   users: User[],
   auditLogs: ValueCreationLog[],
   resources: MiningResource[],
-  transactions: InternalTransaction[]
+  transactions: InternalTransaction[],
+  selectedMonth?: string,
+  startDate?: string,
+  endDate?: string
 ): SingleMonthUnitMetrics {
   const managers = getUnitManagers(unitName, users);
 
@@ -89,6 +92,9 @@ export function computeUnitSingleMonth(
 
   // 2. 筛选当月日志
   const monthLogs = auditLogs.filter(l => {
+    if (startDate && endDate && monthStr === selectedMonth) {
+      return isDateInRange(resolveLogBusinessDate(l), startDate, endDate);
+    }
     return resolveLogBusinessMonth(l) === monthStr;
   });
 
@@ -129,6 +135,13 @@ export function computeUnitSingleMonth(
   // 2.5 承兑奖金：当月承兑台账实发，按发放对象所属经营单元归集；禁止用理论奖金；无所属单元则不计入任一单元。
   const verifiedTxs = transactions.filter(t => {
     if (t.status !== TransactionStatus.Verified) return false;
+    
+    if (startDate && endDate && monthStr === selectedMonth) {
+      const bDate = t.businessDate || (t.timestamp ? new Date(t.timestamp).toLocaleDateString() : '');
+      const cleanDate = bDate.replace(/\//g, '-');
+      return isDateInRange(cleanDate, startDate, endDate);
+    }
+
     // 时间匹配：通过 tx.month 或 timestamp 转成的 YYYY-MM
     let txMonth = t.month;
     if (!txMonth && t.timestamp) {
@@ -244,7 +257,9 @@ export function computeBusinessUnitProfitRanking(
   users: User[],
   auditLogs: ValueCreationLog[],
   resources: MiningResource[],
-  transactions: InternalTransaction[]
+  transactions: InternalTransaction[],
+  startDate?: string,
+  endDate?: string
 ): UnitRankingRow[] {
   if (!businessUnits || businessUnits.length === 0) return [];
 
@@ -260,7 +275,7 @@ export function computeBusinessUnitProfitRanking(
 
   // 1. 计算每个单元在选定月份的单月指标
   const currentMonthMetrics = businessUnits.map(unitName => 
-    computeUnitSingleMonth(unitName, selectedMonth, users, auditLogs, resources, transactions)
+    computeUnitSingleMonth(unitName, selectedMonth, users, auditLogs, resources, transactions, selectedMonth, startDate, endDate)
   );
 
   // 2. 计算每个单元从当年 1 月至选定月的年度累计盈亏 (区分口径)
@@ -270,7 +285,7 @@ export function computeBusinessUnitProfitRanking(
     let row1YearSum = 0;
     let row2YearSum = 0;
     monthsInYearToSelected.forEach(mStr => {
-      const mMetrics = computeUnitSingleMonth(unitName, mStr, users, auditLogs, resources, transactions);
+      const mMetrics = computeUnitSingleMonth(unitName, mStr, users, auditLogs, resources, transactions, selectedMonth, startDate, endDate);
       row1YearSum += mMetrics.row1MonthlyProfit;
       row2YearSum += mMetrics.row2MonthlyProfit;
     });

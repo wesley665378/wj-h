@@ -44,7 +44,7 @@ export function calculateHedgeCapacitiesAndWeights(resource: MiningResource, all
 
   const cWeightRev = revInitial > 0 ? Math.max(0, (revInitial - C) / revInitial) : 1;
   const cWeightVal = valInitial > 0 ? Math.max(0, (valInitial - C) / valInitial) : 1;
-  const b2Weight = valInitial > 0 ? Math.max(0, (valInitial - C - B2) / valInitial) : 1;
+  const b2Weight = valInitial > 0 ? Math.max(0, (valInitial - B2) / valInitial) : 1;
 
   return {
     revInitial,

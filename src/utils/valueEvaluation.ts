@@ -1,6 +1,7 @@
 import { User, ValueCreationLog, MiningResource, AuditStatus, ValueEfficiencySnapshot, RefineCategory, Role } from '../../types';
 import { calculateHistoricalNetValue, getUserSalaryByMonth } from './business';
 import { aggregateUserMonthMetrics } from './bonusAllocation';
+import { isLogInFilter } from './dateUtils';
 
 export interface EvaluationResult extends ValueEfficiencySnapshot {
   tierLabel: string;
@@ -21,9 +22,12 @@ export function computePersonEvaluation(
   logs: ValueCreationLog[],
   resources: MiningResource[],
   allUsers: User[],
-  filterMonth: string
+  filterMonth: string,
+  startDate?: string,
+  endDate?: string
 ): EvaluationResult {
-  const currentYear = filterMonth.split('-')[0];
+  const refMonth = startDate ? startDate.slice(0, 7) : filterMonth;
+  const currentYear = refMonth.split('-')[0];
   
   // 匹配规则：recordedCollectorId 优先，其次是 rankId 回退
   const matchUser = (l: ValueCreationLog) => l.recordedCollectorId === user.id || (!l.recordedCollectorId && l.rankId === user.id);
@@ -39,11 +43,13 @@ export function computePersonEvaluation(
     return isRevenue || isValue;
   };
 
-  // 月度流水
+  // 月度流水 (支持自定义起止日期筛选，或者默认按月筛选)
   const monthlyLogs = logs.filter(l => 
     matchUser(l) && 
     isIncomeLog(l) &&
-    l.month === filterMonth
+    ((startDate || endDate) 
+      ? isLogInFilter(l, '', startDate, endDate)
+      : l.month === filterMonth)
   );
 
   // 年度流水 (至当前月)
@@ -52,7 +58,7 @@ export function computePersonEvaluation(
     isIncomeLog(l) &&
     l.month &&
     l.month.startsWith(currentYear) &&
-    l.month <= filterMonth
+    l.month <= refMonth
   );
 
   // 收入计算 (维持现状)
@@ -72,13 +78,13 @@ export function computePersonEvaluation(
   const mMetrics = aggregateUserMonthMetrics(
     logs,
     user,
-    filterMonth,
+    refMonth,
     resources,
     allUsers,
     [AuditStatus.Confirmed, AuditStatus.Approved]
   );
 
-  const baseSalary = getUserSalaryByMonth(user, filterMonth);
+  const baseSalary = getUserSalaryByMonth(user, refMonth);
   let monthlyCost = baseSalary;
   if (isRevenueExpert) {
     monthlyCost += mMetrics.aCost;
@@ -86,10 +92,10 @@ export function computePersonEvaluation(
     monthlyCost += mMetrics.b1Cost;
   }
   
-  // 年度成本 = 从 1 月到 filterMonth 累计月度成本 (工资 + A/B1)
+  // 年度成本 = 从 1 月到 refMonth 累计月度成本 (工资 + A/B1)
   let yearlyCost = 0;
-  const targetYear = filterMonth.split('-')[0];
-  const targetMonthNum = parseInt(filterMonth.split('-')[1]);
+  const targetYear = refMonth.split('-')[0];
+  const targetMonthNum = parseInt(refMonth.split('-')[1]);
   for (let m = 1; m <= targetMonthNum; m++) {
     const monthStr = `${targetYear}-${String(m).padStart(2, '0')}`;
     const ymMetrics = aggregateUserMonthMetrics(
@@ -138,7 +144,7 @@ export function computePersonEvaluation(
     userId: user.id,
     userName: user.name,
     category: user.category || '奋斗者',
-    filterMonth,
+    filterMonth: refMonth,
     monthlyIncome,
     monthlyCost,
     monthlyEfficiency: efficiency,
@@ -167,7 +173,9 @@ export function computeAllEvaluations(
   users: User[],
   logs: ValueCreationLog[],
   resources: MiningResource[],
-  filterMonth: string
+  filterMonth: string,
+  startDate?: string,
+  endDate?: string
 ): EvaluationResult[] {
   // 正确过滤（在职采集主体）：
   // 保留：
@@ -208,6 +216,6 @@ export function computeAllEvaluations(
   }
 
   return activeUsers.map(user => 
-    computePersonEvaluation(user, logs, resources, users, filterMonth)
+    computePersonEvaluation(user, logs, resources, users, filterMonth, startDate, endDate)
   ).sort((a, b) => b.contribution - a.contribution);
 }

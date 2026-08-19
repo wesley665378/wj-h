@@ -30,6 +30,7 @@ import {
   formatSubmissionTime,
   formatSubmissionDate,
   isDateInRange,
+  isLogInFilter,
 } from '../src/utils/dateUtils';
 import { formatAmount, formatRatio, formatPercent } from '../src/utils/formatters';
 import { InfoTip } from '../src/components/InfoTip';
@@ -111,7 +112,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
   const [workingDays, setWorkingDays] = useState<number>(22);
   const [filterStartDate, setFilterStartDate] = useState<string>('');
   const [filterEndDate, setFilterEndDate] = useState<string>('');
-  const [filterMonth, setFilterMonth] = useState<string>('');
+  const [filterMonth, setFilterMonth] = useState<string>(() => getLocalMonthString());
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
 
   useEffect(() => {
@@ -342,8 +343,8 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
           dynamicCost: dynamicCost,
           netValue: calculatedNetValue,
           timestamp: Date.now(),
-          businessDate: getLocalDateString(),
-          month: getLocalMonthString(),
+          businessDate: businessDate,
+          month: businessDate.slice(0, 7),
           status: status,
           confirmationType: confirmationType as any
         };
@@ -378,23 +379,23 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
     showConfirm(
       `确定提交非有效工时对冲申请？\n\n【对冲金额】${Math.round(deductionAmount).toLocaleString()}\n【归属月份】${businessMonth}`,
       async () => {
-        const deductionLog: ValueCreationLog = {
-          id: `J${(Date.now() % 100000000).toString().padStart(8, '0')}`,
-          miningId: 'SYSTEM_DEDUCTION',
-          rankId: deductionOperatorId,
-          recordedCollectorId: deductionCollectorId,
-          category: RefineCategory.Revenue, 
-          type: RefineType.NonEffectiveHours,
-          amount: 0,
-          rawAmount: 0,
-          dynamicCost: deductionAmount,
-          netValue: -deductionAmount,
-          timestamp: Date.now(),
-          businessDate: getLocalDateString(),
-          month: getLocalMonthString(),
-          status: AuditStatus.Pending,
-          confirmationType: '手动确权'
-        };
+          const deductionLog: ValueCreationLog = {
+            id: `J${(Date.now() % 100000000).toString().padStart(8, '0')}`,
+            miningId: 'SYSTEM_DEDUCTION',
+            rankId: deductionOperatorId,
+            recordedCollectorId: deductionCollectorId,
+            category: RefineCategory.Revenue, 
+            type: RefineType.NonEffectiveHours,
+            amount: 0,
+            rawAmount: 0,
+            dynamicCost: deductionAmount,
+            netValue: -deductionAmount,
+            timestamp: Date.now(),
+            businessDate: businessDate,
+            month: businessDate.slice(0, 7),
+            status: AuditStatus.Pending,
+            confirmationType: '手动确权'
+          };
 
         onLogSubmit(deductionLog);
         setDeductionAmount(0);
@@ -474,7 +475,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
       return {
         '申报编号': log.id,
         '业务月份': resolveLogBusinessMonth(log),
-        '提报日期': resolveLogBusinessDate(log),
+        '业务日期': resolveLogBusinessDate(log),
         '提报时间': formatSubmissionTime(log.timestamp),
         '矿山编号': log.miningId,
         '采集主体': users.find(u => u.id === log.recordedCollectorId)?.name || log.recordedCollectorId,
@@ -503,11 +504,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
       list = list.filter(l => l.rankId === selectedOperatorId || l.recordedCollectorId === selectedOperatorId);
     }
     list = list.slice().reverse();
-    if (filterStartDate && filterEndDate) {
-      list = list.filter(l => isDateInRange(resolveLogBusinessDate(l), filterStartDate, filterEndDate));
-    } else if (filterMonth) {
-      list = list.filter(l => l.month === filterMonth || resolveLogBusinessMonth(l) === filterMonth);
-    }
+    list = list.filter(l => isLogInFilter(l, filterMonth, filterStartDate, filterEndDate));
     return list;
   }, [dtcbLogsToUse, selectedOperatorId, user, filterStartDate, filterEndDate, filterMonth]);
 
@@ -521,7 +518,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
-        <div className="lg:col-span-8 space-y-8">
+        <div className="lg:col-span-12 space-y-8">
           <div className="bg-white rounded-2xl md:rounded-[3rem] shadow-xl border border-slate-100 overflow-hidden">
           <div className="bg-slate-900 p-4 md:p-8 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <h4 className="text-lg md:text-xl font-black flex items-center tracking-tighter uppercase">
@@ -598,14 +595,17 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
                <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center">
-                    <span className="mr-2">🗓️</span> 提报日期 <span className="text-rose-500 ml-1 font-bold">*</span>
+                    <span className="mr-2">🗓️</span> 业务日期 <span className="text-rose-500 ml-1 font-bold">*</span>
                   </label>
                   <input
                     type="date"
-                    value={getLocalDateString()}
-                    disabled
-                    className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 font-mono text-xs font-bold text-slate-400 outline-none cursor-not-allowed"
-                    title="提报日期按系统时间记录"
+                    value={businessDate}
+                    onChange={(e) => {
+                      setBusinessDate(e.target.value);
+                      setBusinessMonth(e.target.value.slice(0, 7));
+                    }}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-mono text-xs font-bold text-slate-700 outline-none focus:border-rose-500"
+                    title="业务日期按系统时间记录"
                   />
                </div>
 
@@ -657,7 +657,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
               </div>
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">矿山状态</label>
-                <div className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-slate-600 h-[50px] flex items-center">
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-slate-600 flex items-center">
                   {selectedResource ? (
                     <ProjectStatusBadge resource={selectedResource} />
                   ) : (
@@ -842,51 +842,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
           </form>
         </div>
       </div>
-
-      <div className="lg:col-span-4 space-y-8">
-           <div className={`rounded-2xl md:rounded-[3rem] p-6 md:p-10 shadow-2xl space-y-6 transition-colors duration-500 ${costCategory === 'C' ? 'bg-amber-900' : 'bg-slate-900'} text-white`}>
-              <p className="text-[10px] font-black text-rose-400 uppercase tracking-widest flex justify-between">
-                <span>资产池冲抵影响预览</span>
-                <span className="bg-rose-500/20 px-2 py-0.5 rounded text-rose-300">-{costCategory}级抵减</span>
-              </p>
-              <div className="flex items-baseline space-x-2">
-                <span className="text-2xl font-black">-</span>
-                <h5 className="text-3xl md:text-5xl font-black font-mono tracking-tighter text-rose-500">
-                  {Math.round(Math.abs(calculatedNetValue)).toLocaleString()}
-                </h5>
-              </div>
-              <div className="pt-6 border-t border-white/10 space-y-4">
-                  {costCategory !== 'C' ? (
-                    <div className="flex justify-between items-center">
-                       <span className="text-[9px] text-slate-400 font-bold uppercase">冲抵目标池</span>
-                       <span className="text-[10px] font-black px-3 py-1 rounded-full uppercase flex items-center space-x-1 bg-rose-600 text-white">
-                         <span>{costCategory === 'A' ? '刚性池 A类消耗' : '刚性池 B类消耗'}</span>
-                       </span>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-center">
-                         <span className="text-[9px] text-amber-400 font-bold uppercase">C对冲权预览</span>
-                         <span className="text-[14px] font-black font-mono text-amber-500">
-                           {sharedWeight.toFixed(4)}
-                         </span>
-                      </div>
-                      <div className="space-y-2 pt-2 border-t border-white/5">
-                        <div className="flex justify-between items-center">
-                          <span className="text-[8px] text-slate-500 font-bold uppercase">款当权重 (对冲后占比)</span>
-                          <span className="text-[10px] font-mono text-amber-600">{revenueWeight.toFixed(4)}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-[8px] text-slate-500 font-bold uppercase">产当权重 (对冲后占比)</span>
-                          <span className="text-[10px] font-mono text-emerald-600">{valueWeight.toFixed(4)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-              </div>
-           </div>
-        </div>
-      </div>
+    </div>
 
       {/* 非有效工时对冲快捷通道 - 独立行布局 */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -929,13 +885,16 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-rose-600 uppercase tracking-widest flex items-center">
-                    提报日期 <span className="text-rose-500 ml-1 font-bold">*</span>
+                    业务日期 <span className="text-rose-500 ml-1 font-bold">*</span>
                   </label>
                   <input
                     type="date"
-                    value={getLocalDateString()}
-                    disabled
-                    className="w-full bg-slate-100 border border-rose-200 rounded-xl px-3 py-2 text-xs font-bold font-mono outline-none text-slate-400 cursor-not-allowed"
+                    value={businessDate}
+                    onChange={(e) => {
+                      setBusinessDate(e.target.value);
+                      setBusinessMonth(e.target.value.slice(0, 7));
+                    }}
+                    className="w-full bg-white border border-rose-200 rounded-xl px-3 py-2 text-xs font-bold font-mono outline-none focus:border-rose-500"
                   />
                 </div>
                 <div className="space-y-1">
@@ -1015,7 +974,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
               <tr>
                 <th className="px-4 py-4 md:py-6">申报编号</th>
                 <th className="px-3 py-6 text-center">业务月份</th>
-                <th className="px-3 py-6 text-center">提报日期</th>
+                <th className="px-3 py-6 text-center">业务日期</th>
                 <th className="px-4 py-6 text-center">矿山编号</th>
                 <th className="px-4 py-6 font-bold text-slate-800">采集主体</th>
                 <th className="px-3 py-6 text-right text-blue-600">A</th>

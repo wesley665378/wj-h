@@ -43,6 +43,7 @@ import {
   formatSubmissionDate,
   formatSubmissionTime,
   isDateInRange,
+  isLogInFilter,
 } from '../src/utils/dateUtils';
 import { formatAmount } from '../src/utils/formatters';
 import { InfoTip } from '../src/components/InfoTip';
@@ -951,11 +952,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
   const scopeLogs = useMemo(() => {
     let list = logs.filter(l => l.rankId === selectedOperatorId || l.recordedCollectorId === selectedOperatorId);
-    if (filterStartDate && filterEndDate) {
-      list = list.filter(l => isDateInRange(resolveLogBusinessDate(l), filterStartDate, filterEndDate));
-    } else if (filterMonth) {
-      list = list.filter(l => l.month === filterMonth || resolveLogBusinessMonth(l) === filterMonth);
-    }
+    list = list.filter(l => isLogInFilter(l, filterMonth, filterStartDate, filterEndDate));
     return list;
   }, [logs, selectedOperatorId, filterMonth, filterStartDate, filterEndDate]);
 
@@ -977,12 +974,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
   const filteredLogs = useMemo(() => {
     let list = logs.filter(l => l && (l.rankId === selectedOperatorId || l.recordedCollectorId === selectedOperatorId)).reverse();
-    
-    if (filterStartDate && filterEndDate) {
-      list = list.filter(l => isDateInRange(resolveLogBusinessDate(l), filterStartDate, filterEndDate));
-    } else if (filterMonth) {
-      list = list.filter(l => l.month === filterMonth || resolveLogBusinessMonth(l) === filterMonth);
-    }
+    list = list.filter(l => isLogInFilter(l, filterMonth, filterStartDate, filterEndDate));
 
     if (recordTab === 'revenue') {
       return list.filter(l => l.category === RefineCategory.Revenue && l.status === AuditStatus.Pending);

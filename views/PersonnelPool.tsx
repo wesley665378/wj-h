@@ -6,11 +6,12 @@ import { UserTableRow } from '../src/components/UserTableRow';
 import { MENU_ITEMS } from '../constants';
 import { checkUserPermission, RANK_CONFIG } from '../src/utils/business';
 import { getLocalMonthString } from '../src/utils/dateUtils';
-import { toast } from 'sonner';
 import { syncWorkspace } from '../src/services/api';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
+import { assertAcceptablePassword } from '../src/utils/security';
 
 interface PersonnelPoolProps {
+  user: User;
   users: User[];
   onUpdateUsers: (users: User[]) => void;
   onUpdatePassword: (userId: string, newPassword: string) => Promise<boolean>;
@@ -19,8 +20,14 @@ interface PersonnelPoolProps {
   onUpdateBusinessUnits: (units: string[]) => void;
 }
 
-const PersonnelPool: React.FC<PersonnelPoolProps> = ({ users, onUpdateUsers, onUpdatePassword, onClearTestData, businessUnits, onUpdateBusinessUnits }) => {
+const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUsers, onUpdatePassword, onClearTestData, businessUnits, onUpdateBusinessUnits }) => {
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
+  const isSyncing = useRef(false);
+
+  const isSystemAdmin = (u: User | null | undefined) => {
+    if (!u) return false;
+    return u.role === Role.Admin || u.category?.toLowerCase() === '系统管理员';
+  };
   const [newCenterName, setNewCenterName] = useState('');
   const [editingCenter, setEditingCenter] = useState<string | null>(null);
   const [editCenterValue, setEditCenterValue] = useState('');
@@ -69,7 +76,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ users, onUpdateUsers, onU
     salaryPackageType: '产值工资包' as User['salaryPackageType'],
     salaryPackage: 0,
     secondaryRoles: [] as ('高款专' | '高产专')[],
-    password: '666888'
+    password: ''
   });
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -97,45 +104,75 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ users, onUpdateUsers, onU
   }, [users, activeCategory, searchQuery]);
 
   const handleCreateUser = async () => {
-    if (!newUserFormData.id || !newUserFormData.name || !newUserFormData.category) return showAlert('请填写完整信息');
-    if (users.some(u => u.id === newUserFormData.id)) return showAlert(`ID 冲突：工号 [${newUserFormData.id}] 已被占用。`);
-    
-    const currentMonth = getLocalMonthString();
-    const newUser: User = {
-      id: newUserFormData.id,
-      userId: newUserFormData.userId || newUserFormData.id,
-      name: newUserFormData.name,
-      center: newUserFormData.center,
-      role: Role.Rank, 
-      category: newUserFormData.category,
-      secondaryRoles: newUserFormData.secondaryRoles,
-      salaryPackageType: newUserFormData.salaryPackageType,
-      salaryPackage: newUserFormData.salaryPackage,
-      salaryHistory: [{ effectiveMonth: currentMonth, salary: newUserFormData.salaryPackage }],
-      permissions: [],
-      userStatus: 'active'
-    };
-
-    const updatedUsers = [...users, newUser];
-    try {
-      await syncWorkspace({ users: updatedUsers });
-      await onUpdatePassword(newUser.id, newUserFormData.password);
-      onUpdateUsers(updatedUsers);
-      toast.success('新实体创建成功并已写库。');
-      setNewUserFormData({ 
-        id: '', 
-        userId: '',
-        name: '', 
-        center: '', 
-        category: '初款专', 
-        salaryPackageType: '产值工资包',
-        salaryPackage: 0,
-        secondaryRoles: [], 
-        password: '666888' 
-      });
-    } catch (err) {
-      toast.error(`新实体创建写库失败：${(err as Error).message || '网络问题'}`);
+    if (!isSystemAdmin(user)) {
+      return showAlert('权限不足：仅系统管理员有权执行人格注入。');
     }
+
+    if (!newUserFormData.id || !newUserFormData.name || !newUserFormData.category || !newUserFormData.password) {
+      return showAlert('请填写完整信息（包括工号、姓名、职级和初始密码）');
+    }
+    
+    const pwCheck = assertAcceptablePassword(newUserFormData.password);
+    if (!pwCheck.acceptable) {
+      return showAlert(pwCheck.message || '密码不符合规范');
+    }
+
+    if (users.some(u => u.id === newUserFormData.id)) {
+      return showAlert(`ID 冲突：工号 [${newUserFormData.id}] 已被占用。`);
+    }
+
+    const confirmMsg = `【人格注入确认】\n\n请核对以下信息：\n工号：${newUserFormData.id}\n姓名：${newUserFormData.name}\n职级：${newUserFormData.category}\n初始密码：${newUserFormData.password}\n\n确定要将此实体注入城市守护者矩阵吗？`;
+    
+    showConfirm(confirmMsg, async () => {
+      if (isSyncing.current) return;
+      isSyncing.current = true;
+
+      const currentMonth = getLocalMonthString();
+      const newUser: User = {
+        id: newUserFormData.id,
+        userId: newUserFormData.userId || newUserFormData.id,
+        name: newUserFormData.name,
+        center: newUserFormData.center,
+        role: Role.Rank, 
+        category: newUserFormData.category,
+        secondaryRoles: newUserFormData.secondaryRoles,
+        salaryPackageType: newUserFormData.salaryPackageType,
+        salaryPackage: newUserFormData.salaryPackage,
+        salaryHistory: [{ effectiveMonth: currentMonth, salary: newUserFormData.salaryPackage }],
+        permissions: [],
+        userStatus: 'active'
+      };
+
+      const updatedUsers = [...users, newUser];
+      try {
+        // 先更新内存再 sync
+        onUpdateUsers(updatedUsers);
+        
+        await syncWorkspace({ users: updatedUsers });
+        const pwSuccess = await onUpdatePassword(newUser.id, newUserFormData.password);
+        if (!pwSuccess) {
+          throw new Error('密码设置失败，请检查网络或权限');
+        }
+        
+        showAlert('新人格实体创建成功，并已成功注入矩阵。');
+        setNewUserFormData({ 
+          id: '', 
+          userId: '',
+          name: '', 
+          center: '', 
+          category: '初款专', 
+          salaryPackageType: '产值工资包',
+          salaryPackage: 0,
+          secondaryRoles: [], 
+          password: '' 
+        });
+        if (showAddAccountForm) setShowAddAccountForm(false);
+      } catch (err) {
+        showAlert(`实体创建同步失败：${(err as Error).message || '未知错误'}`);
+      } finally {
+        isSyncing.current = false;
+      }
+    });
   };
 
   const handleEdit = (user: User) => {
@@ -160,11 +197,23 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ users, onUpdateUsers, onU
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isSystemAdmin(user)) {
+      return showAlert('权限不足：仅系统管理员有权执行保存操作。');
+    }
+    if (isSyncing.current) return;
+
     if (!formData.id || !formData.name) return;
 
-    if (formData.password && formData.password !== formData.confirmPassword) {
-      showAlert('两次输入的密码不一致，请重新确认。');
-      return;
+    if (formData.password) {
+      if (formData.password !== formData.confirmPassword) {
+        showAlert('两次输入的密码不一致，请重新确认。');
+        return;
+      }
+      const pwCheck = assertAcceptablePassword(formData.password);
+      if (!pwCheck.acceptable) {
+        showAlert(pwCheck.message || '密码不符合规范');
+        return;
+      }
     }
 
     if (!editingUserId || (editingUserId !== formData.id)) {
@@ -216,16 +265,24 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ users, onUpdateUsers, onU
       ? users.map(u => u.id === editingUserId ? userToSave : u)
       : [...users, userToSave];
 
+    isSyncing.current = true;
     try {
+      // 先更新内存
+      onUpdateUsers(nextUsers);
+
       await syncWorkspace({ users: nextUsers });
       if (formData.password) {
-        await onUpdatePassword(formData.id, formData.password);
+        const pwSuccess = await onUpdatePassword(formData.id, formData.password);
+        if (!pwSuccess) {
+          throw new Error('密码修改失败，请重试');
+        }
       }
-      onUpdateUsers(nextUsers);
-      toast.success(editingUserId ? '用户信息更新成功并已写库。' : '新的人格实体已成功注入矩阵并写库。');
+      showAlert(editingUserId ? '用户信息更新成功。' : '新的人格实体已成功注入矩阵。');
       resetForm();
     } catch (err) {
-      toast.error(`用户信息写库失败：${(err as Error).message || '网络错误'}`);
+      showAlert(`用户信息同步失败：${(err as Error).message || '网络错误'}`);
+    } finally {
+      isSyncing.current = false;
     }
   };
 
@@ -248,19 +305,33 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ users, onUpdateUsers, onU
     setShowForm(false);
   };
 
-  const addCenter = () => {
+  const addCenter = async () => {
+    if (!isSystemAdmin(user)) {
+      return showAlert('权限不足：仅系统管理员有权操作经营单元。');
+    }
+    if (isSyncing.current) return;
+
     if (!newCenterName.trim()) {
-      toast.error('请输入单元名称');
+      showAlert('请输入单元名称');
       return;
     }
     if (businessUnits.includes(newCenterName.trim())) {
-      toast.error('该经营单元已存在');
+      showAlert('该经营单元已存在');
       return;
     }
     const updatedUnits = [...businessUnits, newCenterName.trim()];
-    onUpdateBusinessUnits(updatedUnits);
-    setNewCenterName('');
-    toast.success(`成功新增单元: ${newCenterName}`);
+    
+    isSyncing.current = true;
+    try {
+      onUpdateBusinessUnits(updatedUnits);
+      await syncWorkspace({ businessUnits: updatedUnits });
+      setNewCenterName('');
+      showAlert(`成功新增单元: ${newCenterName.trim()}`);
+    } catch (err) {
+      showAlert('经营单元同步失败，请重试');
+    } finally {
+      isSyncing.current = false;
+    }
   };
 
   const startEditingCenter = (center: string) => {
@@ -268,35 +339,81 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ users, onUpdateUsers, onU
     setEditCenterValue(center);
   };
 
-  const saveCenterRename = (oldName: string) => {
+  const saveCenterRename = async (oldName: string) => {
+    if (!isSystemAdmin(user)) {
+      setEditingCenter(null);
+      return showAlert('权限不足。');
+    }
+    if (isSyncing.current) return;
+
     const newName = editCenterValue.trim();
     if (!newName || newName === oldName) {
       setEditingCenter(null);
       return;
     }
     if (businessUnits.includes(newName)) {
-      toast.error('该经营单元已存在');
+      showAlert('该经营单元已存在');
       return;
     }
     const updatedUnits = businessUnits.map(unit => unit === oldName ? newName : unit);
-    onUpdateBusinessUnits(updatedUnits);
-    onUpdateUsers(users.map(u => u.center === oldName ? { ...u, center: newName } : u));
-    setEditingCenter(null);
-    toast.success(`单元 [${oldName}] 已重命名为 [${newName}]`);
+    const updatedUsers = users.map(u => u.center === oldName ? { ...u, center: newName } : u);
+
+    isSyncing.current = true;
+    try {
+      onUpdateBusinessUnits(updatedUnits);
+      onUpdateUsers(updatedUsers);
+      await syncWorkspace({ businessUnits: updatedUnits, users: updatedUsers });
+      setEditingCenter(null);
+      showAlert(`单元 [${oldName}] 已重命名为 [${newName}]`);
+    } catch (err) {
+      showAlert('重命名同步失败');
+    } finally {
+      isSyncing.current = false;
+    }
   };
 
   const deleteCenter = (name: string) => {
-    const updatedUnits = businessUnits.filter(c => c !== name);
-    onUpdateBusinessUnits(updatedUnits);
-    onUpdateUsers(users.map(u => u.center === name ? { ...u, center: '' } : u));
-    toast.success(`已注销单元: ${name}`);
+    if (!isSystemAdmin(user)) {
+      return showAlert('权限不足。');
+    }
+    showConfirm(`确定要注销单元 [${name}] 吗？`, async () => {
+      if (isSyncing.current) return;
+      isSyncing.current = true;
+
+      const updatedUnits = businessUnits.filter(c => c !== name);
+      const updatedUsers = users.map(u => u.center === name ? { ...u, center: '' } : u);
+      
+      try {
+        onUpdateBusinessUnits(updatedUnits);
+        onUpdateUsers(updatedUsers);
+        await syncWorkspace({ businessUnits: updatedUnits, users: updatedUsers });
+        showAlert(`已注销单元: ${name}`);
+      } catch (err) {
+        showAlert('注销单元同步失败');
+      } finally {
+        isSyncing.current = false;
+      }
+    });
   };
 
   const clearAllCenters = () => {
-    showConfirm('确定要清空所有经营单元吗？', () => {
-      onUpdateBusinessUnits([]);
-      onUpdateUsers(users.map(u => ({ ...u, center: '' })));
-      toast.success('经营单元列表已全部清空');
+    if (!isSystemAdmin(user)) return showAlert('权限不足。');
+    // 逻辑保留但 UI 已按要求删除
+    showConfirm('确定要清空所有经营单元吗？', async () => {
+      if (isSyncing.current) return;
+      isSyncing.current = true;
+
+      const updatedUsers = users.map(u => ({ ...u, center: '' }));
+      try {
+        onUpdateBusinessUnits([]);
+        onUpdateUsers(updatedUsers);
+        await syncWorkspace({ businessUnits: [], users: updatedUsers });
+        showAlert('经营单元列表已全部清空');
+      } catch (err) {
+        showAlert('清空失败');
+      } finally {
+        isSyncing.current = false;
+      }
     });
   };
 
@@ -359,7 +476,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ users, onUpdateUsers, onU
           ? Number(salaryPackageRaw.replace(/[^0-9.]/g, '')) 
           : Number(salaryPackageRaw || 0);
         
-        const password = '666888';
+        const password = 'Guardian@2026';
         const currentMonth = getLocalMonthString();
 
         let role = Role.Rank;
@@ -385,17 +502,33 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ users, onUpdateUsers, onU
       }).filter(u => u.id && u.name);
 
       if (newUsers.length > 0) {
-        showConfirm(`识别到 ${newUsers.length} 个实体，是否合并入矩阵？（重复 ID 将被覆盖）`, () => {
+        showConfirm(`识别到 ${newUsers.length} 个实体，是否合并入矩阵？（重复 ID 将被覆盖）`, async () => {
+          if (!isSystemAdmin(user)) return showAlert('权限不足：仅系统管理员有权执行批量导入。');
+          if (isSyncing.current) return;
+          isSyncing.current = true;
+
           const newUsersMap = new Map(newUsers.map(u => [u.id, u]));
-          const updatedUsers = users.map(u => newUsersMap.has(u.id) ? newUsersMap.get(u.id)! : u);
+          const mergedUsers = users.map(u => newUsersMap.has(u.id) ? newUsersMap.get(u.id)! : u);
           const existingIds = new Set(users.map(u => u.id));
           const uniqueNewUsers = newUsers.filter(u => !existingIds.has(u.id));
-          onUpdateUsers([...updatedUsers, ...uniqueNewUsers]);
+          const finalUsers = [...mergedUsers, ...uniqueNewUsers];
+
           const newCenters = new Set(newUsers.map(u => u.center).filter(Boolean));
           const currentUnits = new Set(businessUnits);
           const unitsToAdd = Array.from(newCenters).filter(c => !currentUnits.has(c));
-          if (unitsToAdd.length > 0) {
-            onUpdateBusinessUnits([...businessUnits, ...unitsToAdd]);
+          const finalUnits = [...businessUnits, ...unitsToAdd];
+
+          try {
+            onUpdateUsers(finalUsers);
+            if (unitsToAdd.length > 0) {
+              onUpdateBusinessUnits(finalUnits);
+            }
+            await syncWorkspace({ users: finalUsers, businessUnits: finalUnits });
+            showAlert('批量导入成功。');
+          } catch (err) {
+            showAlert('批量导入同步失败');
+          } finally {
+            isSyncing.current = false;
           }
         });
       }
@@ -417,27 +550,39 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ users, onUpdateUsers, onU
       : `【复职操作确认】\n确定要将 [${user.name}] 恢复为在职状态吗？`;
     
     showConfirm(message, async () => {
+      if (!isSystemAdmin(user)) return showAlert('权限不足。');
+      if (isSyncing.current) return;
+      isSyncing.current = true;
+
       const newStatus = isResigning ? 'inactive' : 'active';
       const updatedUsers = users.map(u => u.id === user.id ? { ...u, userStatus: newStatus as any } : u);
       try {
-        await syncWorkspace({ users: updatedUsers });
         onUpdateUsers(updatedUsers);
-        toast.success(`${user.name} 已成功${isResigning ? '离职注销' : '复职'}并已写库`);
+        await syncWorkspace({ users: updatedUsers });
+        showAlert(`${user.name} 已成功${isResigning ? '离职注销' : '复职'}`);
       } catch (err) {
-        toast.error(`注销/复职写库失败：${(err as Error).message || '网络问题'}`);
+        showAlert(`状态更新失败：${(err as Error).message || '网络问题'}`);
+      } finally {
+        isSyncing.current = false;
       }
     });
   };
 
   const deleteUser = async (userId: string) => {
+    if (!isSystemAdmin(user)) return showAlert('权限不足。');
     showConfirm('确定要注销此帐号吗？此操作不可逆！', async () => {
+      if (isSyncing.current) return;
+      isSyncing.current = true;
+
       const updatedUsers = users.filter(u => u.id !== userId);
       try {
-        await syncWorkspace({ users: updatedUsers });
         onUpdateUsers(updatedUsers);
-        toast.success('帐号注销已写库');
+        await syncWorkspace({ users: updatedUsers });
+        showAlert('帐号注销成功');
       } catch (err) {
-        toast.error(`注销帐号写库失败：${(err as Error).message || '网络问题'}`);
+        showAlert(`帐号注销失败：${(err as Error).message || '网络问题'}`);
+      } finally {
+        isSyncing.current = false;
       }
     });
   };
@@ -677,9 +822,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ users, onUpdateUsers, onU
         </div>
 
         <div className="lg:col-span-12 space-y-8 mt-12 pb-12">
-          <Card title="经营单元经理" className="p-8 rounded-[3rem] border-2 border-slate-100 shadow-sm" headerAction={businessUnits.length > 0 && (
-            <button onClick={clearAllCenters} className="text-rose-500 font-black text-xs uppercase tracking-widest px-4 py-2 hover:bg-rose-50 rounded-xl">一键清空单元库</button>
-          )}>
+          <Card title="经营单元经理" className="p-8 rounded-[3rem] border-2 border-slate-100 shadow-sm">
             <div className="space-y-6">
               <div className="flex gap-4 max-w-md">
                 <input type="text" value={newCenterName} onChange={e => setNewCenterName(e.target.value)} placeholder="新经营单元名称..." className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none text-sm focus:ring-2 focus:ring-slate-900 transition-all" />
@@ -776,7 +919,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ users, onUpdateUsers, onU
                       </div>
                       <div className="space-y-1">
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">初始密码</p>
-                        <input type="password" placeholder="默认 666888" value={newUserFormData.password} onChange={e => setNewUserFormData({...newUserFormData, password: e.target.value})} className="bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none text-sm w-full focus:ring-2 focus:ring-blue-500" />
+                        <input type="password" placeholder="设置初始密码 (至少8位)" value={newUserFormData.password} onChange={e => setNewUserFormData({...newUserFormData, password: e.target.value})} className="bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none text-sm w-full focus:ring-2 focus:ring-blue-500" />
                       </div>
                     </div>
                     <div className="space-y-1">

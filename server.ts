@@ -796,7 +796,7 @@ async function startServer() {
 
     const cWeightRev = revCap > 0 ? Math.max(0, (revCap - cCost) / revCap) : 1;
     const cWeightVal = valCap > 0 ? Math.max(0, (valCap - cCost) / valCap) : 1;
-    const b2Weight = valCap > 0 ? Math.max(0, (valCap - cCost - b2Cost) / valCap) : 1;
+    const b2Weight = valCap > 0 ? Math.max(0, (valCap - b2Cost) / valCap) : 1;
 
     const recalibratedLogs: any[] = [];
 
@@ -927,6 +927,33 @@ async function startServer() {
     }
   });
 
+  function getLocalMonthStringServer(input?: Date | number | string): string {
+    const d = input ? new Date(input) : new Date();
+    if (isNaN(d.getTime())) {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    }
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  function resolveLogBusinessMonthServer(log?: any): string {
+    if (!log) return getLocalMonthStringServer();
+    if (log.businessDate && typeof log.businessDate === 'string' && log.businessDate.trim() !== '') {
+      return log.businessDate.trim().slice(0, 7);
+    }
+    if (log.month && typeof log.month === 'string' && log.month.trim() !== '') {
+      return log.month.trim().slice(0, 7);
+    }
+    if (log.timestamp) {
+      const num = Number(log.timestamp);
+      if (!isNaN(num)) {
+        return getLocalMonthStringServer(num);
+      }
+      return getLocalMonthStringServer(log.timestamp);
+    }
+    return getLocalMonthStringServer();
+  }
+
   // 3. Distribution Read-Only API Endpoint (权威分配只读 API)
   app.get("/api/distribution", async (req, res) => {
     try {
@@ -979,16 +1006,16 @@ async function startServer() {
         // 1月到目标月前一个月滚动计算历史欠产
         for (let m = 1; m < targetMonthNum; m++) {
           const ym = `${targetYear}-${String(m).padStart(2, '0')}`;
-          const mLogs = allLogs.filter(l => l.recordedCollectorId === user.id && (l.month === ym || new Date(Number(l.timestamp)).toISOString().slice(0, 7) === ym) && (l.status === '已确权' || l.status === 'Confirmed' || l.status === '入库'));
+          const mLogs = allLogs.filter(l => l.recordedCollectorId === user.id && resolveLogBusinessMonthServer(l) === ym && (l.status === '已确权' || l.status === 'Confirmed' || l.status === '入库'));
           
           let mIncome = 0;
           let mCost = user.salaryPackage || 0;
 
           if (isProdExpert) {
-            mIncome = mLogs.filter(l => l.category === 'Value' || l.category === '产值').reduce((s, l) => s + (Number(l.netValue) || Number(l.amount) * 0.1), 0);
+            mIncome = mLogs.filter(l => l.category === 'Value' || l.category === '产值').reduce((s, l) => s + (Number(l.netValue) || 0), 0);
             mCost += mLogs.filter(l => l.costCategory === 'B' && l.valueConsumptionMode === 'B1').reduce((s, l) => s + (Number(l.dynamicCost) || 0), 0);
           } else if (isRevenueExpert) {
-            mIncome = mLogs.filter(l => l.category === 'Revenue' || l.category === '收款').reduce((s, l) => s + (Number(l.netValue) || Number(l.amount) * 0.1), 0);
+            mIncome = mLogs.filter(l => l.category === 'Revenue' || l.category === '收款').reduce((s, l) => s + (Number(l.netValue) || 0), 0);
             mCost += mLogs.filter(l => l.costCategory === 'A').reduce((s, l) => s + (Number(l.dynamicCost) || 0), 0);
           }
 
@@ -1018,16 +1045,16 @@ async function startServer() {
         const historyDebt = Math.round(rollingDebt);
 
         // 目标月当月计算
-        const currentLogs = allLogs.filter(l => l.recordedCollectorId === user.id && (l.month === targetMonth || new Date(Number(l.timestamp)).toISOString().slice(0, 7) === targetMonth) && (l.status === '已确权' || l.status === 'Confirmed' || l.status === '入库'));
+        const currentLogs = allLogs.filter(l => l.recordedCollectorId === user.id && resolveLogBusinessMonthServer(l) === targetMonth && (l.status === '已确权' || l.status === 'Confirmed' || l.status === '入库'));
         
         let currentIncome = 0;
         let currentCost = user.salaryPackage || 0;
 
         if (isProdExpert) {
-          currentIncome = currentLogs.filter(l => l.category === 'Value' || l.category === '产值').reduce((s, l) => s + (Number(l.netValue) || Number(l.amount) * 0.1), 0);
+          currentIncome = currentLogs.filter(l => l.category === 'Value' || l.category === '产值').reduce((s, l) => s + (Number(l.netValue) || 0), 0);
           currentCost += currentLogs.filter(l => l.costCategory === 'B' && l.valueConsumptionMode === 'B1').reduce((s, l) => s + (Number(l.dynamicCost) || 0), 0);
         } else if (isRevenueExpert) {
-          currentIncome = currentLogs.filter(l => l.category === 'Revenue' || l.category === '收款').reduce((s, l) => s + (Number(l.netValue) || Number(l.amount) * 0.1), 0);
+          currentIncome = currentLogs.filter(l => l.category === 'Revenue' || l.category === '收款').reduce((s, l) => s + (Number(l.netValue) || 0), 0);
           currentCost += currentLogs.filter(l => l.costCategory === 'A').reduce((s, l) => s + (Number(l.dynamicCost) || 0), 0);
         }
 

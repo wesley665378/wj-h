@@ -16,6 +16,7 @@ import { buildValueEfficiencySnapshots } from './src/utils/valueEfficiencySnapsh
 import { buildJzfpSnapshot } from './src/utils/jzfpSnapshot';
 import DynamicConsumption from './views/DynamicConsumption';
 import MyAccount from './views/MyAccount';
+import SystemInstructions from './views/SystemInstructions';
 import Sidebar from './components/Sidebar';
 import Login from './components/Login';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -1116,6 +1117,7 @@ const App: React.FC = () => {
       },
       account: { currentUser, logs: filteredLogs, transactions, resources: filteredResources, users: filteredUsers },
       personnel: { 
+        user: currentUser,
         users: filteredUsers, 
         onUpdateUsers,
         onUpdatePassword,
@@ -1142,7 +1144,8 @@ const App: React.FC = () => {
       evaluation: <Evaluation {...tabProps.evaluation} />,
       distribution: <Distribution {...tabProps.distribution} />,
       account: <MyAccount {...tabProps.account} />,
-      personnel: <PersonnelPool {...tabProps.personnel} />
+      personnel: <PersonnelPool {...tabProps.personnel} />,
+      instructions: <SystemInstructions />
     };
   }, [tabProps, currentUser]);
 

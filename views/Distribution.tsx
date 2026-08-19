@@ -347,7 +347,7 @@ const Distribution: React.FC<DistributionProps> = ({
           }
         }
 
-        const yearlyMonths = Array.from(new Set(userLogsYearly.map(l => l.month!)));
+        const yearlyMonths = Array.from(new Set(userLogsYearly.map(l => resolveLogBusinessMonth(l))));
         for (const m of yearlyMonths) {
           const mConf = aggregateUserMonthMetrics(userLogsYearly, user, m, resources, users, [AuditStatus.Confirmed]);
           const mApp = aggregateUserMonthMetrics(userLogsYearly, user, m, resources, users, [AuditStatus.Approved]);
@@ -852,8 +852,8 @@ const Distribution: React.FC<DistributionProps> = ({
           </div>
         </div>
 
-        {/* Desktop Table View */}
-        <div className="hidden lg:block overflow-x-auto custom-scrollbar pb-4 relative">
+        {/* Table View with Horizontal Scroll */}
+        <div className="block overflow-x-auto custom-scrollbar pb-4 relative">
           <table className="w-full text-left border-separate border-spacing-0 border border-slate-200 rounded-2xl overflow-hidden">
             <thead className="sticky top-0 z-20">
               <tr className="bg-slate-50/90 backdrop-blur-md">
@@ -1095,26 +1095,17 @@ const Distribution: React.FC<DistributionProps> = ({
                             <div className="flex items-center justify-center w-[76px] flex-none border-r border-amber-100/50 text-amber-600/70 text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
                               已确权
                             </div>
-                            {kuanTiers ? (
-                              <div className="flex-1 px-2 py-1 flex flex-col justify-center gap-0.5 font-mono text-[10px] text-right">
-                                <div className="flex items-center justify-between gap-1">
-                                  <span className="text-[9px] text-amber-600/70 font-sans font-medium">60%</span>
-                                  <span className="font-black text-amber-600">{fmtAmount(kuanTiers.t60)}</span>
+                            <div className="flex-1 px-3 py-1.5 flex flex-col items-end justify-center font-mono text-[11px] font-black text-amber-600 whitespace-nowrap leading-tight">
+                              {data.isRevenueExpert ? (
+                                <div className="text-right flex flex-col gap-0.5">
+                                  <div>{fmtAmount(data.theoreticalBonusConfirmed * 0.6)}</div>
+                                  <div>{fmtAmount(data.theoreticalBonusConfirmed * 0.8)}</div>
+                                  <div>{fmtAmount(data.theoreticalBonusConfirmed * 1.0)}</div>
                                 </div>
-                                <div className="flex items-center justify-between gap-1">
-                                  <span className="text-[9px] text-amber-600/70 font-sans font-medium">80%</span>
-                                  <span className="font-black text-amber-600">{fmtAmount(kuanTiers.t80)}</span>
-                                </div>
-                                <div className="flex items-center justify-between gap-1">
-                                  <span className="text-[9px] text-amber-600/70 font-sans font-medium">100%</span>
-                                  <span className="font-black text-amber-600">{fmtAmount(kuanTiers.t100)}</span>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-amber-600 whitespace-nowrap">
-                                {fmtAmount(data.theoreticalBonusConfirmed)}
-                              </div>
-                            )}
+                              ) : (
+                                <span>{fmtAmount(data.theoreticalBonusConfirmed)}</span>
+                              )}
+                            </div>
                           </div>
                           <div className="flex items-stretch flex-1 min-h-[38px]">
                             <div className="flex items-center justify-center w-[76px] flex-none border-r border-amber-100/50 text-amber-600/70 text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
@@ -1537,8 +1528,8 @@ const Distribution: React.FC<DistributionProps> = ({
           </table>
         </div>
 
-        {/* Mobile Card View */}
-        <div className="lg:hidden p-4 space-y-4">
+        {/* Mobile Card View Removed - Table is now responsive with scroll */}
+        <div className="hidden">
           <AnimatePresence>
             {distributionData.map((data) => {
               const userObj = users.find((u) => u.id === data.userId);

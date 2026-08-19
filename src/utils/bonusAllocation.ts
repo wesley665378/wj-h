@@ -6,6 +6,7 @@ import {
   ValueCreationLog,
 } from '../../types';
 import { calculateHistoricalNetValue, getUserSalaryByMonth } from './business';
+import { resolveLogBusinessMonth } from './dateUtils';
 
 export interface UserMetricsResult {
   revenuePackage: number;
@@ -34,7 +35,7 @@ export function aggregateUserMonthMetrics(
   const userLogs = logs.filter(
     (l) =>
       l.recordedCollectorId === user.id &&
-      l.month === month &&
+      resolveLogBusinessMonth(l) === month &&
       statusFilter.includes(l.status as AuditStatus)
   );
 
