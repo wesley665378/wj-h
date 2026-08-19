@@ -1,0 +1,454 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { User, ValueCreationLog, InternalTransaction, MiningResource, AuditStatus, TransactionStatus, RefineCategory } from '../types';
+import { Card, Badge } from '../src/components/UI';
+import { getLocalMonthString, getLocalDateString, resolveLogBusinessMonth, resolveLogBusinessDate, formatSubmissionDate, formatSubmissionTime, isDateInRange } from '../src/utils/dateUtils';
+import { calculateHistoricalNetValue, getUserSalaryByMonth } from '../src/utils/business';
+import { aggregateUserMonthMetrics, calculateBonusAllocation } from '../src/utils/bonusAllocation';
+import { fetchDistributionData } from '../src/services/api';
+import { useCostPrivacy } from '../src/hooks/useCostPrivacy';
+import { formatAmount } from '../src/utils/formatters';
+import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
+import { InfoTip } from '../src/components/InfoTip';
+import * as XLSX from 'xlsx';
+import { toast } from 'sonner';
+import { Wallet, TrendingUp, ShieldCheck, ArrowRight, Eye, EyeOff, FileSpreadsheet, Search, Filter, Calendar } from 'lucide-react';
+
+interface MyAccountProps {
+  currentUser: User;
+  logs: ValueCreationLog[];
+  transactions: InternalTransaction[];
+  resources: MiningResource[];
+  users: User[];
+}
+
+const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, resources, users }) => {
+  const { isCostVisible, toggleCostVisible, maskMoney } = useCostPrivacy();
+  
+  // 业务月份与自定义起止日
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => getLocalMonthString());
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+
+  // 流水明细筛选项
+  const [filterType, setFilterType] = useState<string>('all'); // all, revenue, value
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState<string>('');
+
+  // 1. 口径计算：仅限本人 (recordedCollectorId === currentUser.id)
+  const myLogs = useMemo(() => {
+    return logs.filter(l => l.recordedCollectorId === currentUser.id);
+  }, [logs, currentUser.id]);
+
+  // 价值创造表合并流水
+  const myUnifiedLogs = useMemo(() => {
+    return myLogs.map(l => {
+      const bMonth = resolveLogBusinessMonth(l);
+      const bDate = resolveLogBusinessDate(l);
+      const netVal = calculateHistoricalNetValue(l, resources, users);
+      return {
+        ...l,
+        resolvedMonth: bMonth,
+        resolvedDate: bDate,
+        calculatedNetValue: netVal
+      };
+    }).sort((a, b) => b.timestamp - a.timestamp);
+  }, [myLogs, resources, users]);
+
+  // 按维度模式过滤的当前活跃日志
+  const activeLogs = useMemo(() => {
+    if (startDate && endDate) {
+      return myUnifiedLogs.filter(l => isDateInRange(l.resolvedDate, startDate, endDate));
+    } else if (selectedMonth) {
+      return myUnifiedLogs.filter(l => l.resolvedMonth === selectedMonth);
+    } else {
+      return myUnifiedLogs;
+    }
+  }, [myUnifiedLogs, selectedMonth, startDate, endDate]);
+
+  // 包汇总计算（按净值口径）
+  const collectionPackage = useMemo(() => {
+    return activeLogs
+      .filter(l => l.category === RefineCategory.Revenue && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved))
+      .reduce((sum, l) => sum + l.calculatedNetValue, 0);
+  }, [activeLogs]);
+
+  const productionPackage = useMemo(() => {
+    return activeLogs
+      .filter(l => l.category === RefineCategory.Value && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved))
+      .reduce((sum, l) => sum + l.calculatedNetValue, 0);
+  }, [activeLogs]);
+
+  const combinedPackage = collectionPackage + productionPackage;
+
+  // ===== 结余与分配始终按月计算 =====
+  const effectiveMonth = useMemo(() => {
+    if (selectedMonth) return selectedMonth;
+    if (startDate) return startDate.slice(0, 7);
+    return getLocalMonthString();
+  }, [selectedMonth, startDate]);
+
+  // 经营月度看板指标（始终按 effectiveMonth）
+  const monthMetrics = useMemo(() => {
+    return aggregateUserMonthMetrics(logs, currentUser, effectiveMonth, resources, users, [AuditStatus.Confirmed, AuditStatus.Approved]);
+  }, [logs, currentUser, effectiveMonth, resources, users]);
+
+  // 奖金与欠产分配本地计算（始终按 effectiveMonth）
+  const bonusResult = useMemo(() => {
+    return calculateBonusAllocation(effectiveMonth, currentUser, logs, resources, users, AuditStatus.Confirmed);
+  }, [effectiveMonth, currentUser, logs, resources, users]);
+
+  // 当月结余 = 本月收入 - 本月成本（本地计算）
+  const monthlySalary = getUserSalaryByMonth(currentUser, effectiveMonth);
+  const localCost = monthlySalary + (currentUser.category?.includes('产专') ? monthMetrics.b1Cost : monthMetrics.aCost);
+  const localIncome = currentUser.category?.includes('产专') ? monthMetrics.productionPackage : monthMetrics.revenuePackage;
+  const localBalance = localIncome - localCost;
+
+  const localDebt = bonusResult.newDebt < 0 ? bonusResult.newDebt : (bonusResult.history < 0 ? bonusResult.history : 0);
+  const localBonusQuota = bonusResult.quota;
+
+  // ===== 分配 API 降级控制 =====
+  const [serverDistributionItem, setServerDistributionItem] = useState<any | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (import.meta.env.VITE_USE_LOCAL_AUTH !== 'true') {
+      fetchDistributionData(effectiveMonth)
+        .then(res => {
+          if (isMounted && res && Array.isArray(res.distribution)) {
+            const item = res.distribution.find((d: any) => d.userId === currentUser.id);
+            setServerDistributionItem(item || null);
+          }
+        })
+        .catch(err => {
+          console.warn("MyAccount: fetchDistributionData API 降级使用本地核算:", err);
+          if (isMounted) setServerDistributionItem(null);
+        });
+    } else {
+      setServerDistributionItem(null);
+    }
+    return () => { isMounted = false; };
+  }, [effectiveMonth, currentUser.id]);
+
+  // 权威分配 API 返回值优先，API 异常/无数据时降级至本地计算
+  const currentBalance = serverDistributionItem
+    ? (serverDistributionItem.currentSurplusConfirmed ?? serverDistributionItem.currentSurplus ?? localBalance)
+    : localBalance;
+
+  const bonusQuota = serverDistributionItem
+    ? (serverDistributionItem.theoreticalBonusConfirmed ?? serverDistributionItem.theoreticalBonus ?? localBonusQuota)
+    : localBonusQuota;
+
+  const historicalDebt = serverDistributionItem
+    ? (serverDistributionItem.nextDebtConfirmed ?? serverDistributionItem.nextDebt ?? serverDistributionItem.historyDebt ?? localDebt)
+    : localDebt;
+
+  // 明细列表过滤（按当前维度过滤后的 activeLogs 进行搜索与筛选）
+  const filteredDetailLogs = useMemo(() => {
+    return activeLogs.filter(l => {
+      // 类型过滤
+      if (filterType === 'revenue' && l.category !== RefineCategory.Revenue) return false;
+      if (filterType === 'value' && l.category !== RefineCategory.Value) return false;
+
+      // 状态过滤
+      if (filterStatus !== 'all' && l.status !== filterStatus) return false;
+
+      // 关键字搜索
+      if (searchTerm) {
+        const term = searchTerm.toLowerCase();
+        const matchId = l.id.toLowerCase().includes(term);
+        const matchMining = l.miningId.toLowerCase().includes(term);
+        if (!matchId && !matchMining) return false;
+      }
+
+      return true;
+    });
+  }, [activeLogs, filterType, filterStatus, searchTerm]);
+
+  // 导出表格
+  const handleExportExcel = () => {
+    const exportData = filteredDetailLogs.map((l, index) => ({
+      '序号': index + 1,
+      '单号': l.id,
+      '业务日期': l.resolvedDate,
+      '业务月份': l.resolvedMonth,
+      '提交日期': formatSubmissionDate(l.timestamp),
+      '提交时间': formatSubmissionTime(l.timestamp),
+      '类别': l.category,
+      '类型/项目': l.type,
+      '矿山编号': l.miningId,
+      '金额/净值': Math.round(l.calculatedNetValue || l.amount || 0),
+      '状态': l.status
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, '我的账户流水明细');
+
+    const modeStr = startDate && endDate ? `${startDate}_至_${endDate}` : (selectedMonth || effectiveMonth);
+    const todayStr = getLocalDateString();
+    XLSX.writeFile(workbook, `我的账户流水明细_${currentUser.name}_${modeStr}_导出${todayStr}.xlsx`);
+    toast.success('账户流水明细表格导出成功');
+  };
+
+  return (
+    <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-8">
+      {/* 顶部标题区 */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">👤</span>
+            <h1 className="text-xl font-black text-slate-900 tracking-tight">我的帐户</h1>
+            <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-xs font-mono font-bold">
+              {currentUser.name} | {currentUser.category || currentUser.role}
+            </Badge>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            查看本人价值包汇总与流水明细（<span className="font-bold text-amber-600">结余与分配按月核算</span>）
+          </p>
+        </div>
+
+        {/* 月度固定成本隐私开关 */}
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={toggleCostVisible}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all"
+            title={isCostVisible ? "点击隐藏月度固定成本数据" : "点击显示月度固定成本数据"}
+          >
+            {isCostVisible ? <EyeOff className="w-4 h-4 text-slate-500" /> : <Eye className="w-4 h-4 text-slate-500" />}
+            <span>{isCostVisible ? "隐藏月度固定成本" : "显示月度固定成本"}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 说明横条 */}
+      <div className="bg-amber-50/80 border border-amber-200/80 p-3.5 rounded-2xl flex items-center justify-between gap-2 text-xs text-amber-900 font-medium">
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md text-[11px]">核算说明</span>
+          <span>流水与包汇总按所选业务日区间过滤；<strong className="underline decoration-amber-400 font-black">结余与分配按月核算</strong>，固定按 {effectiveMonth} 月度指标展示，不跨月累加。</span>
+        </div>
+      </div>
+
+      {/* 1. 总览区：价值包汇总与月度财务分配指标 (金额整数展示) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+        {/* 收款包 */}
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50/50 p-5 rounded-3xl border border-blue-100/80 shadow-2xs flex flex-col justify-between">
+          <div>
+            <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest block mb-1">收款包</span>
+            <h3 className="text-2xl font-black text-slate-900 font-mono">
+              {formatAmount(collectionPackage)}
+            </h3>
+          </div>
+          <p className="text-[10px] text-blue-500 mt-3 font-medium">
+            {startDate && endDate ? `区间净值口径 (${startDate}~${endDate})` : `当月净值口径 (${selectedMonth || effectiveMonth})`}
+          </p>
+        </div>
+
+        {/* 产兑包 */}
+        <div className="bg-gradient-to-br from-emerald-50 to-teal-50/50 p-5 rounded-3xl border border-emerald-100/80 shadow-2xs flex flex-col justify-between">
+          <div>
+            <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest block mb-1">产兑包</span>
+            <h3 className="text-2xl font-black text-slate-900 font-mono">
+              {formatAmount(productionPackage)}
+            </h3>
+          </div>
+          <p className="text-[10px] text-emerald-500 mt-3 font-medium">
+            {startDate && endDate ? `区间净值口径 (${startDate}~${endDate})` : `当月净值口径 (${selectedMonth || effectiveMonth})`}
+          </p>
+        </div>
+
+        {/* 收产包 */}
+        <div className="bg-gradient-to-br from-purple-50 to-violet-50/50 p-5 rounded-3xl border border-purple-100/80 shadow-2xs flex flex-col justify-between">
+          <div>
+            <span className="text-[10px] font-black text-purple-600 uppercase tracking-widest block mb-1">收产包</span>
+            <h3 className="text-2xl font-black text-slate-900 font-mono">
+              {formatAmount(combinedPackage)}
+            </h3>
+          </div>
+          <p className="text-[10px] text-purple-500 mt-3 font-medium">
+            收款包与产兑包综合汇总
+          </p>
+        </div>
+
+        {/* 当月结余 (按月) */}
+        <div className="bg-gradient-to-br from-amber-50 to-orange-50/50 p-5 rounded-3xl border border-amber-100/80 shadow-2xs flex flex-col justify-between">
+          <div>
+            <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest block mb-1">当月结余 ({effectiveMonth})</span>
+            <h3 className={`text-2xl font-black font-mono ${currentBalance >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
+              {isCostVisible ? formatAmount(currentBalance) : '****'}
+            </h3>
+          </div>
+          <p className="text-[10px] text-amber-600/80 mt-3 font-medium">按月核算 (不受跨月时段影响)</p>
+        </div>
+
+        {/* 奖金额度 (按月) */}
+        <div className="bg-gradient-to-br from-sky-50 to-cyan-50/50 p-5 rounded-3xl border border-sky-100/80 shadow-2xs flex flex-col justify-between">
+          <div>
+            <span className="text-[10px] font-black text-sky-600 uppercase tracking-widest block mb-1">奖金额度 ({effectiveMonth})</span>
+            <h3 className="text-2xl font-black text-slate-900 font-mono">
+              {isCostVisible ? formatAmount(bonusQuota) : '****'}
+            </h3>
+          </div>
+          <p className="text-[10px] text-sky-500 mt-3 font-medium">按月核算 (可分配额度)</p>
+        </div>
+
+        {/* 历史欠产 (按月) */}
+        <div className="bg-gradient-to-br from-rose-50 to-red-50/50 p-5 rounded-3xl border border-rose-100/80 shadow-2xs flex flex-col justify-between">
+          <div>
+            <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest block mb-1">历史欠产 ({effectiveMonth})</span>
+            <h3 className="text-2xl font-black text-rose-600 font-mono">
+              {isCostVisible ? formatAmount(historicalDebt) : '****'}
+            </h3>
+          </div>
+          <p className="text-[10px] text-rose-500 mt-3 font-medium">按月核算 (负数显示)</p>
+        </div>
+      </div>
+
+      {/* 2. 流水明细区 */}
+      <Card
+        title="本人流水明细"
+        className="p-8 rounded-[2.5rem] bg-white shadow-sm border border-slate-100"
+        headerAction={
+          <BusinessDateFilter
+            month={startDate || endDate ? '' : selectedMonth}
+            onMonthChange={(m) => {
+              setSelectedMonth(m);
+              setStartDate('');
+              setEndDate('');
+            }}
+            startDate={startDate}
+            endDate={endDate}
+            onDateRangeChange={(s, e) => {
+              setStartDate(s);
+              setEndDate(e);
+              setSelectedMonth('');
+            }}
+            onClear={() => {
+              setSelectedMonth(getLocalMonthString());
+              setStartDate('');
+              setEndDate('');
+            }}
+          />
+        }
+      >
+        {/* 筛选与导出工具栏 */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-100">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* 关键词搜索 */}
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="搜索单号、矿山..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-44 sm:w-56 bg-slate-50 border border-slate-200 text-xs rounded-xl pl-8 pr-3 py-2 outline-none focus:border-blue-500 text-slate-800"
+              />
+            </div>
+
+            {/* 类型筛选 */}
+            <select
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value)}
+              className="bg-slate-50 border border-slate-200 text-xs text-slate-700 font-bold rounded-xl px-3 py-2 outline-none focus:border-blue-500 cursor-pointer"
+            >
+              <option value="all">全部类型</option>
+              <option value="revenue">收款</option>
+              <option value="value">产值</option>
+            </select>
+
+            {/* 状态筛选 */}
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="bg-slate-50 border border-slate-200 text-xs text-slate-700 font-bold rounded-xl px-3 py-2 outline-none focus:border-blue-500 cursor-pointer"
+            >
+              <option value="all">全部确权状态</option>
+              <option value={AuditStatus.Confirmed}>{AuditStatus.Confirmed}</option>
+              <option value={AuditStatus.Approved}>{AuditStatus.Approved}</option>
+              <option value={AuditStatus.Pending}>{AuditStatus.Pending}</option>
+              <option value={AuditStatus.Rejected}>{AuditStatus.Rejected}</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-bold text-slate-500">
+              共 <span className="text-blue-600 font-mono font-black">{filteredDetailLogs.length}</span> 条记录
+            </span>
+            <button
+              onClick={handleExportExcel}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+              <span>导出明细表格</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 流水明细表格：业务日期、提交日期、类型、矿山、金额、状态、单号 */}
+        <div className="overflow-x-auto custom-scrollbar border border-slate-100 rounded-2xl">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50/80 border-b border-slate-100 text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                <th className="p-4">业务日期</th>
+                <th className="p-4">提交日期</th>
+                <th className="p-4">类型</th>
+                <th className="p-4">矿山</th>
+                <th className="p-4 text-right">金额</th>
+                <th className="p-4 text-center">状态</th>
+                <th className="p-4">单号</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-xs">
+              {filteredDetailLogs.length > 0 ? (
+                filteredDetailLogs.map((l) => (
+                  <tr key={l.id} className="hover:bg-slate-50/60 transition-colors">
+                    <td className="p-4 font-mono font-bold text-slate-800 whitespace-nowrap">{l.resolvedDate}</td>
+                    <td className="p-4 font-mono text-slate-500 whitespace-nowrap">
+                      {formatSubmissionDate(l.timestamp)} <span className="text-[10px] text-slate-400">{formatSubmissionTime(l.timestamp)}</span>
+                    </td>
+                    <td className="p-4">
+                      <span className={`inline-flex px-2.5 py-1 rounded-lg text-[10px] font-bold ${
+                        l.category === RefineCategory.Revenue ? 'bg-blue-50 text-blue-700 border border-blue-200' :
+                        'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      }`}>
+                        {l.category} ({l.type})
+                      </span>
+                    </td>
+                    <td className="p-4 font-bold text-slate-700 max-w-xs truncate" title={l.miningId}>
+                      {l.miningId}
+                    </td>
+                    <td className="p-4 text-right font-mono font-black text-slate-900 whitespace-nowrap">
+                      {Math.round(l.calculatedNetValue || l.amount || 0).toLocaleString()}
+                    </td>
+                    <td className="p-4 text-center whitespace-nowrap">
+                      <span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                        l.status === AuditStatus.Confirmed ? 'bg-emerald-100 text-emerald-800' :
+                        l.status === AuditStatus.Approved ? 'bg-blue-100 text-blue-800' :
+                        l.status === AuditStatus.Rejected ? 'bg-rose-100 text-rose-800' :
+                        'bg-amber-100 text-amber-800'
+                      }`}>
+                        {l.status}
+                      </span>
+                    </td>
+                    <td className="p-4 font-mono text-[11px] text-slate-400 whitespace-nowrap">{l.id}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={7} className="text-center py-16 text-slate-400">
+                    <p className="text-sm font-bold">
+                      暂无符合当前{startDate && endDate ? `业务日区间 (${startDate}~${endDate})` : `业务月 (${selectedMonth || effectiveMonth})`} 及筛选条件的流水明细
+                    </p>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+};
+
+export default MyAccount;
+

@@ -1,0 +1,6 @@
+{
+  "name": "城市守护者价值循环智能体",
+  "description": "世和智能体运营系统，涵盖价值创造提炼、双重审计及熔断保护机制。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
