@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ValueCreationLog, MiningResource, User, InternalTransaction, TransactionStatus } from '../types';
+import { ValueCreationLog, MiningResource, User, InternalTransaction, TransactionStatus, AuditStatus } from '../types';
 import { Card } from '../src/components/UI';
 import { BusinessUnitProfitRankingTable } from '../src/components/BusinessUnitProfitRankingTable';
 import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
@@ -49,13 +49,13 @@ const ReservoirVisualizer: React.FC<{
             统筹水库流向示意图
           </h3>
           <p className="text-slate-400 text-[10px] font-bold mt-2 uppercase tracking-[0.2em]">
-            中央为统筹池：蓝色管道 20% 确权流入；琥珀色管道刚性补足流出
+            统筹池：蓝色管道 经营单元确权流入；琥珀色管道刚性补足流出
           </p>
         </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center space-x-2 bg-blue-50 px-3 py-1.5 rounded-full border border-blue-100">
             <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-            <span className="text-[10px] font-black text-blue-700 uppercase">20% 统筹流入</span>
+            <span className="text-[10px] font-black text-blue-700 uppercase">经营单元流入</span>
           </div>
           <div className="flex items-center space-x-2 bg-amber-50 px-3 py-1.5 rounded-full border border-amber-100">
             <div className="w-2 h-2 rounded-full bg-amber-500"></div>
@@ -89,7 +89,7 @@ const ReservoirVisualizer: React.FC<{
 
             return (
               <React.Fragment key={`lines-${m.center}`}>
-                {/* 20% 流入连线 (蓝线) */}
+                {/* 经营单元流入连线 (蓝线) */}
                 <motion.path
                   initial={{ pathLength: 0, opacity: 0 }}
                   animate={{ pathLength: 1, opacity: 1 }}
@@ -259,6 +259,18 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
   
   const totalSupplement = Math.max(0, totalRigidSalary - totalIncomeProductionPackage);
 
+  const totalCPoints = useMemo(() => {
+    return filteredLogs
+      .filter(l => l.costCategory === 'C' && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved))
+      .reduce((acc, l) => acc + (l.dynamicCost || 0), 0);
+  }, [filteredLogs]);
+
+  const totalB2Points = useMemo(() => {
+    return filteredLogs
+      .filter(l => l.costCategory === 'B' && l.valueConsumptionMode === 'B2' && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved))
+      .reduce((acc, l) => acc + (l.dynamicCost || 0), 0);
+  }, [filteredLogs]);
+
   // 3. 经营单元明细计算
   const centerMetrics = useMemo(() => businessUnits.map(center => {
     const centerLogs = filteredLogs.filter(l => {
@@ -293,7 +305,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
     const data = centerMetrics.map(m => ({
       '经营单元': m.center,
       '已确权收款包': Math.round(m.confirmedRevenuePackage),
-      '统筹池流入(20%)': Math.round(m.inflow20),
+      '经营单元流入': Math.round(m.inflow20),
       '单元收产包': Math.round(m.incomeProductionPackage),
       '单元刚性工资': Math.round(m.unitSalary),
       '统筹补足': Math.round(m.unitSupplement)
@@ -317,7 +329,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="p-8 rounded-[2.5rem] bg-gradient-to-br from-slate-900 to-slate-800 text-white border-none shadow-2xl relative overflow-hidden group">
           <div className="absolute top-0 right-0 p-6 opacity-[0.1] group-hover:scale-150 transition-transform duration-700 pointer-events-none text-6xl">🌊</div>
-          <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] mb-2">统筹池流入 (20%)</p>
+          <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] mb-2">经营单元流入</p>
           <h4 className="text-4xl font-black tracking-tighter mb-4 font-mono">
             {Math.round(platformCoordinationInflow).toLocaleString()}
           </h4>
@@ -353,6 +365,31 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
           <div className="flex items-center text-[10px] font-bold text-slate-400">
             <ShieldCheck className="w-3 h-3 mr-1" />
             <span>{totalSupplement > 0 ? '统筹池预计需补足' : '收产包已覆盖刚性'}</span>
+          </div>
+        </Card>
+      </div>
+
+      {/* 消耗积分全盘总览 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card className="p-8 rounded-[2.5rem] bg-white border border-slate-100 shadow-xl relative group overflow-hidden">
+          <div className="absolute top-0 right-0 p-6 opacity-[0.05] group-hover:scale-150 transition-transform duration-700 pointer-events-none text-6xl">🔥</div>
+          <p className="text-[10px] font-black text-rose-500 uppercase tracking-[0.2em] mb-2">C 类已确权/入库消耗积分</p>
+          <h4 className="text-4xl font-black text-slate-800 tracking-tighter mb-4 font-mono">
+            {Math.round(totalCPoints).toLocaleString()}
+          </h4>
+          <div className="flex items-center text-[10px] font-bold text-slate-400">
+            <span>当前月份或日期区间内，已确权或入库的 C 类消耗积分合计</span>
+          </div>
+        </Card>
+
+        <Card className="p-8 rounded-[2.5rem] bg-white border border-slate-100 shadow-xl relative group overflow-hidden">
+          <div className="absolute top-0 right-0 p-6 opacity-[0.05] group-hover:scale-150 transition-transform duration-700 pointer-events-none text-6xl">⚡</div>
+          <p className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.2em] mb-2">B2 类已确权/入库消耗积分</p>
+          <h4 className="text-4xl font-black text-slate-800 tracking-tighter mb-4 font-mono">
+            {Math.round(totalB2Points).toLocaleString()}
+          </h4>
+          <div className="flex items-center text-[10px] font-bold text-slate-400">
+            <span>当前月份或日期区间内，已确权或入库的 B2 消耗积分合计</span>
           </div>
         </Card>
       </div>
@@ -408,7 +445,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
              <div className="flex space-x-2 pl-2 border-l border-slate-200">
                 <div className="px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-100 flex items-center">
                    <div className="w-2 h-2 rounded-full bg-blue-500 mr-2"></div>
-                   <span className="text-[9px] font-black text-slate-600 uppercase">统筹池流入</span>
+                   <span className="text-[9px] font-black text-slate-600 uppercase">经营单元流入</span>
                 </div>
                 <div className="px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-100 flex items-center">
                    <div className="w-2 h-2 rounded-full bg-amber-500 mr-2"></div>
@@ -424,7 +461,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
               <tr className="border-b border-slate-100">
                 <th className="pb-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">经营单元</th>
                 <th className="pb-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">已确权收款包</th>
-                <th className="pb-6 text-[10px] font-black text-blue-500 uppercase tracking-widest text-right">流入 (20%)</th>
+                <th className="pb-6 text-[10px] font-black text-blue-500 uppercase tracking-widest text-right">经营单元流入</th>
                 <th className="pb-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">单元收产包</th>
                 <th className="pb-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">单元刚性工资</th>
                 <th className="pb-6 text-[10px] font-black text-amber-600 uppercase tracking-widest text-right">统筹补足</th>

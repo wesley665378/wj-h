@@ -1,24 +1,39 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { User, MiningResource, RefineType, Role, ResourceStatus, ValueCreationLog } from '../types';
+import { User, MiningResource, RefineType, Role, ResourceStatus, ValueCreationLog, InternalTransaction } from '../types';
 import { Card, ProgressBar, Badge, ProjectStatusBadge } from '../src/components/UI';
 import * as XLSX from 'xlsx';
 import { deriveProjectStatus } from '../src/utils/projectStatus';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
 import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
+import { MiningResourceQueryView, normalizeMiningId } from '../src/components/MiningResourceQueryView';
 
 interface ResourceManagementProps {
   user: User;
   resources: MiningResource[];
   logs?: ValueCreationLog[];
+  dtcbLogs?: ValueCreationLog[];
+  transactions?: InternalTransaction[];
+  managedUsers?: User[];
   onAddResource: (res: MiningResource) => void;
   onUpdateResource: (res: MiningResource) => void;
   onDeleteResource: (id: string) => void;
   businessUnits: string[];
 }
 
-const ResourceManagement: React.FC<ResourceManagementProps> = ({ resources, logs = [], onAddResource, onUpdateResource, onDeleteResource, user, businessUnits }) => {
+const ResourceManagement: React.FC<ResourceManagementProps> = ({ 
+  resources, 
+  logs = [], 
+  dtcbLogs = [],
+  transactions = [],
+  managedUsers = [],
+  onAddResource, 
+  onUpdateResource, 
+  onDeleteResource, 
+  user, 
+  businessUnits 
+}) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const [newMiningId, setNewMiningId] = useState('');
@@ -35,8 +50,13 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({ resources, logs
   const [monthN, setMonthN] = useState<number>(1);
   const [units, setUnits] = useState<string[]>([]);
 
-  const isNpcxie = user.role === Role.npcxie;
-  const isAdmin = user.role === Role.Admin;
+  // 按矿山编号查询相关状态
+  const [searchMiningId, setSearchMiningId] = useState('');
+  const [queriedMiningId, setQueriedMiningId] = useState<string | null>(null);
+
+  const isNpcxie = user.role === Role.npcxie || user.category === 'NPC';
+  const isAdmin = user.role === Role.Admin || user.category === '系统管理员';
+  const canQuery = isAdmin || isNpcxie;
   const [selectedUnitFilter, setSelectedUnitFilter] = useState<string>('');
 
   const isDepleted = useMemo(() => {
@@ -214,16 +234,22 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({ resources, logs
       ? resources.map(r => r.id === editingId ? resourceData : r)
       : [...resources, resourceData];
 
-    if (editingId) {
-      onUpdateResource(resourceData);
-      const quotaInfo = isOutsourced ? `本月(N=${monthN})授权额度：${Math.round(authorizedQuota || 0).toLocaleString()} 积分` : '';
-      toast.success(`矿山 ${newMiningId} 指令已更新。${quotaInfo}`);
-    } else {
-      onAddResource(resourceData);
-      const quotaInfo = isOutsourced ? `本月(N=${monthN})授权额度：${Math.round(authorizedQuota || 0).toLocaleString()} 积分` : '';
-      toast.success(`指令下达成功：矿山 ${newMiningId} 已分配。${quotaInfo}`);
-    }
-    handleCancelEdit();
+    const actionText = editingId ? '保存矿山指令' : '下达矿山指令';
+    showConfirm(
+      `确定${actionText}？\n\n【矿山编号】${newMiningId}\n【提炼类型】${selectedType}\n【收款指派】${assigneeRevenue}\n【产值指派】${assigneeValue}\n【款初】${Math.round(purifiedRevenueCapacity).toLocaleString()}\n【产初】${Math.round(purifiedValueCapacity).toLocaleString()}`,
+      async () => {
+        if (editingId) {
+          onUpdateResource(resourceData);
+          const quotaInfo = isOutsourced ? `\n本月(N=${monthN})授权额度：${Math.round(authorizedQuota || 0).toLocaleString()} 积分` : '';
+          showAlert(`矿山 ${newMiningId} 指令已更新。${quotaInfo}`);
+        } else {
+          onAddResource(resourceData);
+          const quotaInfo = isOutsourced ? `\n本月(N=${monthN})授权额度：${Math.round(authorizedQuota || 0).toLocaleString()} 积分` : '';
+          showAlert(`指令下达成功：矿山 ${newMiningId} 已分配。${quotaInfo}`);
+        }
+        handleCancelEdit();
+      }
+    );
   };
 
   const exportToExcel = () => {
@@ -246,8 +272,101 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({ resources, logs
     XLSX.writeFile(workbook, `矿山资源分配记录_${new Date().toLocaleDateString()}.xlsx`);
   };
 
+  const queriedResource = useMemo(() => {
+    if (!queriedMiningId) return null;
+    const norm = normalizeMiningId(queriedMiningId);
+    return resources.find(r => normalizeMiningId(r.id) === norm) || null;
+  }, [resources, queriedMiningId]);
+
+  const handleQuerySearch = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const normalized = normalizeMiningId(searchMiningId);
+    if (!normalized) {
+      showAlert('请输入要查询的矿山编号。');
+      return;
+    }
+    const matched = resources.find(r => normalizeMiningId(r.id) === normalized);
+    if (!matched) {
+      showAlert('无此矿');
+      setQueriedMiningId(null);
+      return;
+    }
+    setQueriedMiningId(matched.id);
+  };
+
   return (
     <div className="w-full space-y-4 md:space-y-6 lg:space-y-8 animate-in fade-in duration-500 pb-20">
+      {/* 权限受控：仅系统管理员（Admin）与 npcxie 显示查询入口 */}
+      {canQuery && (
+        <Card className="rounded-[2rem] md:rounded-[2.5rem] p-6 md:p-8 bg-gradient-to-br from-slate-900 via-slate-850 to-slate-900 border border-slate-700 shadow-xl text-white space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="w-11 h-11 rounded-2xl bg-blue-600/30 border border-blue-400/40 flex items-center justify-center text-blue-400 text-xl font-black shrink-0">
+                🔎
+              </span>
+              <div>
+                <h3 className="text-base font-black tracking-tight text-white flex items-center gap-2">
+                  按矿山编号查询 (全景穿透)
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 font-bold border border-blue-400/30">
+                    Admin / NPCXIE 专享
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  输入矿山编号穿透主档、价值创造(jzcz)、动态消耗(dtcb)与内部交易(nbjy)四块台账
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleQuerySearch} className="flex items-center gap-2 w-full sm:w-auto">
+              <div className="relative flex-1 sm:w-72">
+                <input
+                  type="text"
+                  value={searchMiningId}
+                  onChange={(e) => setSearchMiningId(e.target.value)}
+                  placeholder="输入矿山编号 (如 A01)..."
+                  className="w-full bg-slate-950/90 border border-slate-700 rounded-xl px-4 py-2.5 text-xs font-mono font-bold text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all h-10"
+                />
+                {searchMiningId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchMiningId('');
+                      setQueriedMiningId(null);
+                    }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs font-bold px-1"
+                    title="清空"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+              <button
+                type="submit"
+                className="px-5 bg-blue-600 hover:bg-blue-500 text-white font-black text-xs rounded-xl shadow-md transition-all shrink-0 flex items-center justify-center gap-1.5 h-10"
+              >
+                <span>查询</span>
+              </button>
+            </form>
+          </div>
+        </Card>
+      )}
+
+      {/* 穿透查询结果展示 (包含 1 矿山主档、2 价值创造、3 动态消耗、4 内部交易 与 Excel 导出) */}
+      {canQuery && queriedResource && (
+        <MiningResourceQueryView
+          resource={queriedResource}
+          resources={resources}
+          logs={logs}
+          dtcbLogs={dtcbLogs}
+          transactions={transactions}
+          managedUsers={managedUsers}
+          onClose={() => {
+            setQueriedMiningId(null);
+            setSearchMiningId('');
+          }}
+        />
+      )}
+
       {/* 矿山全盘总览卡片 */}
       {(() => {
         const rev = overallQuadrants.revenue;
@@ -484,7 +603,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({ resources, logs
                         });
 
                         newResourcesList.forEach(r => onAddResource(r));
-                        toast.success(`批量导入完成：新增 ${importCount} 个矿山资源。`);
+                        showAlert(`批量导入完成：新增 ${importCount} 个矿山资源。`);
                         e.target.value = ''; // Reset input
                       };
                       reader.readAsBinaryString(file);

@@ -102,13 +102,15 @@ export function useCityGuardianModal() {
     });
   }, []);
 
-  const showConfirm = React.useCallback((message: string, onConfirm: () => void, onCancel?: () => void) => {
+  const showConfirm = React.useCallback((message: string, onConfirm: () => void, onCancel?: () => void, confirmText?: string, cancelText?: string) => {
     setModalState({
       isOpen: true,
       type: 'confirm',
       message,
       onConfirm,
       onCancel,
+      confirmText,
+      cancelText,
     });
   }, []);
 

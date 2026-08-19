@@ -1,13 +1,15 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ValueCreationLog, MiningResource, AuditStatus, RefineCategory, User, InternalTransaction, RefineType, Role, TransactionType, TransactionStatus } from '../types';
+import { ValueCreationLog, MiningResource, AuditStatus, RefineCategory, User, InternalTransaction, RefineType, Role, TransactionType, TransactionStatus, MeetingSample } from '../types';
 import { 
   Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend
 } from 'recharts';
-import { RefreshCw, Info, LayoutGrid, List, AlertTriangle, Wallet, Eye, EyeOff } from 'lucide-react';
+import { RefreshCw, Info, LayoutGrid, List, AlertTriangle, Wallet, Eye, EyeOff, FileSpreadsheet, Sparkles, Lock, CheckCircle2 } from 'lucide-react';
 import { useCostPrivacy } from '../src/hooks/useCostPrivacy';
+import { useCityGuardianModal, CityGuardianModal } from '../src/components/CityGuardianModal';
+import * as XLSX from 'xlsx';
 import { Card, StatItem, ProgressBar } from '../src/components/UI';
 import { UI_LABELS } from '../src/constants/uiLabels';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
@@ -29,13 +31,18 @@ interface DashboardProps {
   onSystemAdjustment?: (log: ValueCreationLog, details: string) => void;
   onSwitchTab?: (tab: string) => void;
   businessUnits: string[];
+  meetingSamples?: MeetingSample[];
+  onSaveMeetingSample?: (sample: MeetingSample) => Promise<boolean>;
 }
 
 type PeriodType = 'month' | 'quarter' | 'half' | 'year';
 
-const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUser, transactions, onSystemAdjustment, onSwitchTab, businessUnits }) => {
+const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUser, transactions, onSystemAdjustment, onSwitchTab, businessUnits, meetingSamples, onSaveMeetingSample }) => {
   const { isCostVisible, toggleCostVisible, maskMoney, maskText } = useCostPrivacy();
+  const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const [now, setNow] = useState<Date>(() => new Date());
+
+  const canSampleAndExport = currentUser?.role === Role.Admin || currentUser?.role === Role.npcxie;
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -552,6 +559,217 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     }
   }, [onSystemAdjustment, waterMetrics.rigidSalaryPackage, waterMetrics.incomeWaterPool]);
 
+  // --- 会务留样与报告状态管理 ---
+  const isSampleSupported = periodType === 'month' || periodType === 'quarter';
+  const samplePeriodKey = useMemo(() => {
+    if (periodType === 'month') return `${now.getFullYear()}-${String(periodValue).padStart(2, '0')}`;
+    if (periodType === 'quarter') return `${now.getFullYear()}-Q${periodValue}`;
+    return '';
+  }, [periodType, periodValue, now]);
+
+  const currentMeetingSample = useMemo(() => {
+    if (!isSampleSupported || !meetingSamples || !samplePeriodKey) return undefined;
+    return meetingSamples.find(s => s.periodType === periodType && s.periodKey === samplePeriodKey);
+  }, [isSampleSupported, meetingSamples, periodType, samplePeriodKey]);
+
+  const [sampleViewMode, setSampleViewMode] = useState<'sample' | 'live'>('sample');
+
+  useEffect(() => {
+    if (currentMeetingSample) {
+      setSampleViewMode('sample');
+    } else {
+      setSampleViewMode('live');
+    }
+  }, [periodType, periodValue, currentMeetingSample?.id]);
+
+  const isViewingSample = isSampleSupported && Boolean(currentMeetingSample) && sampleViewMode === 'sample';
+
+  // 冻结数据与现算数据映射
+  const displayIncomeWaterPool = isViewingSample && currentMeetingSample ? currentMeetingSample.kpis.totalRevenueAndValuePackage : waterMetrics.incomeWaterPool;
+  const displayRevenueWater = isViewingSample && currentMeetingSample ? currentMeetingSample.kpis.totalRevenuePackage : waterMetrics.revenueWater;
+  const displayValueWater = isViewingSample && currentMeetingSample ? currentMeetingSample.kpis.totalValuePackage : waterMetrics.valueWater;
+  const displayDividendPool = isViewingSample && currentMeetingSample ? (currentMeetingSample.kpis.dividendPool ?? waterMetrics.dividendPool) : waterMetrics.dividendPool;
+  const displayTotalRigidExpenses = isViewingSample && currentMeetingSample ? (currentMeetingSample.kpis.totalRigidExpenses ?? waterMetrics.totalRigidExpenses) : waterMetrics.totalRigidExpenses;
+  const displayOperatingLoss = isViewingSample && currentMeetingSample ? (currentMeetingSample.kpis.operatingLoss ?? waterMetrics.operatingLoss) : waterMetrics.operatingLoss;
+  const displayTotalBonusPool = isViewingSample && currentMeetingSample ? (currentMeetingSample.kpis.totalBonusPool ?? waterMetrics.totalBonusPool) : waterMetrics.totalBonusPool;
+  const displayPlatformCoordinationPool = isViewingSample && currentMeetingSample ? (currentMeetingSample.kpis.platformCoordinationPool ?? waterMetrics.platformCoordinationPool) : waterMetrics.platformCoordinationPool;
+  const displayReservoirInflow = isViewingSample && currentMeetingSample ? (currentMeetingSample.kpis.reservoirInflow ?? waterMetrics.reservoirInflow) : waterMetrics.reservoirInflow;
+  const displayGlobalWeightedPurity = isViewingSample && currentMeetingSample ? (currentMeetingSample.kpis.globalWeightedPurity ?? globalWeightedPurity) : globalWeightedPurity;
+
+  // 生成会务留样处理
+  const handleGenerateMeetingSample = () => {
+    if (!isSampleSupported) return;
+    const periodLogs = logs.filter(l => l.timestamp >= periodRange.start && l.timestamp < periodRange.end);
+    const isOverwrite = Boolean(currentMeetingSample);
+
+    showConfirm(
+      `确认生成「${currentPeriodLabel}」会务留样吗？\n\n本留样只对生成此刻系统内的数据负责。之后再录入的动态消耗、权重等（凡会影响收入包的）都不会改这份留样。${isOverwrite ? '\n\n⚠️ 注意：本期已存在旧留样，本次生成将覆盖该期最新一份。' : ''}`,
+      async () => {
+        const frozenAt = Date.now();
+        const frozenByUserId = currentUser.userId || currentUser.id || 'admin';
+        const frozenByName = currentUser.name || '管理员';
+        const label = `${currentPeriodLabel} 会务留样`;
+        const checksum = `流水 ${periodLogs.length} 条 | 收产包 ${Math.round(waterMetrics.incomeWaterPool)} | 收款包 ${Math.round(waterMetrics.revenueWater)} | 产兑包 ${Math.round(waterMetrics.valueWater)}`;
+
+        const sampleToSave: MeetingSample = {
+          id: `${periodType}:${samplePeriodKey}`,
+          periodType: periodType as 'month' | 'quarter',
+          periodKey: samplePeriodKey,
+          frozenAt,
+          frozenByUserId,
+          frozenByName,
+          label,
+          fixedNotice: '会务留样 · 仅对生成时刻数据负责',
+          checksum,
+          kpis: {
+            totalRevenueAndValuePackage: Math.round(waterMetrics.incomeWaterPool),
+            totalRevenuePackage: Math.round(waterMetrics.revenueWater),
+            totalValuePackage: Math.round(waterMetrics.valueWater),
+            rigidSalaryPackage: Math.round(waterMetrics.rigidSalaryPackage),
+            operatingLoss: Math.round(waterMetrics.operatingLoss),
+            totalBonusPool: Math.round(waterMetrics.totalBonusPool),
+            platformCoordinationPool: Math.round(waterMetrics.platformCoordinationPool),
+            dividendPool: Math.round(waterMetrics.dividendPool),
+            reservoirInflow: Math.round(waterMetrics.reservoirInflow),
+            globalWeightedPurity: Number(globalWeightedPurity.toFixed(1)),
+            totalRigidExpenses: Math.round(waterMetrics.totalRigidExpenses),
+            logCount: periodLogs.length,
+          }
+        };
+
+        if (onSaveMeetingSample) {
+          const success = await onSaveMeetingSample(sampleToSave);
+          if (success) {
+            setSampleViewMode('sample');
+            showAlert(
+              `【${currentPeriodLabel} 会务留样】已成功生成并冻结落库！\n\n凭证信息：\n• 冻结时间：${new Date(frozenAt).toLocaleString()}\n• 经办人员：${frozenByName} (${frozenByUserId})\n• 校验摘要：${checksum}\n• 规则：会务留样 · 仅对生成时刻数据负责`
+            );
+          } else {
+            showAlert(`生成经营快照失败，未保存至数据库，请检查后端服务状态后重试。`);
+          }
+        }
+      },
+      undefined,
+      '确定生成',
+      '取消'
+    );
+  };
+
+  // 导出 Excel 报告底层函数
+  const doExportExcel = (isFrozen: boolean, sample: MeetingSample | null) => {
+    const periodLogs = logs.filter(l => l.timestamp >= periodRange.start && l.timestamp < periodRange.end);
+    const frozenDateStr = sample ? new Date(sample.frozenAt).toISOString().slice(0, 10) : '';
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    const totalRevVal = isFrozen && sample ? sample.kpis.totalRevenueAndValuePackage : Math.round(waterMetrics.incomeWaterPool);
+    const totalRev = isFrozen && sample ? sample.kpis.totalRevenuePackage : Math.round(waterMetrics.revenueWater);
+    const totalVal = isFrozen && sample ? sample.kpis.totalValuePackage : Math.round(waterMetrics.valueWater);
+    const rigidSalary = isFrozen && sample ? (sample.kpis.rigidSalaryPackage ?? Math.round(waterMetrics.rigidSalaryPackage)) : Math.round(waterMetrics.rigidSalaryPackage);
+    const operatingLossVal = isFrozen && sample ? (sample.kpis.operatingLoss ?? Math.round(waterMetrics.operatingLoss)) : Math.round(waterMetrics.operatingLoss);
+    const totalBonus = isFrozen && sample ? (sample.kpis.totalBonusPool ?? Math.round(waterMetrics.totalBonusPool)) : Math.round(waterMetrics.totalBonusPool);
+    const coordPool = isFrozen && sample ? (sample.kpis.platformCoordinationPool ?? Math.round(waterMetrics.platformCoordinationPool)) : Math.round(waterMetrics.platformCoordinationPool);
+    const divPool = isFrozen && sample ? (sample.kpis.dividendPool ?? Math.round(waterMetrics.dividendPool)) : Math.round(waterMetrics.dividendPool);
+    const reservoirInflowVal = isFrozen && sample ? (sample.kpis.reservoirInflow ?? Math.round(waterMetrics.reservoirInflow)) : Math.round(waterMetrics.reservoirInflow);
+    const totalRigidExpensesVal = isFrozen && sample ? (sample.kpis.totalRigidExpenses ?? Math.round(waterMetrics.totalRigidExpenses)) : Math.round(waterMetrics.totalRigidExpenses);
+    const purityVal = isFrozen && sample ? (sample.kpis.globalWeightedPurity ?? Number(globalWeightedPurity.toFixed(1))) : Number(globalWeightedPurity.toFixed(1));
+
+    // 成本脱敏规则：若未开眼 (isCostVisible === false)，成本类数字不显示明文
+    const maskCost = (val: number) => isCostVisible ? val : '***';
+
+    const sheetData: (string | number)[][] = [
+      ['【城市守护者】经营会务留样与指标报告'],
+      [],
+      ['报告凭证与基础信息'],
+      ['报告类型', isFrozen ? '会务留样 · 仅对生成时刻数据负责' : '未留样 · 即时数据'],
+      ['统计时段', `${currentPeriodLabel} (${samplePeriodKey || periodType})`],
+      ['数据口径', isFrozen ? '已冻结留样 (只读)' : '实时现算 (动态)'],
+      ['留样冻结时间', isFrozen && sample ? new Date(sample.frozenAt).toLocaleString() : '未冻结 (即时生成)'],
+      ['经办操作人', isFrozen && sample ? `${sample.frozenByName} (${sample.frozenByUserId})` : `${currentUser.name} (${currentUser.userId || currentUser.id || 'admin'})`],
+      ['数据校验摘要', isFrozen && sample ? (sample.checksum || '—') : `流水 ${periodLogs.length} 条 | 收产包 ${totalRevVal} | 收款包 ${totalRev} | 产兑包 ${totalVal}`],
+      ['报告导出时间', new Date().toLocaleString()],
+      ['合规声明', '本报告参照检测机构留样规范生成，金额均为整数计量，不含币种符号。'],
+      [],
+      ['核心经营 KPI 汇总表'],
+      ['序号', '指标名称', '金额 / 数值', '指标定义及口径说明'],
+      [1, '收产包 (Income & Value Package)', totalRevVal, '实收现金流提炼（收款包）与已确权产值提炼（产兑包）总和'],
+      [2, '收款包 (Revenue Package)', totalRev, '实收现金流提炼收款包'],
+      [3, '产兑包 (Value Conversion Package)', totalVal, '已确权产值提炼产兑包'],
+      [4, '刚性保底工资包 (Rigid Salary Package)', maskCost(rigidSalary), '专家保障底薪及硬性人工开支（按月累加）'],
+      [5, '运营直接损耗 (Operating Loss)', maskCost(operatingLossVal), 'A/B1/B2/C/D 动态运维消耗总和'],
+      [6, '专家收产包冗余奖金池 (Bonus Pool)', totalBonus, '采集专家收产包冗余激励及理论分配池'],
+      [7, '平台统筹留用池 (Platform Pool)', coordPool, '已确权收款20%提取与分红沉淀，用于刚性补足与对冲'],
+      [8, '分红池纯结余 (Dividend Pool)', divPool, '覆盖成本与承兑后的净盈余沉淀（80%二次分配，20%注入统筹池）'],
+      [9, '组织造血对冲能力 (蓄水入库 / 刚性支出)', `${reservoirInflowVal} / ${isCostVisible ? totalRigidExpensesVal : '***'}`, '入库总蓄水对冲刚性底线开支能力比率'],
+      [10, '全盘加权含金量 (%)', `${purityVal}%`, '全盘矿山资源与流水加权综合含金量评估']
+    ];
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(sheetData);
+
+    ws['!cols'] = [
+      { wch: 8 },
+      { wch: 38 },
+      { wch: 24 },
+      { wch: 54 }
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, isFrozen ? '会务留样报告' : '即时经营报告');
+
+    const filename = isFrozen
+      ? `${currentPeriodLabel}_会务留样报告_${frozenDateStr}.xlsx`
+      : `${currentPeriodLabel}_未留样-即时数据报告_${todayStr}.xlsx`;
+
+    XLSX.writeFile(wb, filename);
+
+    showAlert(`报告已成功导出！\n\n文件名：${filename}\n口径：${isFrozen ? '已冻结会务留样' : '未留样 · 即时数据'}`);
+  };
+
+  // 导出报告触发处理
+  const handleExportReport = () => {
+    if (!isSampleSupported) {
+      // 半年度 / 年度
+      showConfirm(
+        `当前所选时段【${currentPeriodLabel}】不支持生成会务留样。\n\n是否导出【未留样 · 即时数据】Excel 经营报告？`,
+        () => {
+          doExportExcel(false, null);
+        },
+        undefined,
+        '导出即时报告',
+        '取消'
+      );
+      return;
+    }
+
+    if (!currentMeetingSample) {
+      // 月度 / 季度无留样
+      showConfirm(
+        `当前时段【${currentPeriodLabel}】尚未生成会务留样。\n\n是否立即导出【未留样 · 即时数据】报告？\n(提示：您也可以先点击「生成会务留样」进行冻结后再导出正式会务留样报告)`,
+        () => {
+          doExportExcel(false, null);
+        },
+        undefined,
+        '导出即时报告',
+        '取消'
+      );
+      return;
+    }
+
+    // 已有留样
+    if (sampleViewMode === 'live') {
+      showConfirm(
+        `当前看板处于【现算模式】，但该期已存在冻结的会务留样。\n\n是否导出该期【已冻结会务留样】报告？`,
+        () => {
+          doExportExcel(true, currentMeetingSample);
+        },
+        undefined,
+        '导出冻结留样',
+        '取消'
+      );
+    } else {
+      doExportExcel(true, currentMeetingSample);
+    }
+  };
+
   const funnelData = [
     { name: '收产包', value: waterMetrics.incomeWaterPool, color: '#A855F7', icon: '🌊', precision: 2 },
     { name: '刚性池 (Rigid)', value: waterMetrics.totalRigidExpenses, color: '#1E293B', icon: '⚡', precision: 2 },
@@ -627,9 +845,9 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
           </div>
         </div>
 
-        {/* Bottom: Period Value Selector & System Time */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4 pt-4 border-t border-slate-50">
-          <div className="flex items-center gap-3">
+        {/* Bottom: Period Value Selector & Meeting Sample Controls & System Time */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-4 border-t border-slate-50">
+          <div className="flex items-center gap-3 flex-wrap">
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">时段切换</span>
             <div className="flex flex-wrap bg-slate-50 p-1 rounded-xl border border-slate-100">
                {periodOptions.map((opt) => (
@@ -645,11 +863,92 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                ))}
             </div>
           </div>
-          <div className="sm:ml-auto flex items-center gap-2">
-            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
-            <span className="text-[10px] font-bold text-slate-400 font-mono italic">
-              系统实时同步中: {now.toLocaleString()}
-            </span>
+
+          <div className="flex items-center flex-wrap gap-2.5 sm:ml-auto">
+            {/* 1) 留样状态文案 / 角标 */}
+            {isSampleSupported ? (
+              currentMeetingSample ? (
+                sampleViewMode === 'sample' ? (
+                  <div 
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-xs"
+                    title={`冻结时间: ${new Date(currentMeetingSample.frozenAt).toLocaleString()} | 经办人: ${currentMeetingSample.frozenByName} (${currentMeetingSample.frozenByUserId})`}
+                  >
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse shrink-0"></span>
+                    <span className="truncate max-w-[260px]">已留样 · 冻结于 {new Date(currentMeetingSample.frozenAt).toLocaleDateString()} {new Date(currentMeetingSample.frozenAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {currentMeetingSample.frozenByName}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black bg-blue-50 text-blue-700 border border-blue-200 shadow-xs">
+                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full shrink-0"></span>
+                    <span>现算模式 (已有留样)</span>
+                  </div>
+                )
+              ) : (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black bg-amber-50 text-amber-700 border border-amber-200 shadow-xs">
+                  <span className="w-1.5 h-1.5 bg-amber-500 rounded-full shrink-0"></span>
+                  <span>现算 · 未留样</span>
+                </div>
+              )
+            ) : (
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black bg-slate-100 text-slate-500 border border-slate-200">
+                <span>即时数据 (不支持留样)</span>
+              </div>
+            )}
+
+            {/* 4) 已留样时：切换「现算 / 留样」 */}
+            {isSampleSupported && currentMeetingSample && (
+              <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 shadow-inner">
+                <button
+                  onClick={() => setSampleViewMode('sample')}
+                  className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all ${
+                    sampleViewMode === 'sample' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                  title="展示冻结留样数据（会议投影标准口径）"
+                >
+                  留样 (冻结)
+                </button>
+                <button
+                  onClick={() => setSampleViewMode('live')}
+                  className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all ${
+                    sampleViewMode === 'live' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                  title="展示实时现算数据"
+                >
+                  现算 (实时)
+                </button>
+              </div>
+            )}
+
+            {/* 2) 按钮「生成经营快照」（仅 Admin / npcxie） */}
+            {canSampleAndExport && isSampleSupported && (
+              <button
+                onClick={handleGenerateMeetingSample}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-black text-white bg-slate-900 hover:bg-slate-800 active:scale-95 transition-all shadow-sm"
+                title="参照检测机构留样标准冻结当期看板核心 KPI"
+              >
+                <Sparkles className="w-3 h-3 text-amber-400 shrink-0" />
+                <span>生成经营快照</span>
+              </button>
+            )}
+
+            {/* 3) 按钮「导出报告」（仅 Admin / npcxie） */}
+            {canSampleAndExport && (
+              <button
+                onClick={handleExportReport}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-black text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 active:scale-95 transition-all shadow-sm"
+                title="导出本期 Excel 经营报告"
+              >
+                <FileSpreadsheet className="w-3 h-3 text-emerald-600 shrink-0" />
+                <span>导出报告</span>
+              </button>
+            )}
+
+            {/* 系统实时同步中 */}
+            <div className="flex items-center gap-1.5 ml-1">
+              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full shrink-0"></span>
+              <span className="text-[10px] font-bold text-slate-400 font-mono italic whitespace-nowrap">
+                {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -672,13 +971,13 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
             </span>
           </div>
           <div className="flex items-end gap-2">
-            <span className={`text-3xl font-black tracking-tighter ${globalWeightedPurityState.color500}`}>{globalWeightedPurity.toFixed(1)}%</span>
+            <span className={`text-3xl font-black tracking-tighter ${globalWeightedPurityState.color500}`}>{displayGlobalWeightedPurity.toFixed(1)}%</span>
             <span className="text-[10px] font-bold text-slate-400 mb-1">加权平均</span>
           </div>
           <div className="mt-4 h-1.5 bg-slate-100 rounded-full overflow-hidden">
             <div 
               className={`h-full transition-all duration-1000 ${globalWeightedPurityState.color500.replace('text', 'bg')}`}
-              style={{ width: `${globalWeightedPurity}%` }}
+              style={{ width: `${displayGlobalWeightedPurity}%` }}
             />
           </div>
         </Card>
@@ -695,23 +994,23 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
               </button>
             </div>
             <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
-              {((waterMetrics.reservoirInflow / (waterMetrics.totalRigidExpenses || 1)) * 100).toFixed(0)}% 对冲
+              {((displayReservoirInflow / (displayTotalRigidExpenses || 1)) * 100).toFixed(0)}% 对冲
             </span>
           </div>
           <div className="flex items-end gap-2">
             <span className="text-3xl font-black tracking-tighter text-slate-900">
-              <span className="text-lg mr-1 opacity-50"></span>{waterMetrics.reservoirInflow.toLocaleString()}
+              <span className="text-lg mr-1 opacity-50"></span>{displayReservoirInflow.toLocaleString()}
             </span>
-            <span className="text-[10px] font-bold text-slate-400 mb-1">/ {waterMetrics.totalRigidExpenses.toLocaleString()}</span>
+            <span className="text-[10px] font-bold text-slate-400 mb-1">/ {displayTotalRigidExpenses.toLocaleString()}</span>
           </div>
           <div className="mt-4 h-1.5 bg-slate-100 rounded-full overflow-hidden relative">
             <div 
               className="h-full bg-blue-500 transition-all duration-1000"
-              style={{ width: `${Math.min((waterMetrics.reservoirInflow / (waterMetrics.totalRigidExpenses || 1)) * 100, 100)}%` }}
+              style={{ width: `${Math.min((displayReservoirInflow / (displayTotalRigidExpenses || 1)) * 100, 100)}%` }}
             />
             <div className="absolute top-0 left-[100%] w-px h-full bg-rose-500 z-10" title="盈亏平衡线"></div>
           </div>
-          <p className="mt-2 text-[9px] font-bold text-slate-400 italic">离“核心均衡”还有 {Math.max(0, waterMetrics.reservoirInflow - waterMetrics.totalRigidExpenses).toLocaleString()} 额度</p>
+          <p className="mt-2 text-[9px] font-bold text-slate-400 italic">离“核心均衡”还有 {Math.max(0, displayReservoirInflow - displayTotalRigidExpenses).toLocaleString()} 额度</p>
         </Card>
 
       </div>
@@ -1035,30 +1334,30 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
               <div className="water-pool text-white shadow-lg w-[24%] h-32" style={{ background: 'linear-gradient(135deg, #a855f7, #7e22ce)', left: '44%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-1s' }}>
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none whitespace-nowrap">统筹池</h4>
-                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{waterMetrics.platformCoordinationPool.toLocaleString()}</div>
+                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{displayPlatformCoordinationPool.toLocaleString()}</div>
               </div>
 
               {/* 1. 收产包 (Top Left) */}
               <div className="water-pool text-white shadow-lg w-[24%] h-36" style={{ background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', left: '18%', top: '25%', transform: 'translate(-50%, -50%)', animationDelay: '0s' }}>
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-0.5 relative z-10 drop-shadow-md leading-none">收产包</h4>
-                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md border-b border-blue-400/50 pb-0.5 mb-1 w-[95%] leading-none text-center">{waterMetrics.incomeWaterPool.toLocaleString()}</div>
+                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md border-b border-blue-400/50 pb-0.5 mb-1 w-[95%] leading-none text-center">{displayIncomeWaterPool.toLocaleString()}</div>
                 <div className="grid grid-cols-2 gap-1 relative z-10 w-[95%] text-[8px] md:text-[9px]">
                   <div className="bg-amber-500/20 px-1 py-0.5 rounded flex flex-col items-center">
                     <span className="font-bold">收款包</span>
-                    <span className="font-mono">{waterMetrics.revenueWater.toLocaleString()}</span>
+                    <span className="font-mono">{displayRevenueWater.toLocaleString()}</span>
                   </div>
                   <div className="bg-emerald-500/20 px-1 py-0.5 rounded flex flex-col items-center">
                     <span className="font-bold">产兑包</span>
-                    <span className="font-mono">{waterMetrics.valueWater.toLocaleString()}</span>
+                    <span className="font-mono">{displayValueWater.toLocaleString()}</span>
                   </div>
                 </div>
               </div>
 
               {/* 2. 刚性池 (Top Right) */}
               {(() => {
-                const operatingLoss = waterMetrics.aCosts + waterMetrics.b1Costs;
-                const totalRigid = waterMetrics.rigidSalaryPackage + operatingLoss;
+                const operatingLoss = displayOperatingLoss;
+                const totalRigid = displayTotalRigidExpenses + operatingLoss;
                 return (
                   <div 
                     className="water-pool text-white shadow-lg w-[28%] h-36 cursor-pointer group" 
@@ -1074,7 +1373,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                     <div className="grid grid-cols-2 gap-1 relative z-10 w-[95%] text-[8px] md:text-[9px]">
                       <div className="bg-rose-400/20 px-1 py-0.5 rounded flex flex-col items-center">
                         <span className="font-bold truncate w-full text-center">👤刚性包</span>
-                        <span className="font-mono">{maskMoney(waterMetrics.rigidSalaryPackage)}</span>
+                        <span className="font-mono">{maskMoney(displayTotalRigidExpenses)}</span>
                       </div>
                       <div className="bg-rose-400/20 px-1 py-0.5 rounded flex flex-col items-center group/loss relative" title="运维损耗池">
                         <span className="font-bold truncate w-full text-center">📉损耗</span>
@@ -1097,14 +1396,14 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
               <div className="water-pool text-white shadow-lg w-[24%] h-32" style={{ background: 'linear-gradient(135deg, #10b981, #047857)', left: '82%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-3s' }}>
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none">奖金池</h4>
-                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{waterMetrics.totalBonusPool.toLocaleString()}</div>
+                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{displayTotalBonusPool.toLocaleString()}</div>
               </div>
 
               {/* 4. 承兑池 (Bottom Right) */}
               <div className="water-pool text-white shadow-lg w-[24%] h-32" style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)', left: '82%', top: '85%', transform: 'translate(-50%, -50%)', animationDelay: '-4s' }}>
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none">承兑池</h4>
-                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{waterMetrics.acceptancePool.toLocaleString()}</div>
+                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{displayTotalBonusPool.toLocaleString()}</div>
               </div>
 
               {/* 5. 分红池 (Bottom Left) */}
@@ -1112,7 +1411,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none">分红池</h4>
                 <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md border-b border-white/20 pb-0.5 mb-1 w-[90%] leading-none text-center">
-                  {waterMetrics.dividendPool.toLocaleString()}
+                  {displayDividendPool.toLocaleString()}
                 </div>
                 <div className={`text-[8px] font-bold ${waterMetrics.fhctzCost > 0 ? 'text-amber-300' : 'text-white/40'} relative z-10 uppercase tracking-tighter`}>
                   {`统筹补足(fhctz): ${waterMetrics.fhctzCost.toLocaleString()}`}
@@ -1726,6 +2025,9 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
           </motion.div>
         </div>
       )}
+
+      {/* 城市守护者统一站内弹窗 */}
+      <CityGuardianModal state={modalState} onClose={closeModal} />
     </div>
   );
 };

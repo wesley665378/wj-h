@@ -392,7 +392,7 @@ const Auditing: React.FC<AuditingProps> = ({
         return {
           '申报编号': log.id,
           '业务月份': resolveLogBusinessMonth(log),
-          '业务日期': resolveLogBusinessDate(log),
+          '提报日期': resolveLogBusinessDate(log),
           '提报时间': formatSubmissionTime(log.timestamp),
           '矿山编号': log.miningId,
           '采集主体': users.find(u => u.id === log.recordedCollectorId)?.name || log.recordedCollectorId,
@@ -804,7 +804,7 @@ const Auditing: React.FC<AuditingProps> = ({
               data={summaryData.categoryStats}
             />
             <PieChartCard
-              title="角色确权贡献分布 (净值)"
+              title="角色确权贡献分布 (收产包)"
               icon="👥"
               iconBgColor="bg-purple-50"
               iconTextColor="text-purple-600"
@@ -963,7 +963,7 @@ const Auditing: React.FC<AuditingProps> = ({
                     d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
                   />
                 </svg>
-                导出 EXCEL
+                导出
               </button>
               <div className="hidden sm:flex items-center space-x-2">
                 <span className="w-2 h-2 rounded-full bg-blue-500"></span>
@@ -1014,7 +1014,7 @@ const Auditing: React.FC<AuditingProps> = ({
                         <td className="px-4 py-6">
                           <span className="font-mono text-[10px] font-black text-slate-300 block mb-1 group-hover:text-rose-400">#{log.id}</span>
                           <span className="text-[9px] font-bold text-slate-500 block">
-                            业务: {resolveLogBusinessDate(log)} ({resolveLogBusinessMonth(log)})
+                            提报: {resolveLogBusinessDate(log)} ({resolveLogBusinessMonth(log)})
                           </span>
                           <span className="text-[8px] text-slate-400 block">
                             提报: {formatSubmissionDate(log.timestamp)}

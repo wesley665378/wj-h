@@ -176,7 +176,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
       '类别': l.category,
       '类型/项目': l.type,
       '矿山编号': l.miningId,
-      '金额/净值': Math.round(l.calculatedNetValue || l.amount || 0),
+      '收产包': Math.round(l.calculatedNetValue || l.amount || 0),
       '状态': l.status
     }));
 
@@ -187,7 +187,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
     const modeStr = startDate && endDate ? `${startDate}_至_${endDate}` : (selectedMonth || effectiveMonth);
     const todayStr = getLocalDateString();
     XLSX.writeFile(workbook, `我的账户流水明细_${currentUser.name}_${modeStr}_导出${todayStr}.xlsx`);
-    toast.success('账户流水明细表格导出成功');
+    toast.success('已导出');
   };
 
   return (
@@ -196,15 +196,11 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-2xl">👤</span>
-            <h1 className="text-xl font-black text-slate-900 tracking-tight">我的帐户</h1>
+            <h1 className="text-xl font-black text-slate-900 tracking-tight">我的账户</h1>
             <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-xs font-mono font-bold">
               {currentUser.name} | {currentUser.category || currentUser.role}
             </Badge>
           </div>
-          <p className="text-xs text-slate-500 mt-1">
-            查看本人价值包汇总与流水明细（<span className="font-bold text-amber-600">结余与分配按月核算</span>）
-          </p>
         </div>
 
         {/* 月度固定成本隐私开关 */}
@@ -212,19 +208,10 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
           <button
             onClick={toggleCostVisible}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all"
-            title={isCostVisible ? "点击隐藏月度固定成本数据" : "点击显示月度固定成本数据"}
           >
             {isCostVisible ? <EyeOff className="w-4 h-4 text-slate-500" /> : <Eye className="w-4 h-4 text-slate-500" />}
-            <span>{isCostVisible ? "隐藏月度固定成本" : "显示月度固定成本"}</span>
+            <span>{isCostVisible ? "隐藏成本" : "显示成本"}</span>
           </button>
-        </div>
-      </div>
-
-      {/* 说明横条 */}
-      <div className="bg-amber-50/80 border border-amber-200/80 p-3.5 rounded-2xl flex items-center justify-between gap-2 text-xs text-amber-900 font-medium">
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md text-[11px]">核算说明</span>
-          <span>流水与包汇总按所选业务日区间过滤；<strong className="underline decoration-amber-400 font-black">结余与分配按月核算</strong>，固定按 {effectiveMonth} 月度指标展示，不跨月累加。</span>
         </div>
       </div>
 
@@ -238,9 +225,6 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               {formatAmount(collectionPackage)}
             </h3>
           </div>
-          <p className="text-[10px] text-blue-500 mt-3 font-medium">
-            {startDate && endDate ? `区间净值口径 (${startDate}~${endDate})` : `当月净值口径 (${selectedMonth || effectiveMonth})`}
-          </p>
         </div>
 
         {/* 产兑包 */}
@@ -251,9 +235,6 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               {formatAmount(productionPackage)}
             </h3>
           </div>
-          <p className="text-[10px] text-emerald-500 mt-3 font-medium">
-            {startDate && endDate ? `区间净值口径 (${startDate}~${endDate})` : `当月净值口径 (${selectedMonth || effectiveMonth})`}
-          </p>
         </div>
 
         {/* 收产包 */}
@@ -264,9 +245,6 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               {formatAmount(combinedPackage)}
             </h3>
           </div>
-          <p className="text-[10px] text-purple-500 mt-3 font-medium">
-            收款包与产兑包综合汇总
-          </p>
         </div>
 
         {/* 当月结余 (按月) */}
@@ -277,7 +255,6 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               {isCostVisible ? formatAmount(currentBalance) : '****'}
             </h3>
           </div>
-          <p className="text-[10px] text-amber-600/80 mt-3 font-medium">按月核算 (不受跨月时段影响)</p>
         </div>
 
         {/* 奖金额度 (按月) */}
@@ -288,7 +265,6 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               {isCostVisible ? formatAmount(bonusQuota) : '****'}
             </h3>
           </div>
-          <p className="text-[10px] text-sky-500 mt-3 font-medium">按月核算 (可分配额度)</p>
         </div>
 
         {/* 历史欠产 (按月) */}
@@ -299,7 +275,6 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               {isCostVisible ? formatAmount(historicalDebt) : '****'}
             </h3>
           </div>
-          <p className="text-[10px] text-rose-500 mt-3 font-medium">按月核算 (负数显示)</p>
         </div>
       </div>
 
@@ -379,12 +354,12 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95"
             >
               <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-              <span>导出明细表格</span>
+              <span>导出</span>
             </button>
           </div>
         </div>
 
-        {/* 流水明细表格：业务日期、提交日期、类型、矿山、金额、状态、单号 */}
+        {/* 流水明细表格：业务日期、提交日期、类型、矿山、收产包、状态、单号 */}
         <div className="overflow-x-auto custom-scrollbar border border-slate-100 rounded-2xl">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -393,7 +368,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
                 <th className="p-4">提交日期</th>
                 <th className="p-4">类型</th>
                 <th className="p-4">矿山</th>
-                <th className="p-4 text-right">金额</th>
+                <th className="p-4 text-right">收产包</th>
                 <th className="p-4 text-center">状态</th>
                 <th className="p-4">单号</th>
               </tr>
@@ -436,9 +411,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               ) : (
                 <tr>
                   <td colSpan={7} className="text-center py-16 text-slate-400">
-                    <p className="text-sm font-bold">
-                      暂无符合当前{startDate && endDate ? `业务日区间 (${startDate}~${endDate})` : `业务月 (${selectedMonth || effectiveMonth})`} 及筛选条件的流水明细
-                    </p>
+                    <p className="text-sm font-bold">暂无流水</p>
                   </td>
                 </tr>
               )}

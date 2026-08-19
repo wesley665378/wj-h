@@ -343,3 +343,30 @@ export interface CenterDistribution {
   centerSurplus: number; // 40%
   dividendAmount: number; // Surplus * 50%
 }
+
+export interface MeetingSample {
+  id: string; // e.g. "month:2026-08" or "quarter:2026-Q3"
+  periodType: 'month' | 'quarter';
+  periodKey: string; // "2026-08" or "2026-Q3"
+  frozenAt: number; // 时间戳
+  frozenByUserId: string; // 工号
+  frozenByName: string; // 姓名
+  label: string; // e.g. "2026年8月 会务留样" / "2026年Q3 会务留样"
+  fixedNotice?: string; // "会务留样 · 仅对生成时刻数据负责"
+  checksum?: string; // 校验摘要
+  kpis: {
+    totalRevenueAndValuePackage: number; // 收产包 (整数)
+    totalRevenuePackage: number; // 收款包 (整数)
+    totalValuePackage: number; // 产兑包 (整数)
+    rigidSalaryPackage?: number; // 刚性保底/工资包 (整数)
+    operatingLoss?: number; // 运营损耗 (整数)
+    totalBonusPool?: number; // 奖金池 (整数)
+    platformCoordinationPool?: number; // 统筹留用池 (整数)
+    dividendPool?: number; // 分红池纯结余 (整数)
+    reservoirInflow?: number; // 蓄水入库 (整数)
+    globalWeightedPurity?: number; // 加权含金量 %
+    totalRigidExpenses?: number; // 刚性保底开支
+    logCount?: number; // 该期流水条数
+    [key: string]: any;
+  };
+}

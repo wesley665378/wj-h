@@ -224,7 +224,7 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
                         </td>
                       </tr>
 
-                      {/* 第二行: 收款背书在途 */}
+                      {/* 第二行: 已确权+待确权 */}
                       <tr className={`${isEven ? 'bg-white' : 'bg-slate-50/30'} border-b border-slate-200/60 hover:bg-amber-50/20 transition-colors`}>
                         {/* 第二行口径 */}
                         <td className="py-3 px-3 text-center">
@@ -234,30 +234,50 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
                         </td>
 
                         {/* 收款 */}
-                        <td className="py-3 px-3 text-right text-slate-400 font-mono">—</td>
+                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-700">
+                          {formatAmount(row2.revenue)}
+                        </td>
 
                         {/* 产值 */}
-                        <td className="py-3 px-3 text-right text-slate-400 font-mono">—</td>
+                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-700">
+                          {formatAmount(row2.outputValue)}
+                        </td>
 
                         {/* 收款包 */}
-                        <td className="py-3 px-3 text-right text-slate-400 font-mono">—</td>
+                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-700">
+                          {formatAmount(row2.revenuePackage)}
+                        </td>
 
-                        {/* 产兑包 (仅待确权产兑包) */}
+                        {/* 产兑包 */}
                         <td className="py-3 px-3 text-right font-mono font-bold text-amber-600">
                           {formatAmount(row2.valuePackage)}
                         </td>
 
                         {/* 收产包 */}
-                        <td className="py-3 px-3 text-right text-slate-400 font-mono">—</td>
+                        <td className="py-3 px-3 text-right font-mono font-black text-slate-900 bg-amber-50/10">
+                          {formatAmount(row2.incomeValuePackage)}
+                        </td>
 
-                        {/* 总成本 */}
-                        <td className="py-3 px-3 text-right text-slate-400 font-mono">—</td>
+                        {/* 总成本 (受成本隐私保护) */}
+                        <td className="py-3 px-3 text-right font-mono font-bold text-rose-600">
+                          {formatAmount(row2.totalCost, true)}
+                        </td>
 
                         {/* 月度盈亏 */}
-                        <td className="py-3 px-3 text-right text-slate-400 font-mono">—</td>
+                        <td className="py-3 px-3 text-right font-mono font-black text-sm">
+                          <span className={row2.monthlyProfit !== null && row2.monthlyProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                            {row2.monthlyProfit !== null && row2.monthlyProfit > 0 ? '+' : ''}
+                            {formatAmount(row2.monthlyProfit)}
+                          </span>
+                        </td>
 
                         {/* 年度盈亏 */}
-                        <td className="py-3 px-3 text-right text-slate-400 font-mono">—</td>
+                        <td className="py-3 px-3 text-right font-mono font-black text-sm">
+                          <span className={row2.yearlyProfit !== null && row2.yearlyProfit >= 0 ? 'text-indigo-600' : 'text-rose-600'}>
+                            {row2.yearlyProfit !== null && row2.yearlyProfit > 0 ? '+' : ''}
+                            {formatAmount(row2.yearlyProfit)}
+                          </span>
+                        </td>
                       </tr>
                     </React.Fragment>
                   );

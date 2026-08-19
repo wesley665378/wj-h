@@ -161,7 +161,7 @@ export function computePersonEvaluation(
 }
 
 /**
- * 汇总计算所有在职专家的综合评价（排除管理员与产值代录，与分配专家口径一致）
+ * 汇总计算所有在职采集主体的综合评价（包含款专与产专，仅排除管理员、NPC与产值代录）
  */
 export function computeAllEvaluations(
   users: User[],
@@ -169,28 +169,34 @@ export function computeAllEvaluations(
   resources: MiningResource[],
   filterMonth: string
 ): EvaluationResult[] {
-  // 仅保留类别含款专或产专（含经管员高×专）的在职用户
-  // 排除：系统/水库/经营单元管理员（category含「管理员」或 Role.Admin/Rank纯管理）、NPC、Role.ValueCollector 及 category/姓名含「产值代录」
+  // 正确过滤（在职采集主体）：
+  // 保留：
+  // - userStatus 不是 inactive
+  // - 职级 category 含「款专」或「产专」（含：初/中/高款专、初/中/高产专、经管员高款专、经管员高产专）
+  // 排除：
+  // - NPC、Role.npcxie、category === 'NPC'
+  // - Role.Admin、category 含「管理员」（系统管理员/水库管理员/经营单元管理员等）
+  // - category 或姓名含「产值代录」（只排除代录，不要用 Role.ValueCollector 当排除条件）
+  // 不要再写：role === Role.ValueCollector 就 return false。
   const activeUsers = users.filter(u => {
     // 1. 排除离职人员
     if (u.userStatus === 'inactive') return false;
 
     const cat = u.category || '';
     const name = u.name || '';
+    const role = u.role;
 
     // 2. 排除 NPC
-    if (cat === 'NPC' || u.role === Role.NPC || u.role === Role.npcxie) return false;
+    if (cat === 'NPC' || cat.includes('NPC') || role === Role.NPC || role === Role.npcxie || name === 'NPC' || name === 'npcxie') return false;
 
-    // 3. 排除 Role.Admin 与 Role.ValueCollector
-    if (u.role === Role.Admin || u.role === Role.ValueCollector) return false;
+    // 3. 排除 Role.Admin 与 category 含“管理员”
+    if (role === Role.Admin || cat.includes('管理员')) return false;
 
-    // 4. 排除 category 含“管理员”
-    if (cat.includes('管理员')) return false;
-
-    // 5. 排除 category 或姓名含“产值代录”
+    // 4. 排除 category 或姓名含“产值代录”
     if (cat.includes('产值代录') || name.includes('产值代录')) return false;
 
-    // 6. 仅保留 category 包含“款专”或“产专”的在职专家（例如：初款专、中款专、高款专、经管员高款专、初产专、中产专、高产专、经管员高产专）
+    // 5. 必须为在职采集主体：category 包含“款专”或“产专”
+    // （例如：初款专、中款专、高款专、经管员高款专、初产专、中产专、高产专、经管员高产专）
     const isExpert = cat.includes('款专') || cat.includes('产专');
     if (!isExpert) return false;
 

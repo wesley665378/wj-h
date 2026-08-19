@@ -198,7 +198,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   }, [users, allUsers]);
 
   const availableMiningResources = useMemo(() => {
-    if (isAdmin || isNpcxie) return resources;
+    if (isAdmin) return resources;
     const isAssigned = (assigned: string | undefined, center: string) => {
       if (!assigned) return false;
       return assigned.split(',').map(c => c.trim()).includes(center);
@@ -208,7 +208,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       isAssigned(r.assignedToValue, currentUser.center) || 
       isAssigned(r.assignedTo, currentUser.center)
     );
-  }, [resources, currentUser.center, isAdmin, isNpcxie]);
+  }, [resources, currentUser.center, isAdmin]);
 
   const pendingTransactions = useMemo(() => {
     return transactions.filter(t => {
@@ -224,15 +224,12 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
         if (t.senderId === currentUser.id) return true;
       }
 
-      // 3. npcxie 审核阶段
-      if (t.status === TransactionStatus.PendingNpcxie && isNpcxie) return true;
-
-      // 4. 管理员终审阶段
+      // 3. 管理员终审阶段
       if (t.status === TransactionStatus.PendingAdmin && isAdmin) return true;
 
       return false;
     });
-  }, [transactions, currentUser.id, isNpcxie, isAdmin, users, currentUser.center]);
+  }, [transactions, currentUser.id, isAdmin, users, currentUser.center]);
 
   const selectedResource = useMemo(() => {
     return resources.find(r => r.id === miningId);
@@ -315,52 +312,59 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       }
     }
 
-    const newTxs: InternalTransaction[] = [];
-    receiverIds.forEach((rid, index) => {
-      const newTx: InternalTransaction = {
-        id: `TX${(Date.now() + index).toString().slice(-6)}`,
-        type,
-        senderId: currentUser.id,
-        receiverId: rid,
-        miningId: type === TransactionType.Resource ? miningId : undefined,
-        amount: amount,
-        unitPrice: unitPrice > 0 ? unitPrice : undefined,
-        revenueAmount: type === TransactionType.Resource ? ((sharedAllocations[rid]?.confirmedRevenue || 0) + (sharedAllocations[rid]?.unconfirmedRevenue || 0)) : undefined,
-        valueAmount: type === TransactionType.Resource ? ((sharedAllocations[rid]?.pendingValue || 0) + (sharedAllocations[rid]?.confirmedValue || 0) + (sharedAllocations[rid]?.unconfirmedValue || 0)) : undefined,
-        confirmedRevenue: sharedAllocations[rid]?.confirmedRevenue,
-        unconfirmedRevenue: sharedAllocations[rid]?.unconfirmedRevenue,
-        pendingValue: sharedAllocations[rid]?.pendingValue,
-        confirmedValue: sharedAllocations[rid]?.confirmedValue,
-        unconfirmedValue: sharedAllocations[rid]?.unconfirmedValue,
-        description: description,
-        timestamp: Date.now(),
-        status: TransactionStatus.PendingTarget,
-        valueQuadrants: type === TransactionType.Resource ? valueQuadrants : undefined,
-        revenueQuadrants: type === TransactionType.Resource ? revenueQuadrants : undefined,
-        month: selectedMonth,
-        businessDate: selectedDate
-      };
-      newTxs.push(newTx);
-      onSubmitTransaction(newTx);
-    });
+    const receiverNames = receiverIds.map(rid => users.find(u => u.id === rid)?.center || users.find(u => u.id === rid)?.name || rid).join(', ');
 
-    toast.success('交易指令已发起，等待接收方验证。');
+    showConfirm(
+      `确定发起内部交易指令？\n\n【交易类别】${type}\n【接收节点】${receiverNames}${miningId ? `\n【关联矿山】${miningId}` : ''}\n【业务月份】${selectedMonth}`,
+      async () => {
+        const newTxs: InternalTransaction[] = [];
+        receiverIds.forEach((rid, index) => {
+          const newTx: InternalTransaction = {
+            id: `TX${(Date.now() + index).toString().slice(-6)}`,
+            type,
+            senderId: currentUser.id,
+            receiverId: rid,
+            miningId: type === TransactionType.Resource ? miningId : undefined,
+            amount: amount,
+            unitPrice: unitPrice > 0 ? unitPrice : undefined,
+            revenueAmount: type === TransactionType.Resource ? ((sharedAllocations[rid]?.confirmedRevenue || 0) + (sharedAllocations[rid]?.unconfirmedRevenue || 0)) : undefined,
+            valueAmount: type === TransactionType.Resource ? ((sharedAllocations[rid]?.pendingValue || 0) + (sharedAllocations[rid]?.confirmedValue || 0) + (sharedAllocations[rid]?.unconfirmedValue || 0)) : undefined,
+            confirmedRevenue: sharedAllocations[rid]?.confirmedRevenue,
+            unconfirmedRevenue: sharedAllocations[rid]?.unconfirmedRevenue,
+            pendingValue: sharedAllocations[rid]?.pendingValue,
+            confirmedValue: sharedAllocations[rid]?.confirmedValue,
+            unconfirmedValue: sharedAllocations[rid]?.unconfirmedValue,
+            description: description,
+            timestamp: Date.now(),
+            status: TransactionStatus.PendingTarget,
+            valueQuadrants: type === TransactionType.Resource ? valueQuadrants : undefined,
+            revenueQuadrants: type === TransactionType.Resource ? revenueQuadrants : undefined,
+            month: selectedMonth,
+            businessDate: selectedDate
+          };
+          newTxs.push(newTx);
+          onSubmitTransaction(newTx);
+        });
 
-    setReceiverIds([]);
-    setMiningId('');
-    setAmount(0);
-    setUnitPrice(0);
-    setRevenueAmount(0);
-    setModAmount(0);
-    setSharedAllocations({});
-    setValueQuadrants({ q1: 0, q2: 0, q3: 0, q4: 0 });
-    setRevenueQuadrants({ q1: 0, q2: 0, q3: 0 });
-    setDescription('');
+        showAlert('交易指令已发起，等待接收方验证。');
+
+        setReceiverIds([]);
+        setMiningId('');
+        setAmount(0);
+        setUnitPrice(0);
+        setRevenueAmount(0);
+        setModAmount(0);
+        setSharedAllocations({});
+        setValueQuadrants({ q1: 0, q2: 0, q3: 0, q4: 0 });
+        setRevenueQuadrants({ q1: 0, q2: 0, q3: 0 });
+        setDescription('');
+      }
+    );
   };
 
   const filteredTransactions = useMemo(() => {
     let list = transactions;
-    if (!(isAdmin || isNpcxie)) {
+    if (!isAdmin) {
       list = list.filter(t => {
         const sender = users.find(u => u.id === t.senderId);
         const receiver = users.find(u => u.id === t.receiverId);
@@ -375,7 +379,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     }
     
     return list;
-  }, [transactions, currentUser.center, isAdmin, isNpcxie, users, filterMonth, filterStartDate, filterEndDate]);
+  }, [transactions, currentUser.center, isAdmin, users, filterMonth, filterStartDate, filterEndDate]);
 
   const filteredExchangeTransactions = useMemo(() => {
     return transactions.filter(t => {
@@ -388,10 +392,10 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       const matchesMonth = matchesRange ? true : (!filterMonth || t.month === filterMonth || resolveLogBusinessMonth(t) === filterMonth);
       const matchesDate = (!filterDateRange.start || t.timestamp >= new Date(filterDateRange.start).getTime()) &&
                           (!filterDateRange.end || t.timestamp <= new Date(filterDateRange.end).getTime());
-      const isRelated = isAdmin || isNpcxie || t.senderId === currentUser.id || t.receiverId === currentUser.id;
+      const isRelated = isAdmin || t.senderId === currentUser.id || t.receiverId === currentUser.id;
       return matchesMiningId && matchesType && matchesMonth && matchesRange && matchesDate && isRelated && t.status === TransactionStatus.Verified;
     }).sort((a, b) => b.timestamp - a.timestamp);
-  }, [transactions, filterMiningId, filterType, filterDateRange, currentUser.id, isAdmin, isNpcxie, filterMonth, filterStartDate, filterEndDate]);
+  }, [transactions, filterMiningId, filterType, filterDateRange, currentUser.id, isAdmin, filterMonth, filterStartDate, filterEndDate]);
 
   const handleAudit = async (tx: InternalTransaction, action: 'approve' | 'reject' | 'return' | 'modify' | 'withdraw' | 'agree') => {
     let nextStatus = tx.status;
@@ -419,6 +423,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
         onSubmitTransaction(updatedTx);
         setModifyingTx(null);
         setShowConfirmModal({ show: false });
+        showAlert(`交易 [${modifyingTx.id}] 已修改并重新提交发起方验证！`);
         return;
       }
     }
@@ -481,7 +486,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     }
 
     onAuditTransaction(tx.id, nextStatus);
-    toast.success(`交易 [${tx.id}] 状态更新成功！`);
+    showAlert(`交易 [${tx.id}] 状态更新成功！`);
     setShowConfirmModal({ show: false });
   };
 
@@ -490,8 +495,10 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       const tx = transactions.find(t => t.id === id);
       if (tx) await handleAudit(tx, action);
     }
+    const count = selectedTxIds.length;
     setSelectedTxIds([]);
     setShowConfirmModal({ show: false });
+    showAlert(`批量操作完成！共处理 ${count} 条交易指令。`);
   };
 
   const startModify = (tx: InternalTransaction) => {
@@ -552,6 +559,20 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
 
     return { typeData, statusData };
   }, [transactions]);
+
+  if (isNpcxie) {
+    return (
+      <div className="w-full flex flex-col items-center justify-center p-16 bg-white rounded-3xl border border-slate-200 shadow-sm text-center space-y-4 animate-in fade-in duration-500">
+        <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-2xl flex items-center justify-center text-3xl font-bold">
+          🔒
+        </div>
+        <h3 className="text-base font-black text-slate-800 tracking-tight">无内部交易访问与操作权限</h3>
+        <p className="text-xs text-slate-500 max-w-md leading-relaxed">
+          根据系统权责规范，当前智能体账户 (NPCXIE) 的内部交易发起、审核与流转权限已取消。如需处理内部交易，请使用对应经营单元合伙人或系统管理账户。
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full space-y-8 animate-in fade-in duration-500 pb-20 text-[14px]">
@@ -616,7 +637,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
             <button
               onClick={async () => {
                 await persistWorkspaceNow();
-                toast.success('工作区数据已保存');
+                showAlert('工作区数据已保存');
               }}
               className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-[10px] font-black tracking-widest shadow-lg active:scale-95 transition-all flex items-center"
             >
@@ -1351,8 +1372,8 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       <StandardModal
         isOpen={!!showConfirmModal.show}
         onClose={() => setShowConfirmModal({ show: false })}
-        title={showConfirmModal.title || '确认操作'}
-        subtitle="TRANSACTION CONFIRMATION"
+        title="城市守护者"
+        subtitle="内部交易状态流转与审核确权"
         maxWidthClassName="max-w-md"
       >
         <div className="p-6 text-center bg-white">

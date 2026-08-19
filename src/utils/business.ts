@@ -255,7 +255,7 @@ export const RANK_CONFIG: Record<string, { cluster: PermissionCluster; salaryTyp
   'NPC': { 
     cluster: PermissionCluster.Management, 
     salaryType: 'NPC工资包',
-    defaultPermissions: ['kanban', 'resources', 'audit', 'transactions', 'personnel', 'evaluation', 'distribution', 'reservoir', 'account']
+    defaultPermissions: ['kanban', 'resources', 'audit', 'personnel', 'evaluation', 'distribution', 'reservoir', 'account']
   },
   '系统管理员': { 
     cluster: PermissionCluster.System, 
@@ -270,7 +270,7 @@ export const checkUserPermission = (user: User, menuId: string): boolean => {
   if (isAdmin) return true;
 
   const isNpcxie = user.role === Role.npcxie || user.category === 'NPC';
-  if (isNpcxie && menuId === 'personnel') return false;
+  if (isNpcxie && (menuId === 'personnel' || menuId === 'transactions')) return false;
 
   if (user.permissions && user.permissions.length > 0) {
     return user.permissions.includes(menuId);

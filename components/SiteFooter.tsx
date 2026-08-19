@@ -12,34 +12,40 @@ export const SiteFooter: React.FC<SiteFooterProps> = ({
 }) => {
   return (
     <footer
-      className={`absolute bottom-4 left-0 right-0 flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4 text-[10px] text-slate-500 z-10 px-4 text-center pointer-events-auto ${className}`}
+      className={`w-full py-4 flex flex-wrap items-center justify-center gap-x-2 sm:gap-x-3 gap-y-1 text-[11px] text-slate-400 text-center pointer-events-auto ${className}`}
     >
       <span>{SITE_META.copyright}</span>
-      {SITE_META.icpNumber && (
-        <span className="hidden sm:inline text-slate-700">|</span>
-      )}
-      {SITE_META.icpNumber && (
-        <span className="font-mono text-slate-500">{SITE_META.icpNumber}</span>
-      )}
+      <span className="text-slate-600">|</span>
+      <a
+        href={SITE_META.icpLink}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-slate-400 hover:text-blue-400 transition-colors font-mono underline decoration-slate-600 underline-offset-2"
+        title="工业和信息化部政务服务平台 ICP/IP 地址/域名信息备案管理系统"
+      >
+        {SITE_META.icpNumber}
+      </a>
       {onOpenLegal && (
-        <div className="flex items-center gap-2 text-slate-400">
-          <span className="text-slate-700">|</span>
-          <button
-            type="button"
-            onClick={() => onOpenLegal('agreement')}
-            className="text-slate-400 hover:text-blue-400 transition-colors underline decoration-slate-700 underline-offset-2"
-          >
-            {SITE_META.userAgreement.title}
-          </button>
-          <span className="text-slate-700">|</span>
-          <button
-            type="button"
-            onClick={() => onOpenLegal('privacy')}
-            className="text-slate-400 hover:text-blue-400 transition-colors underline decoration-slate-700 underline-offset-2"
-          >
-            {SITE_META.privacyPolicy.title}
-          </button>
-        </div>
+        <>
+          <span className="text-slate-600">|</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onOpenLegal('privacy')}
+              className="text-slate-400 hover:text-blue-400 transition-colors underline decoration-slate-600 underline-offset-2 cursor-pointer"
+            >
+              {SITE_META.privacyPolicy.title}
+            </button>
+            <span className="text-slate-600">|</span>
+            <button
+              type="button"
+              onClick={() => onOpenLegal('agreement')}
+              className="text-slate-400 hover:text-blue-400 transition-colors underline decoration-slate-600 underline-offset-2 cursor-pointer"
+            >
+              {SITE_META.userAgreement.title}
+            </button>
+          </div>
+        </>
       )}
     </footer>
   );

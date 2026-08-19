@@ -27,7 +27,10 @@ export const LegalOverlay: React.FC<LegalOverlayProps> = ({
     activeTab === 'agreement' ? SITE_META.userAgreement : SITE_META.privacyPolicy;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in"
+      onClick={onClose}
+    >
       <div
         className="relative w-full max-w-2xl max-h-[85vh] bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl flex flex-col overflow-hidden text-slate-200"
         onClick={(e) => e.stopPropagation()}
@@ -40,7 +43,7 @@ export const LegalOverlay: React.FC<LegalOverlayProps> = ({
             </div>
             <div>
               <h3 className="text-base font-black text-white tracking-wide">
-                法律条款与隐私协议
+                城市守护者
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
                 {SITE_META.companyName}
@@ -49,7 +52,7 @@ export const LegalOverlay: React.FC<LegalOverlayProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-xl transition-all"
+            className="p-2 text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-800 rounded-xl transition-all cursor-pointer"
             title="关闭"
           >
             <X size={18} />
@@ -60,20 +63,8 @@ export const LegalOverlay: React.FC<LegalOverlayProps> = ({
         <div className="flex border-b border-slate-800 bg-slate-950/40 p-1.5 gap-1 mx-6 mt-4 rounded-xl">
           <button
             type="button"
-            onClick={() => setActiveTab('agreement')}
-            className={`flex-1 py-2 px-4 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-              activeTab === 'agreement'
-                ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
-            }`}
-          >
-            <FileText size={14} />
-            {SITE_META.userAgreement.title}
-          </button>
-          <button
-            type="button"
             onClick={() => setActiveTab('privacy')}
-            className={`flex-1 py-2 px-4 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+            className={`flex-1 py-2 px-4 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
               activeTab === 'privacy'
                 ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
@@ -81,6 +72,18 @@ export const LegalOverlay: React.FC<LegalOverlayProps> = ({
           >
             <ShieldCheck size={14} />
             {SITE_META.privacyPolicy.title}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('agreement')}
+            className={`flex-1 py-2 px-4 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+              activeTab === 'agreement'
+                ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+            }`}
+          >
+            <FileText size={14} />
+            {SITE_META.userAgreement.title}
           </button>
         </div>
 
@@ -97,7 +100,7 @@ export const LegalOverlay: React.FC<LegalOverlayProps> = ({
               <h4 className="font-bold text-slate-100 text-sm tracking-tight">
                 {section.heading}
               </h4>
-              <p className="text-slate-400 font-normal leading-normal">
+              <p className="text-slate-400 font-normal leading-normal whitespace-pre-line">
                 {section.content}
               </p>
             </div>
@@ -112,7 +115,7 @@ export const LegalOverlay: React.FC<LegalOverlayProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition-all"
+            className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer"
           >
             已知晓并关闭
           </button>

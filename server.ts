@@ -121,6 +121,7 @@ let MOCK_SNAPSHOTS_DB: any[] = [];
 let MOCK_ACCEPTANCE_DB: any[] = [];
 let MOCK_JZFP_DB: any[] = [];
 let MOCK_RDQ_DB: any[] = [];
+let MOCK_MEETING_SAMPLES_DB: any[] = [];
 let MOCK_RESOURCES_DB: any[] = [
   { 
     id: 'KS001', 
@@ -241,7 +242,8 @@ async function startServer() {
             [miningResources],
             [snapshots],
             [cdtzRows],
-            [rdqRows]
+            [rdqRows],
+            [meetingSamplesRows]
           ] = await Promise.all([
             db.execute('SELECT * FROM users'),
             db.execute('SELECT * FROM logs'),
@@ -249,8 +251,16 @@ async function startServer() {
             db.execute('SELECT * FROM mining_resources').catch(() => [[]]),
             db.execute('SELECT * FROM value_efficiency_snapshots').catch(() => [[]]),
             db.execute('SELECT * FROM cdtz').catch(() => [[]]),
-            db.execute('SELECT * FROM rdq').catch(() => [[]])
+            db.execute('SELECT * FROM rdq').catch(() => [[]]),
+            db.execute('SELECT * FROM meeting_samples').catch(() => [[]])
           ]);
+          const parsedMeetingSamples = meetingSamplesRows && meetingSamplesRows.length > 0
+            ? meetingSamplesRows.map((r: any) => ({
+                ...r,
+                kpis: typeof r.kpis === 'string' ? JSON.parse(r.kpis) : r.kpis
+              }))
+            : MOCK_MEETING_SAMPLES_DB;
+
           return res.json({ 
             managedUsers: users, 
             logs, 
@@ -259,7 +269,8 @@ async function startServer() {
             valueEfficiencySnapshots: snapshots || [],
             acceptanceRecords: cdtzRows && cdtzRows.length > 0 ? cdtzRows : MOCK_ACCEPTANCE_DB,
             circuitBreakers: rdqRows && rdqRows.length > 0 ? rdqRows : MOCK_RDQ_DB,
-            rdq: rdqRows && rdqRows.length > 0 ? rdqRows : MOCK_RDQ_DB
+            rdq: rdqRows && rdqRows.length > 0 ? rdqRows : MOCK_RDQ_DB,
+            meetingSamples: parsedMeetingSamples
           });
         } catch (queryErr) {
           const err = queryErr as any;
@@ -275,10 +286,10 @@ async function startServer() {
           // Don't throw, just fall through to mock
         }
       }
-      res.json({ managedUsers: MOCK_USERS_DB, logs: MOCK_LOGS_DB, transactions: MOCK_TRANSACTIONS_DB, miningResources: MOCK_RESOURCES_DB, valueEfficiencySnapshots: MOCK_SNAPSHOTS_DB, acceptanceRecords: MOCK_ACCEPTANCE_DB, circuitBreakers: MOCK_RDQ_DB, rdq: MOCK_RDQ_DB });
+      res.json({ managedUsers: MOCK_USERS_DB, logs: MOCK_LOGS_DB, transactions: MOCK_TRANSACTIONS_DB, miningResources: MOCK_RESOURCES_DB, valueEfficiencySnapshots: MOCK_SNAPSHOTS_DB, acceptanceRecords: MOCK_ACCEPTANCE_DB, circuitBreakers: MOCK_RDQ_DB, rdq: MOCK_RDQ_DB, meetingSamples: MOCK_MEETING_SAMPLES_DB });
     } catch (error) {
       console.error('Workspace recovery failure:', error);
-      res.json({ managedUsers: MOCK_USERS_DB, logs: MOCK_LOGS_DB, transactions: MOCK_TRANSACTIONS_DB, miningResources: MOCK_RESOURCES_DB, valueEfficiencySnapshots: MOCK_SNAPSHOTS_DB, acceptanceRecords: MOCK_ACCEPTANCE_DB, circuitBreakers: MOCK_RDQ_DB, rdq: MOCK_RDQ_DB });
+      res.json({ managedUsers: MOCK_USERS_DB, logs: MOCK_LOGS_DB, transactions: MOCK_TRANSACTIONS_DB, miningResources: MOCK_RESOURCES_DB, valueEfficiencySnapshots: MOCK_SNAPSHOTS_DB, acceptanceRecords: MOCK_ACCEPTANCE_DB, circuitBreakers: MOCK_RDQ_DB, rdq: MOCK_RDQ_DB, meetingSamples: MOCK_MEETING_SAMPLES_DB });
     }
   });
 
@@ -387,6 +398,21 @@ async function startServer() {
             }
           }
 
+          // Sync Meeting Samples
+          const samples = req.body.meetingSamples;
+          if (samples && Array.isArray(samples)) {
+            for (const s of samples) {
+              const kpisStr = typeof s.kpis === 'object' ? JSON.stringify(s.kpis) : (s.kpis || '{}');
+              await connection.execute(
+                'INSERT INTO meeting_samples (id, periodType, periodKey, frozenAt, frozenByUserId, frozenByName, label, fixedNotice, checksum, kpis, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE periodType=?, periodKey=?, frozenAt=?, frozenByUserId=?, frozenByName=?, label=?, fixedNotice=?, checksum=?, kpis=?, timestamp=?',
+                [
+                  s.id, s.periodType, s.periodKey, s.frozenAt || Date.now(), s.frozenByUserId || '', s.frozenByName || '', s.label || '', s.fixedNotice || '', s.checksum || '', kpisStr, s.timestamp || Date.now(),
+                  s.periodType, s.periodKey, s.frozenAt || Date.now(), s.frozenByUserId || '', s.frozenByName || '', s.label || '', s.fixedNotice || '', s.checksum || '', kpisStr, s.timestamp || Date.now()
+                ]
+              ).catch(() => {});
+            }
+          }
+
           await connection.commit();
         } catch (syncErr) {
           if (connection) await connection.rollback().catch(() => {});
@@ -415,6 +441,16 @@ async function startServer() {
       if (acceptanceRecords) MOCK_ACCEPTANCE_DB = acceptanceRecords;
       if (req.body.jzfp) MOCK_JZFP_DB = req.body.jzfp;
       if (req.body.circuitBreakers || req.body.rdq) MOCK_RDQ_DB = req.body.circuitBreakers || req.body.rdq;
+      if (req.body.meetingSamples && Array.isArray(req.body.meetingSamples)) {
+        for (const s of req.body.meetingSamples) {
+          const idx = MOCK_MEETING_SAMPLES_DB.findIndex(item => item.id === s.id);
+          if (idx !== -1) {
+            MOCK_MEETING_SAMPLES_DB[idx] = { ...s };
+          } else {
+            MOCK_MEETING_SAMPLES_DB.push({ ...s });
+          }
+        }
+      }
       
       res.json({ success: true });
     } catch (error) {
@@ -1111,6 +1147,118 @@ async function startServer() {
     }
   });
 
+  // 5. Meeting Samples API Endpoints
+  app.get("/api/meeting-samples", async (req, res) => {
+    try {
+      const db = await getPool();
+      if (db) {
+        try {
+          const [rows]: any = await db.execute('SELECT * FROM meeting_samples ORDER BY frozenAt DESC');
+          const samples = (rows || []).map((r: any) => ({
+            ...r,
+            kpis: typeof r.kpis === 'string' ? JSON.parse(r.kpis) : r.kpis
+          }));
+          return res.json({ samples });
+        } catch (dbErr) {
+          console.warn("DB query meeting_samples failed, returning mock:", (dbErr as Error).message);
+        }
+      }
+      res.json({ samples: MOCK_MEETING_SAMPLES_DB });
+    } catch (error) {
+      console.error("Meeting samples get error:", error);
+      res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
+  app.post("/api/meeting-samples", async (req, res) => {
+    try {
+      const sample = req.body;
+      if (!sample || !sample.id || !sample.periodType || !sample.periodKey || !sample.kpis) {
+        return res.status(400).json({ error: "会务留样数据无效或缺少必要字段" });
+      }
+
+      const kpisStr = typeof sample.kpis === 'object' ? JSON.stringify(sample.kpis) : sample.kpis;
+      const frozenAt = sample.frozenAt || Date.now();
+      const timestamp = sample.timestamp || frozenAt;
+
+      const db = await getPool();
+      if (db) {
+        try {
+          await db.execute(
+            `INSERT INTO meeting_samples (
+              id, periodType, periodKey, frozenAt, frozenByUserId, frozenByName, label, fixedNotice, checksum, kpis, timestamp
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE 
+              periodType=?, periodKey=?, frozenAt=?, frozenByUserId=?, frozenByName=?, label=?, fixedNotice=?, checksum=?, kpis=?, timestamp=?`,
+            [
+              sample.id, sample.periodType, sample.periodKey, frozenAt, sample.frozenByUserId || '', sample.frozenByName || '', sample.label || '', sample.fixedNotice || '会务留样 · 仅对生成时刻数据负责', sample.checksum || '', kpisStr, timestamp,
+              sample.periodType, sample.periodKey, frozenAt, sample.frozenByUserId || '', sample.frozenByName || '', sample.label || '', sample.fixedNotice || '会务留样 · 仅对生成时刻数据负责', sample.checksum || '', kpisStr, timestamp
+            ]
+          );
+        } catch (dbErr) {
+          console.warn("DB insert meeting_samples failed, using mock storage fallback:", (dbErr as Error).message);
+        }
+      }
+
+      const existingIndex = MOCK_MEETING_SAMPLES_DB.findIndex(s => s.id === sample.id);
+      if (existingIndex !== -1) {
+        MOCK_MEETING_SAMPLES_DB[existingIndex] = { ...sample, frozenAt, timestamp };
+      } else {
+        MOCK_MEETING_SAMPLES_DB.push({ ...sample, frozenAt, timestamp });
+      }
+
+      res.json({ success: true, sample: { ...sample, frozenAt, timestamp } });
+    } catch (error) {
+      console.error("Meeting samples post error:", error);
+      res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
+  app.put("/api/meeting-samples", async (req, res) => {
+    // Forward to same handler
+    try {
+      const sample = req.body;
+      if (!sample || !sample.id || !sample.periodType || !sample.periodKey || !sample.kpis) {
+        return res.status(400).json({ error: "会务留样数据无效或缺少必要字段" });
+      }
+
+      const kpisStr = typeof sample.kpis === 'object' ? JSON.stringify(sample.kpis) : sample.kpis;
+      const frozenAt = sample.frozenAt || Date.now();
+      const timestamp = sample.timestamp || frozenAt;
+
+      const db = await getPool();
+      if (db) {
+        try {
+          await db.execute(
+            `INSERT INTO meeting_samples (
+              id, periodType, periodKey, frozenAt, frozenByUserId, frozenByName, label, fixedNotice, checksum, kpis, timestamp
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE 
+              periodType=?, periodKey=?, frozenAt=?, frozenByUserId=?, frozenByName=?, label=?, fixedNotice=?, checksum=?, kpis=?, timestamp=?`,
+            [
+              sample.id, sample.periodType, sample.periodKey, frozenAt, sample.frozenByUserId || '', sample.frozenByName || '', sample.label || '', sample.fixedNotice || '会务留样 · 仅对生成时刻数据负责', sample.checksum || '', kpisStr, timestamp,
+              sample.periodType, sample.periodKey, frozenAt, sample.frozenByUserId || '', sample.frozenByName || '', sample.label || '', sample.fixedNotice || '会务留样 · 仅对生成时刻数据负责', sample.checksum || '', kpisStr, timestamp
+            ]
+          );
+        } catch (dbErr) {
+          console.warn("DB insert meeting_samples failed, using mock storage fallback:", (dbErr as Error).message);
+        }
+      }
+
+      const existingIndex = MOCK_MEETING_SAMPLES_DB.findIndex(s => s.id === sample.id);
+      if (existingIndex !== -1) {
+        MOCK_MEETING_SAMPLES_DB[existingIndex] = { ...sample, frozenAt, timestamp };
+      } else {
+        MOCK_MEETING_SAMPLES_DB.push({ ...sample, frozenAt, timestamp });
+      }
+
+      res.json({ success: true, sample: { ...sample, frozenAt, timestamp } });
+    } catch (error) {
+      console.error("Meeting samples put error:", error);
+      res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
   // Global error handler for uncaught exceptions in route handlers
   app.use((err: any, req: any, res: any, next: any) => {
     console.error('Unhandled Exception:', err);
@@ -1270,6 +1418,22 @@ async function startServer() {
           status VARCHAR(64) NOT NULL,
           createdAt BIGINT NOT NULL,
           expiresAt BIGINT NOT NULL
+        )
+      `);
+
+      await db.execute(`
+        CREATE TABLE IF NOT EXISTS meeting_samples (
+          id VARCHAR(128) PRIMARY KEY,
+          periodType VARCHAR(32) NOT NULL,
+          periodKey VARCHAR(32) NOT NULL,
+          frozenAt BIGINT NOT NULL,
+          frozenByUserId VARCHAR(128) NOT NULL,
+          frozenByName VARCHAR(128) NOT NULL,
+          label VARCHAR(256) NOT NULL,
+          fixedNotice TEXT,
+          checksum TEXT,
+          kpis JSON,
+          timestamp BIGINT NOT NULL
         )
       `);
       

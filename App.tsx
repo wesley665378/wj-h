@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { User, Role, MiningResource, ValueCreationLog, AuditStatus, RefineCategory, RefineType, InternalTransaction, TransactionStatus, SystemOperationLog, CircuitBreaker, ResourceStatus, QuotaSnapshot, AcceptanceRecord } from './types';
+import { User, Role, MiningResource, ValueCreationLog, AuditStatus, RefineCategory, RefineType, InternalTransaction, TransactionStatus, SystemOperationLog, CircuitBreaker, ResourceStatus, QuotaSnapshot, AcceptanceRecord, MeetingSample } from './types';
 import Dashboard from './views/Dashboard';
 import ValueCreation from './views/ValueCreation';
 import { calculateHistoricalNetValue } from './src/utils/business';
@@ -20,6 +20,8 @@ import Sidebar from './components/Sidebar';
 import Login from './components/Login';
 import ErrorBoundary from './components/ErrorBoundary';
 import ChangePasswordModal from './src/components/ChangePasswordModal';
+import SiteFooter from './components/SiteFooter';
+import LegalOverlay from './components/LegalOverlay';
 import { Toaster, toast } from 'sonner';
 import { auditLog } from './src/services/api';
 import { getLocalDateString, getLocalMonthString } from './src/utils/dateUtils';
@@ -78,7 +80,15 @@ const App: React.FC = () => {
   });
 
   const [managedUsers, setManagedUsers] = useState<User[]>(INITIAL_USERS);
+  const [meetingSamples, setMeetingSamples] = useState<MeetingSample[]>([]);
   const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
+  const [isLegalOpen, setIsLegalOpen] = useState(false);
+  const [legalTab, setLegalTab] = useState<'agreement' | 'privacy'>('agreement');
+
+  const handleOpenLegal = (tab: 'agreement' | 'privacy') => {
+    setLegalTab(tab);
+    setIsLegalOpen(true);
+  };
   
   // 从后端获取初始数据
   useEffect(() => {
@@ -94,6 +104,7 @@ const App: React.FC = () => {
       setTransactions([]);
       setMiningResources([]);
       setBusinessUnits(['RC', '经营单元-001']);
+      setMeetingSamples([]);
 
       try {
         let data = null;
@@ -161,6 +172,9 @@ const App: React.FC = () => {
           } else if (data.rdq && Array.isArray(data.rdq)) {
             setCircuitBreakers(data.rdq);
             localStorage.setItem('shihe_circuit_breakers', JSON.stringify(data.rdq));
+          }
+          if (data.meetingSamples && Array.isArray(data.meetingSamples)) {
+            setMeetingSamples(data.meetingSamples);
           }
           // 最后且关键：标记工作区已就绪
           setWorkspaceLoaded(true);
@@ -281,6 +295,7 @@ const App: React.FC = () => {
     logs?: ValueCreationLog[];
     users?: User[];
     circuitBreakers?: CircuitBreaker[];
+    meetingSamples?: MeetingSample[];
   }) => {
     if (!currentUser) return;
     const nextUsers = overrides?.users ?? managedUsers;
@@ -288,6 +303,7 @@ const App: React.FC = () => {
     const nextTxs = overrides?.transactions ?? transactions;
     const nextRes = overrides?.miningResources ?? miningResources;
     const nextCBs = overrides?.circuitBreakers ?? circuitBreakers;
+    const nextSamples = overrides?.meetingSamples ?? meetingSamples;
 
     const dtcbLogs = nextLogs.filter(l => l.confirmationType === '手动确权');
     const jzczLogs = nextLogs.filter(l => l.confirmationType !== '手动确权');
@@ -308,13 +324,14 @@ const App: React.FC = () => {
           acceptanceRecords,
           jzfp: jzfpSnapshots,
           circuitBreakers: nextCBs,
-          rdq: nextCBs
+          rdq: nextCBs,
+          meetingSamples: nextSamples
         })
       });
     } catch (err) {
       console.error('Data sync error:', err);
     }
-  }, [currentUser, managedUsers, logs, transactions, miningResources, circuitBreakers, filterMonth, acceptanceRecords]);
+  }, [currentUser, managedUsers, logs, transactions, miningResources, circuitBreakers, meetingSamples, filterMonth, acceptanceRecords]);
 
   const persistWorkspaceNow = React.useCallback(async () => {
     await persistWorkspaceWithOverrides();
@@ -759,7 +776,8 @@ const App: React.FC = () => {
             miningResources,
             valueEfficiencySnapshots: snapshots,
             acceptanceRecords,
-            jzfp: jzfpSnapshots
+            jzfp: jzfpSnapshots,
+            meetingSamples
           })
         });
         if (!response.ok) {
@@ -837,7 +855,7 @@ const App: React.FC = () => {
         case 'audit': isAllowed = isNpcxie || isAdmin; break;
         case 'distribution': isAllowed = isAdmin || isNpcxie || isReservoirManager || isCenter; break;
         case 'personnel': isAllowed = isAdmin || isNpcxie; break;
-        case 'transactions': isAllowed = isAdmin || isNpcxie || isOperator || isRevenueCollector || isValueCollector || isCenter; break;
+        case 'transactions': isAllowed = isAdmin || (!isNpcxie && (isOperator || isRevenueCollector || isValueCollector || isCenter)); break;
         case 'reservoir': isAllowed = isAdmin || isNpcxie; break;
         case 'evaluation': isAllowed = true; break;
         default: isAllowed = true;
@@ -861,6 +879,7 @@ const App: React.FC = () => {
     setTransactions([]);
     setMiningResources([]);
     setBusinessUnits(['RC', '经营单元-001']);
+    setMeetingSamples([]);
     // 保持公共主数据，不清除 shihe_resources
     // 确保登出后切换账号干净，但公共静态资产数据仍可利用或由下一次会签自动重新初始化
     localStorage.removeItem('shihe_user');
@@ -959,6 +978,30 @@ const App: React.FC = () => {
     );
   }, [circuitBreakers, filteredUsers, filteredResources, currentUser, isAdminOrNPC]);
 
+  const onSaveMeetingSample = React.useCallback(async (sample: MeetingSample): Promise<boolean> => {
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/meeting-samples`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sample)
+      });
+      if (res.ok) {
+        setMeetingSamples(prev => {
+          const idx = prev.findIndex(s => s.id === sample.id);
+          const next = idx !== -1 ? prev.map(s => s.id === sample.id ? sample : s) : [...prev, sample];
+          persistWorkspaceWithOverrides({ meetingSamples: next });
+          return next;
+        });
+        addSystemLog('会务留样', `生成并冻结了【${sample.label}】(${sample.periodKey}) 数据`);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('保存会务留样失败:', err);
+      return false;
+    }
+  }, [addSystemLog, persistWorkspaceWithOverrides]);
+
   const tabProps = useMemo(() => {
     if (!currentUser) return {} as any;
     return {
@@ -970,7 +1013,9 @@ const App: React.FC = () => {
         transactions,
         onSystemAdjustment,
         onSwitchTab: setActiveTab,
-        businessUnits: businessUnits
+        businessUnits: businessUnits,
+        meetingSamples,
+        onSaveMeetingSample
       },
       creation: { 
         user: currentUser, 
@@ -1032,8 +1077,11 @@ const App: React.FC = () => {
       },
       resources: { 
         user: currentUser, 
-        resources: filteredResources,
-        logs: filteredLogs,
+        resources: isAdminOrNPC ? miningResources : filteredResources,
+        logs: isAdminOrNPC ? logs : filteredLogs,
+        dtcbLogs: (isAdminOrNPC ? logs : filteredLogs).filter(l => l.confirmationType === '手动确权' || !!l.costCategory || !!(l as any).consumptionType),
+        transactions: isAdminOrNPC ? transactions : filteredTransactions,
+        managedUsers: isAdminOrNPC ? managedUsers : filteredUsers,
         onAddResource,
         onUpdateResource,
         onDeleteResource,
@@ -1189,18 +1237,25 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        <div className="flex-1 overflow-auto custom-scrollbar relative z-10">
-          <div className="w-full p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6 lg:space-y-8">
+        <div className="flex-1 overflow-auto custom-scrollbar relative z-10 flex flex-col justify-between">
+          <div className="w-full p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6 lg:space-y-8 flex-1">
             <ErrorBoundary>
               {renderContent()}
             </ErrorBoundary>
           </div>
+          {/* 登录后：SiteFooter 挂在主内容区 overflow-auto 容器末尾，禁止与可滚区并列的 shrink-0 贴底条 */}
+          <SiteFooter onOpenLegal={handleOpenLegal} className="border-t border-slate-200/60 bg-white/40 mt-8 pt-4 pb-8" />
         </div>
       </main>
       <ChangePasswordModal 
         isOpen={isChangePasswordModalOpen}
         onClose={() => setIsChangePasswordModalOpen(false)}
         onUpdate={(oldPassword, newPassword) => onUpdatePassword(currentUser.id, newPassword, oldPassword)}
+      />
+      <LegalOverlay
+        isOpen={isLegalOpen}
+        onClose={() => setIsLegalOpen(false)}
+        defaultTab={legalTab}
       />
     </div>
   );

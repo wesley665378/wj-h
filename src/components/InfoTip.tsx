@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { HelpCircle, AlertCircle } from 'lucide-react';
 
 interface InfoTipProps {
@@ -12,7 +13,13 @@ interface InfoTipProps {
 
 /**
  * 统一口径悬停气泡提示组件
- * 支持鼠标悬停与点击查看，禁止仅靠浏览器原生 title 属性，禁止冗长白皮书公式。
+ * 使用 React Portal 挂载至 document.body，采用 getBoundingClientRect fixed 定位，
+ * 防止父级 overflow-hidden / overflow-x-auto 裁切。
+ * 
+ * 交互优化：
+ * - 离开后稍等 (300ms) 再关，保证鼠标可以顺利从按钮移到气泡上
+ * - 点击后变为“固定开启”，再次点击或点击外部才关闭
+ * - 默认优先在下方弹出
  */
 export const InfoTip: React.FC<InfoTipProps> = ({
   content,
@@ -20,49 +27,162 @@ export const InfoTip: React.FC<InfoTipProps> = ({
   className = '',
   icon = 'exclamation',
   children,
-  placement = 'top'
+  placement = 'bottom' // 默认优先在下方弹出
 }) => {
   const [isVisible, setIsVisible] = useState(false);
+  const [isClickedOpen, setIsClickedOpen] = useState(false);
+  
   const triggerRef = useRef<HTMLDivElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const arrowRef = useRef<HTMLDivElement>(null);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [coords, setCoords] = useState<{
+    x: number;
+    y: number;
+    actualPlacement: 'top' | 'bottom';
+  } | null>(null);
+
+  const clearHideTimer = () => {
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  };
+
+  const updatePosition = useCallback(() => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    
+    // 如果触发器不在当前视口内可见（例如被滚动移出），则不显示或关闭
+    if (rect.bottom < 0 || rect.top > window.innerHeight) {
+      setIsVisible(false);
+      setIsClickedOpen(false);
+      return;
+    }
+
+    const spaceAbove = rect.top;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const isTopPreferred = placement === 'top';
+
+    let actualPlacement: 'top' | 'bottom' = 'bottom';
+    if (isTopPreferred) {
+      actualPlacement = spaceAbove < 120 && spaceBelow > spaceAbove ? 'bottom' : 'top';
+    } else {
+      actualPlacement = spaceBelow < 120 && spaceAbove > spaceBelow ? 'top' : 'bottom';
+    }
+
+    const x = rect.left + rect.width / 2;
+    const y = actualPlacement === 'top' ? rect.top - 6 : rect.bottom + 6;
+
+    setCoords({ x, y, actualPlacement });
+  }, [placement]);
+
+  const handleMouseEnter = () => {
+    clearHideTimer();
+    updatePosition();
+    setIsVisible(true);
+  };
+
+  const handleMouseLeave = () => {
+    if (isClickedOpen) return; // 如果点击打开，则不通过鼠标离开关闭
+    clearHideTimer();
+    hideTimerRef.current = setTimeout(() => {
+      setIsVisible(false);
+    }, 300); // 离开后延迟 300ms 再关闭，确保鼠标能顺利移入气泡
+  };
+
+  const handleTooltipMouseEnter = () => {
+    clearHideTimer();
+  };
+
+  const handleTooltipMouseLeave = () => {
+    if (isClickedOpen) return;
+    clearHideTimer();
+    hideTimerRef.current = setTimeout(() => {
+      setIsVisible(false);
+    }, 300);
+  };
+
+  const handleToggleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isClickedOpen) {
+      updatePosition();
+      setIsVisible(true);
+      setIsClickedOpen(true);
+    } else {
+      setIsVisible(false);
+      setIsClickedOpen(false);
+    }
+  };
+
+  // 监听点击外部关闭与滚动/视口变化更新位置
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (triggerRef.current && !triggerRef.current.contains(e.target as Node)) {
+      if (
+        triggerRef.current &&
+        !triggerRef.current.contains(e.target as Node) &&
+        tooltipRef.current &&
+        !tooltipRef.current.contains(e.target as Node)
+      ) {
         setIsVisible(false);
+        setIsClickedOpen(false);
       }
     };
-    if (isVisible) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
+
+    const handleScrollOrResize = () => {
+      if (isVisible) {
+        updatePosition();
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('scroll', handleScrollOrResize, true);
+    window.addEventListener('resize', handleScrollOrResize);
+
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('scroll', handleScrollOrResize, true);
+      window.removeEventListener('resize', handleScrollOrResize);
+      clearHideTimer();
     };
-  }, [isVisible]);
+  }, [isVisible, updatePosition]);
 
-  const placementClasses = {
-    top: 'bottom-full left-1/2 -translate-x-1/2 mb-2',
-    bottom: 'top-full left-1/2 -translate-x-1/2 mt-2',
-    left: 'right-full top-1/2 -translate-y-1/2 mr-2',
-    right: 'left-full top-1/2 -translate-y-1/2 ml-2'
-  };
+  // 对 Tooltip 水平位置和箭头进行视口内严格钳制
+  useLayoutEffect(() => {
+    if (!isVisible || !coords || !tooltipRef.current) return;
+    const tooltipRect = tooltipRef.current.getBoundingClientRect();
+    const margin = 12;
+    const viewportWidth = window.innerWidth;
 
-  const arrowClasses = {
-    top: 'top-full left-1/2 -translate-x-1/2 border-t-slate-900 border-x-transparent border-b-transparent',
-    bottom: 'bottom-full left-1/2 -translate-x-1/2 border-b-slate-900 border-x-transparent border-t-transparent',
-    left: 'left-full top-1/2 -translate-y-1/2 border-l-slate-900 border-y-transparent border-r-transparent',
-    right: 'right-full top-1/2 -translate-y-1/2 border-r-slate-900 border-y-transparent border-l-transparent'
-  };
+    let left = coords.x - tooltipRect.width / 2;
+    if (left < margin) {
+      left = margin;
+    } else if (left + tooltipRect.width > viewportWidth - margin) {
+      left = viewportWidth - margin - tooltipRect.width;
+    }
+
+    const arrowX = Math.max(12, Math.min(tooltipRect.width - 12, coords.x - left));
+
+    tooltipRef.current.style.left = `${left}px`;
+    tooltipRef.current.style.top = `${coords.y}px`;
+    tooltipRef.current.style.transform = coords.actualPlacement === 'top' ? 'translateY(-100%)' : 'translateY(0)';
+
+    if (arrowRef.current) {
+      arrowRef.current.style.left = `${arrowX}px`;
+    }
+  }, [coords, isVisible]);
 
   return (
     <div 
       ref={triggerRef}
       className={`relative inline-flex items-center align-middle ${className}`}
-      onMouseEnter={() => setIsVisible(true)}
-      onMouseLeave={() => setIsVisible(false)}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       {children ? (
         <span 
-          onClick={() => setIsVisible(!isVisible)}
+          onClick={handleToggleClick}
           className="cursor-pointer inline-flex items-center"
         >
           {children}
@@ -70,17 +190,28 @@ export const InfoTip: React.FC<InfoTipProps> = ({
       ) : (
         <button
           type="button"
-          onClick={() => setIsVisible(!isVisible)}
-          className="w-4 h-4 rounded-full bg-slate-100 hover:bg-amber-100 text-slate-500 hover:text-amber-700 border border-slate-200 hover:border-amber-300 inline-flex items-center justify-center text-[10px] font-black transition-colors shrink-0 ml-1"
+          onClick={handleToggleClick}
+          className="w-4 h-4 rounded-full bg-slate-100 hover:bg-amber-100 text-slate-500 hover:text-amber-700 border border-slate-200 hover:border-amber-300 inline-flex items-center justify-center text-[10px] font-black transition-colors shrink-0 ml-1 cursor-pointer"
           aria-label="查看口径说明"
         >
           {icon === 'help' ? <HelpCircle size={11} /> : icon === 'info' ? <AlertCircle size={11} /> : '!'}
         </button>
       )}
 
-      {isVisible && (
+      {isVisible && coords && typeof document !== 'undefined' && createPortal(
         <div 
-          className={`absolute z-50 ${placementClasses[placement]} w-max max-w-xs md:max-w-sm p-3 bg-slate-900/95 text-slate-100 text-xs rounded-xl shadow-xl border border-slate-700/60 backdrop-blur-xs pointer-events-auto transition-all animate-in fade-in zoom-in-95 duration-150`}
+          ref={tooltipRef}
+          style={{
+            position: 'fixed',
+            left: `${coords.x}px`,
+            top: `${coords.y}px`,
+            zIndex: 200,
+            maxWidth: 'calc(100vw - 24px)',
+            width: 'max-content',
+          }}
+          className="p-3 bg-slate-900/95 text-slate-100 text-xs rounded-xl shadow-2xl border border-slate-700/60 backdrop-blur-md pointer-events-auto transition-all animate-in fade-in zoom-in-95 duration-150"
+          onMouseEnter={handleTooltipMouseEnter}
+          onMouseLeave={handleTooltipMouseLeave}
           role="tooltip"
         >
           {title && (
@@ -89,12 +220,20 @@ export const InfoTip: React.FC<InfoTipProps> = ({
               <span>{title}</span>
             </div>
           )}
-          <div className="leading-relaxed text-slate-300 font-normal text-[11px]">
+          <div className="leading-relaxed text-slate-300 font-normal text-[11px] max-w-xs md:max-w-sm whitespace-normal">
             {content}
           </div>
           {/* Arrow */}
-          <div className={`absolute w-0 h-0 border-4 ${arrowClasses[placement]}`} />
-        </div>
+          <div 
+            ref={arrowRef}
+            className={`absolute w-0 h-0 border-4 -translate-x-1/2 ${
+              coords.actualPlacement === 'top'
+                ? 'top-full border-t-slate-900 border-x-transparent border-b-transparent'
+                : 'bottom-full border-b-slate-900 border-x-transparent border-t-transparent'
+            }`} 
+          />
+        </div>,
+        document.body
       )}
     </div>
   );

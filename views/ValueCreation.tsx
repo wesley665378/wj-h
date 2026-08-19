@@ -26,6 +26,7 @@ import { calculateHistoricalNetValue, calculateDualTrackCoreMatrices, calculateT
 import { deriveProjectStatus, isProjectWritable } from '../src/utils/projectStatus';
 import { syncWorkspace } from '../src/services/api';
 import { toast } from 'sonner';
+import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { Info, AlertCircle, CheckCircle2, X } from 'lucide-react';
 import {
   getInitialRevenueCapacity,
@@ -58,8 +59,8 @@ const AuditModal: React.FC<{
     <StandardModal
       isOpen={isOpen}
       onClose={onClose}
-      title="数据核对"
-      subtitle="系统数据确权审计"
+      title="城市守护者"
+      subtitle="提报数据核对与确权审计"
       maxWidthClassName="max-w-lg"
     >
       <div className="space-y-6">
@@ -141,9 +142,10 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
   const [managedUsers, setManagedUsers] = useState<User[]>([]);
   const [selectedOperatorId, setSelectedOperatorId] = useState<string>(user.id);
-  const [selectedCollectors, setSelectedCollectors] = useState<{ id: string, amount: number }[]>([]);
+  const [selectedCollectors, setSelectedCollectors] = useState<{ id: string, amount: number, rawAmount?: number }[]>([]);
   const [selectedMiningId, setSelectedMiningId] = useState('');
   const [miningSearchTerm, setMiningSearchTerm] = useState('');
+  const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const [selectedRefineType, setSelectedRefineType] = useState<RefineType>(RefineType.Enterprise);
   const [selectedCategory, setSelectedCategory] = useState<RefineCategory>(RefineCategory.Revenue);
   const [selectedTier, setSelectedTier] = useState<string>('A');
@@ -752,17 +754,21 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     );
     if (activeBreaker) {
       const remainingMinutes = Math.ceil((activeBreaker.expiresAt - Date.now()) / (60 * 1000));
-      toast.error(`提交拦截：您当前处于熔断锁定期（剩余约 ${remainingMinutes} 分钟）。\n原因：${activeBreaker.reason}`);
+      showAlert(`提交拦截：您当前处于熔断锁定期（剩余约 ${remainingMinutes} 分钟）。\n原因：${activeBreaker.reason}`);
       return;
     }
 
     if (!selectedMiningId || selectedCollectors.length === 0) {
-      toast.error('请确保“采集主体”及“关联矿产”已选择。');
+      showAlert('请确保“采集主体”及“关联矿产”已选择。');
       return;
     }
     
     // 自动联动填充校验逻辑
     const totalAmount = selectedCollectors.reduce((sum, c) => sum + c.amount, 0);
+    if (totalAmount <= 0) {
+      showAlert('申报积分必须大于0，请填写有效的采集积分。');
+      return;
+    }
 
     // 强制读取最新实时数据见 getCClassCostForResource / getB2ClassCostForResource
     const realtimeC = getCClassCostForResource(AuditStatus.Confirmed) + getCClassCostForResource(AuditStatus.Approved);
@@ -787,24 +793,24 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     );
     if (activeBreaker) {
       const remainingMinutes = Math.ceil((activeBreaker.expiresAt - Date.now()) / (60 * 1000));
-      toast.error(`提交拦截：您当前处于熔断锁定期（剩余约 ${remainingMinutes} 分钟）。\n原因：${activeBreaker.reason}`);
+      showAlert(`提交拦截：您当前处于熔断锁定期（剩余约 ${remainingMinutes} 分钟）。\n原因：${activeBreaker.reason}`);
       return;
     }
     
     const totalAmount = selectedCollectors.reduce((sum, c) => sum + c.amount, 0);
-    if (totalAmount <= 0) return setError('总积分必须大于0');
+    if (totalAmount <= 0) return showAlert('总积分必须大于0');
 
     if (selectedResource) {
       // 1. 物理上限校验
       const purifiedTotalAmount = totalAmount;
       if (purifiedTotalAmount > maxAllowed + 0.01) { // 允许 0.01 误差
-        toast.error(`超额限制：本次注入提纯后积分（${purifiedTotalAmount.toFixed(2)}）超过了当前最高可提炼量（${maxAllowed.toFixed(2)}）。\n\n核算逻辑：预计资源储量上限 - 已确 - 待确 = 最高提炼量。`);
+        showAlert(`超额限制：本次注入提纯后积分（${Math.round(purifiedTotalAmount).toLocaleString()}）超过了当前最高可提炼量（${Math.round(maxAllowed).toLocaleString()}）。\n\n核算逻辑：预计资源储量上限 - 已确 - 待确 = 最高提炼量。`);
         return;
       }
       
       // 2. 内部交易接收上限校验 (单次校验)
       if (receivedLimit !== Infinity && totalAmount > receivedLimit) {
-        const reason = `单次注入积分（${totalAmount}）超过了从内部交易接收到的对应资源上限（${receivedLimit}）。`;
+        const reason = `单次注入积分（${Math.round(totalAmount).toLocaleString()}）超过了从内部交易接收到的对应资源上限（${Math.round(receivedLimit).toLocaleString()}）。`;
         
         if (onAddCircuitBreaker) {
           onAddCircuitBreaker({
@@ -819,13 +825,13 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           });
         }
         
-        toast.error(`熔断触发：${reason}\n系统已暂停您的提报功能（锁定期 30 分钟），请联系管理员。`);
+        showAlert(`熔断触发：${reason}\n系统已暂停您的提报功能（锁定期 30 分钟），请联系管理员。`);
         return; // 拒绝提报
       }
 
       // 3. 内部交易接收上限校验 (累计校验)
       if (receivedLimit !== Infinity && (alreadyInjected + totalAmount > receivedLimit)) {
-        const reason = `累计注入积分（${alreadyInjected + totalAmount}）超过了从内部交易接收到的资源总量（${receivedLimit}）。已注入：${alreadyInjected}，本次申请：${totalAmount}。`;
+        const reason = `累计注入积分（${Math.round(alreadyInjected + totalAmount).toLocaleString()}）超过了从内部交易接收到的资源总量（${Math.round(receivedLimit).toLocaleString()}）。已注入：${Math.round(alreadyInjected).toLocaleString()}，本次申请：${Math.round(totalAmount).toLocaleString()}。`;
         
         if (onAddCircuitBreaker) {
           const txIds = transactions
@@ -845,18 +851,18 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           });
         }
         
-        toast.error(`熔断触发：${reason}\n系统已暂停您的提报功能（锁定期 30 分钟），请联系管理员。`);
+        showAlert(`熔断触发：${reason}\n系统已暂停您的提报功能（锁定期 30 分钟），请联系管理员。`);
         return; // 拒绝提报
       }
 
       if (selectedCategory === RefineCategory.Value) {
         const { status } = deriveProjectStatus(selectedResource);
         if (status !== ProjectStatus.InProgress) {
-          toast.error(`该项目处于${status}状态，无法继续提报产值。`);
+          showAlert(`该项目处于${status}状态，无法继续提报产值。`);
           return;
         }
         if (selectedResource.valueDepleted) {
-          toast.error('该矿山产出已满，无法继续提报。');
+          showAlert('该矿山产出已满，无法继续提报。');
           return;
         }
       }
@@ -865,7 +871,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       if (selectedCategory === RefineCategory.Value && selectedRefineType === RefineType.Outsourced && selectedResource.monthlyQuota !== undefined) {
         const monthlyUsed = selectedResource.monthlyUsed || 0;
         if (monthlyUsed + totalAmount > selectedResource.monthlyQuota + 0.01) {
-          toast.error(`本月(N=${selectedResource.rhythmMonthN})授权额度不足。\n当前已录入：${Math.round(monthlyUsed).toLocaleString()}\n本次尝试：${Math.round(totalAmount).toLocaleString()}\n本月上限：${Math.round(selectedResource.monthlyQuota).toLocaleString()}\n\n请联系经营单元更新提炼指令或调整月份。`);
+          showAlert(`本月(N=${selectedResource.rhythmMonthN})授权额度不足。\n当前已录入：${Math.round(monthlyUsed).toLocaleString()}\n本次尝试：${Math.round(totalAmount).toLocaleString()}\n本月上限：${Math.round(selectedResource.monthlyQuota).toLocaleString()}\n\n请联系经营单元更新提炼指令或调整月份。`);
           return;
         }
       }
@@ -933,9 +939,9 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       onLogSubmit(logsToSubmit);
       try {
         await syncWorkspace({ logs: [...logs, ...logsToSubmit] });
-        toast.success(`提报指令提交成功并已落库！共提交 ${logsToSubmit.length} 条数据，预审中...`);
+        showAlert(`提报指令提交成功并已落库！共提交 ${logsToSubmit.length} 条数据，预审中...`);
       } catch (err) {
-        toast.error('提报落库失败，请稍后重试');
+        showAlert('提报落库失败，请稍后重试');
       }
     }
 
@@ -1061,6 +1067,11 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           : `${Math.round(postHedge)}`;
       }
 
+      const isLogRev = log.category === RefineCategory.Revenue;
+      const displayInjection = isLogRev
+        ? (log.rawAmount != null ? Math.round(log.rawAmount * 0.933) : Math.round(log.amount || 0))
+        : (log.rawAmount != null ? log.rawAmount : log.amount || 0);
+
       return {
         '矿山编号': log.miningId,
         '类别': log.category === RefineCategory.Revenue ? '收款' : '产值',
@@ -1070,7 +1081,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         '经营单元': operator?.center || log.rankId,
         '采集主体': `${collector?.name || log.recordedCollectorId} (${collector?.category || '未定义'})`,
         '确权类型': log.confirmationType || '手动确权',
-        '注入积分': log.amount,
+        '注入积分': displayInjection,
         'C对冲权重': cWeight.toFixed(4),
         'B2对冲权重': log.category === RefineCategory.Revenue ? '—' : b2Weight.toFixed(4),
         '产兑包': valuePackageDisplay,
@@ -1152,18 +1163,21 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     });
 
                     if (isNewRevenueSpec && hasSelectedValueSpec) {
-                      return alert('款专与产专不能同时提报。');
+                      showAlert('款专与产专不能同时提报。');
+                      return;
                     }
                     if (isNewValueSpec && hasSelectedRevenueSpec) {
-                      return alert('款专与产专不能同时提报。');
+                      showAlert('款专与产专不能同时提报。');
+                      return;
                     }
 
                     // 禁止同时选择多个款专
                     if (isNewRevenueSpec && hasSelectedRevenueSpec) {
-                      return alert('禁止同时选择多个款专（初/中/高款专只能选择其一）。');
+                      showAlert('禁止同时选择多个款专（初/中/高款专只能选择其一）。');
+                      return;
                     }
 
-                    setSelectedCollectors([...selectedCollectors, { id, amount: 0 }]);
+                    setSelectedCollectors([...selectedCollectors, { id, amount: 0, rawAmount: 0 }]);
                   }
                 }} 
                 className="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-xs outline-none focus:border-blue-900 focus:ring-2 focus:ring-blue-100 transition-all font-bold text-slate-800 h-10" 
@@ -1449,15 +1463,23 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     </div>
                     <div className={`${hasAnyHedge ? 'lg:col-span-2' : 'lg:col-span-3'} space-y-1`}>
                       <label className="text-[10px] font-bold text-slate-400 uppercase">
-                        {selectedCategory === RefineCategory.Value ? '输入产值' : (user && isRevenueExpert(user) ? '输入收款' : '输入产值')}
+                        {selectedCategory === RefineCategory.Value ? '输入产值' : '输入收款'}
                       </label>
                       <input
                         type="number"
-                        value={c.amount ? Number((c.amount).toFixed(2)) : ''}
+                        value={c.rawAmount !== undefined ? (c.rawAmount || '') : (c.amount || '')}
                         onChange={(e) => {
                           const val = Number(e.target.value);
-                          const newAmount = (val).toFixed(2);
-                          setSelectedCollectors(selectedCollectors.map(sc => sc.id === c.id ? { ...sc, amount: Number(newAmount) } : sc));
+                          const isRev = selectedCategory === RefineCategory.Revenue;
+                          setSelectedCollectors(selectedCollectors.map(sc => 
+                            sc.id === c.id 
+                              ? { 
+                                  ...sc, 
+                                  rawAmount: val, 
+                                  amount: isRev ? Math.round(val * 0.933) : val 
+                                } 
+                              : sc
+                          ));
                         }}
                         className="w-full border border-slate-300 rounded-sm px-3 py-1.5 text-sm font-bold font-mono focus:border-blue-900 outline-none h-10"
                         placeholder="0"
@@ -1469,15 +1491,11 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                         <input
                           type="number"
                           value={c.amount || ''}
-                          onChange={(e) => {
-                            const newAmount = Number(e.target.value);
-                            setSelectedCollectors(selectedCollectors.map(sc => sc.id === c.id ? { ...sc, amount: newAmount } : sc));
-                          }}
-                          className="w-full border border-slate-300 rounded-sm px-3 py-1.5 text-sm font-bold font-mono focus:border-blue-900 outline-none h-10"
+                          readOnly
+                          disabled
+                          className="w-full border border-slate-200 bg-slate-100 text-slate-500 rounded-sm px-3 py-1.5 text-sm font-bold font-mono outline-none h-10 cursor-not-allowed"
                           placeholder="0"
                           required
-                          min="0.01"
-                          step="0.01"
                         />
                         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-[9px] font-bold font-mono uppercase">积分</span>
                       </div>
@@ -1802,14 +1820,14 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
               <p className="text-[10px] text-amber-700 font-bold uppercase tracking-wider mb-1">收款包</p>
               <p className="text-2xl font-black text-amber-900 font-mono">{Math.round(summaryRevenuePackage).toLocaleString()}</p>
             </div>
-            <p className="text-[9px] text-amber-500 mt-2 font-medium">公式: Σ(已确权收款的 netValue)</p>
+            <p className="text-[9px] text-amber-500 mt-2 font-medium">公式: 收款包合计</p>
           </div>
           <div className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 p-4 rounded-sm border border-emerald-200 shadow-sm flex flex-col justify-between">
             <div>
               <p className="text-[10px] text-emerald-700 font-bold uppercase tracking-wider mb-1">产兑包</p>
               <p className="text-2xl font-black text-emerald-950 font-mono">{Math.round(summaryValuePackage).toLocaleString()}</p>
             </div>
-            <p className="text-[9px] text-emerald-600 mt-2 font-medium">公式: Σ(已确权) + Σ(联动确权待确权) 的 netValue</p>
+            <p className="text-[9px] text-emerald-600 mt-2 font-medium">公式: 产兑包合计</p>
           </div>
         </div>
 
@@ -1914,6 +1932,10 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 const revPostHedge = revPreHedge * cWeight;
                 const revHasHedge = cWeight < 1;
 
+                const displayInjection = isRevenueLine
+                  ? (log.rawAmount != null ? Math.round(log.rawAmount * 0.933) : Math.round(log.amount || 0))
+                  : (log.rawAmount != null ? log.rawAmount : log.amount || 0);
+
                 return (
                   <tr key={log.id} className="text-[10px] hover:bg-slate-50 transition-colors">
                     <td className="px-2 py-4">
@@ -1949,7 +1971,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                         {log.confirmationType || '手动确权'}
                       </span>
                     </td>
-                    <td className="px-2 py-4 text-right font-mono font-bold text-slate-700">{log.amount.toLocaleString()}</td>
+                    <td className="px-2 py-4 text-right font-mono font-bold text-slate-700">{displayInjection.toLocaleString()}</td>
                     <td className="px-2 py-4 text-right font-mono font-black text-slate-900 bg-slate-50/50">
                       {cWeight.toFixed(4)}
                     </td>
@@ -1994,6 +2016,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           </table>
         </div>
       </Card>
+      <CityGuardianModal state={modalState} onClose={closeModal} />
     </div>
   );
 };

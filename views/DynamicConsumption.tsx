@@ -112,7 +112,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
   const [filterStartDate, setFilterStartDate] = useState<string>('');
   const [filterEndDate, setFilterEndDate] = useState<string>('');
   const [filterMonth, setFilterMonth] = useState<string>('');
-  const { modalState, showAlert, closeModal } = useCityGuardianModal();
+  const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
 
   useEffect(() => {
     setSelectedOperatorId(user.id);
@@ -315,42 +315,49 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
     const isB2 = costCategory === 'B' && valueConsumptionMode === 'B2';
     
     if (!selectedMiningId || !selectedType || (!recordedCollectorId && !isB2) || dynamicCost <= 0) {
-      showAlert('请确保“采集主体”、“消耗类型”及“关联矿产”已完整填写。');
+      showAlert('请确保“采集主体”、“消耗类型”及“关联矿产”已完整填写且金额大于0。');
       return;
     }
 
-    // 动态消耗申请统一进入待确权状态，且由 npcxie 手动确权
-    const status = AuditStatus.Pending;
-    const confirmationType = '手动确权';
+    const categoryLabel = costCategory === 'B' && valueConsumptionMode === 'B2' ? 'B2' : costCategory;
 
-    const newLog: ValueCreationLog = {
-      id: `${selectedCategory === RefineCategory.Revenue ? 'J' : 'M'}${(Date.now() % 100000000).toString().padStart(8, '0')}`,
-      miningId: selectedMiningId,
-      rankId: selectedOperatorId,
-      recordedCollectorId: isB2 ? 'SYSTEM_B2' : recordedCollectorId,
-      category: selectedCategory,
-      type: selectedType as RefineType,
-      costCategory: costCategory,
-      valueConsumptionMode: selectedCategory === RefineCategory.Value && costCategory === 'B' ? valueConsumptionMode : undefined,
-      amount: 0,
-      rawAmount: 0,
-      dynamicCost: dynamicCost,
-      netValue: calculatedNetValue,
-      timestamp: Date.now(),
-      businessDate: businessDate,
-      month: businessMonth,
-      status: status,
-      confirmationType: confirmationType as any
-    };
+    showConfirm(
+      `确定提报动态消耗申请？\n\n【类别】${categoryLabel}类消耗\n【矿山】${selectedMiningId}\n【金额】${Math.round(dynamicCost).toLocaleString()}\n【归属月份】${businessMonth}`,
+      async () => {
+        // 动态消耗申请统一进入待确权状态，且由 npcxie 手动确权
+        const status = AuditStatus.Pending;
+        const confirmationType = '手动确权';
 
-    onLogSubmit(newLog);
-    setDynamicCost(0);
-    try {
-      await syncWorkspace({ logs: [...logs, newLog] });
-      toast.success(`[${costCategory}] 动态消耗申报成功并写入数据库！`);
-    } catch (err) {
-      toast.error('动态消耗申报写库失败：' + ((err as Error).message || '网络问题'));
-    }
+        const newLog: ValueCreationLog = {
+          id: `${selectedCategory === RefineCategory.Revenue ? 'J' : 'M'}${(Date.now() % 100000000).toString().padStart(8, '0')}`,
+          miningId: selectedMiningId,
+          rankId: selectedOperatorId,
+          recordedCollectorId: isB2 ? 'SYSTEM_B2' : recordedCollectorId,
+          category: selectedCategory,
+          type: selectedType as RefineType,
+          costCategory: costCategory,
+          valueConsumptionMode: selectedCategory === RefineCategory.Value && costCategory === 'B' ? valueConsumptionMode : undefined,
+          amount: 0,
+          rawAmount: 0,
+          dynamicCost: dynamicCost,
+          netValue: calculatedNetValue,
+          timestamp: Date.now(),
+          businessDate: getLocalDateString(),
+          month: getLocalMonthString(),
+          status: status,
+          confirmationType: confirmationType as any
+        };
+
+        onLogSubmit(newLog);
+        setDynamicCost(0);
+        try {
+          await syncWorkspace({ logs: [...logs, newLog] });
+          showAlert(`[${categoryLabel}] 动态消耗申报成功并写入数据库！`);
+        } catch (err) {
+          showAlert('动态消耗申报写库失败：' + ((err as Error).message || '网络问题'));
+        }
+      }
+    );
   };
 
   const [deductionAmount, setDeductionAmount] = useState<number>(0);
@@ -363,34 +370,42 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
   const handleDeductionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!deductionCollectorId || deductionAmount <= 0) return showAlert('请选择采集主体并输入对冲积分。');
-
-    const deductionLog: ValueCreationLog = {
-      id: `J${(Date.now() % 100000000).toString().padStart(8, '0')}`,
-      miningId: 'SYSTEM_DEDUCTION',
-      rankId: deductionOperatorId,
-      recordedCollectorId: deductionCollectorId,
-      category: RefineCategory.Revenue, 
-      type: RefineType.NonEffectiveHours,
-      amount: 0,
-      rawAmount: 0,
-      dynamicCost: deductionAmount,
-      netValue: -deductionAmount,
-      timestamp: Date.now(),
-      businessDate: businessDate,
-      month: businessMonth,
-      status: AuditStatus.Pending,
-      confirmationType: '手动确权'
-    };
-
-    onLogSubmit(deductionLog);
-    setDeductionAmount(0);
-    try {
-      await syncWorkspace({ logs: [...logs, deductionLog] });
-      toast.success('非有效工时对冲申请成功并落库，等待审核冲抵刚性工资包。');
-    } catch (err) {
-      toast.error('对冲申请写库失败');
+    if (!deductionCollectorId || deductionAmount <= 0) {
+      showAlert('请选择采集主体并输入有效对冲积分。');
+      return;
     }
+
+    showConfirm(
+      `确定提交非有效工时对冲申请？\n\n【对冲金额】${Math.round(deductionAmount).toLocaleString()}\n【归属月份】${businessMonth}`,
+      async () => {
+        const deductionLog: ValueCreationLog = {
+          id: `J${(Date.now() % 100000000).toString().padStart(8, '0')}`,
+          miningId: 'SYSTEM_DEDUCTION',
+          rankId: deductionOperatorId,
+          recordedCollectorId: deductionCollectorId,
+          category: RefineCategory.Revenue, 
+          type: RefineType.NonEffectiveHours,
+          amount: 0,
+          rawAmount: 0,
+          dynamicCost: deductionAmount,
+          netValue: -deductionAmount,
+          timestamp: Date.now(),
+          businessDate: getLocalDateString(),
+          month: getLocalMonthString(),
+          status: AuditStatus.Pending,
+          confirmationType: '手动确权'
+        };
+
+        onLogSubmit(deductionLog);
+        setDeductionAmount(0);
+        try {
+          await syncWorkspace({ logs: [...logs, deductionLog] });
+          showAlert('非有效工时对冲申请成功并落库，等待审核冲抵刚性工资包。');
+        } catch (err) {
+          showAlert('对冲申请写库失败，请重试');
+        }
+      }
+    );
   };
 
   const getWeightForLog = (log: ValueCreationLog) => {
@@ -459,7 +474,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
       return {
         '申报编号': log.id,
         '业务月份': resolveLogBusinessMonth(log),
-        '业务日期': resolveLogBusinessDate(log),
+        '提报日期': resolveLogBusinessDate(log),
         '提报时间': formatSubmissionTime(log.timestamp),
         '矿山编号': log.miningId,
         '采集主体': users.find(u => u.id === log.recordedCollectorId)?.name || log.recordedCollectorId,
@@ -583,21 +598,14 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
                <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center">
-                    <span className="mr-2">🗓️</span> 业务日期 <span className="text-rose-500 ml-1 font-bold">*</span>
+                    <span className="mr-2">🗓️</span> 提报日期 <span className="text-rose-500 ml-1 font-bold">*</span>
                   </label>
                   <input
                     type="date"
-                    value={businessDate}
-                    onChange={(e) => {
-                      const d = e.target.value;
-                      setBusinessDate(d);
-                      if (d) {
-                        setBusinessMonth(d.slice(0, 7));
-                      }
-                    }}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-mono text-xs font-bold text-slate-700 outline-none focus:border-rose-500 transition-all"
-                    required
-                    title="业务申报具体日期"
+                    value={getLocalDateString()}
+                    disabled
+                    className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 font-mono text-xs font-bold text-slate-400 outline-none cursor-not-allowed"
+                    title="提报日期按系统时间记录"
                   />
                </div>
 
@@ -828,9 +836,8 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
               </div>
             </div>
 
-            <button type="submit" title="提交成本消耗指令，进入待联动队列，将从对应资产池中抵减" className="w-full bg-slate-900 text-white py-4 md:py-6 rounded-2xl md:rounded-[2rem] font-black uppercase tracking-[0.2em] md:tracking-[0.4em] shadow-2xl hover:bg-rose-600 transition-all flex items-center justify-center space-x-4 active:scale-95">
-              <span>提交 npcxie 手动确权</span>
-              <span className="text-xl">🔥</span>
+            <button type="submit" className="w-full bg-slate-900 text-white py-4 md:py-6 rounded-2xl md:rounded-[2rem] font-black uppercase tracking-[0.2em] md:tracking-[0.4em] shadow-2xl hover:bg-rose-600 transition-all flex items-center justify-center space-x-4 active:scale-95">
+              <span>提交</span>
             </button>
           </form>
         </div>
@@ -922,20 +929,13 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-rose-600 uppercase tracking-widest flex items-center">
-                    业务日期 <span className="text-rose-500 ml-1 font-bold">*</span>
+                    提报日期 <span className="text-rose-500 ml-1 font-bold">*</span>
                   </label>
                   <input
                     type="date"
-                    value={businessDate}
-                    onChange={(e) => {
-                      const d = e.target.value;
-                      setBusinessDate(d);
-                      if (d) {
-                        setBusinessMonth(d.slice(0, 7));
-                      }
-                    }}
-                    className="w-full bg-white border border-rose-200 rounded-xl px-3 py-2 text-xs font-bold font-mono outline-none focus:border-rose-500 text-slate-700"
-                    required
+                    value={getLocalDateString()}
+                    disabled
+                    className="w-full bg-slate-100 border border-rose-200 rounded-xl px-3 py-2 text-xs font-bold font-mono outline-none text-slate-400 cursor-not-allowed"
                   />
                 </div>
                 <div className="space-y-1">
@@ -955,7 +955,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                 <p className="text-[10px] text-rose-700 font-bold leading-relaxed">
                   💡 该操作将直接从采集人的刚性工资包中扣除对应金额，用于对冲组织运营成本。
                 </p>
-                <button type="submit" title="提交非有效工时对冲申请，直接冲抵采集人的刚性工资包" className="w-full sm:w-auto px-10 py-3 bg-rose-600 text-white rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-rose-700 transition-all shadow-lg shadow-rose-200 active:scale-95">
+                <button type="submit" className="w-full sm:w-auto px-10 py-3 bg-rose-600 text-white rounded-xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-rose-700 transition-all shadow-lg shadow-rose-200 active:scale-95">
                   非有效工时对冲
                 </button>
               </div>
@@ -1005,7 +1005,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
               className="px-4 py-2 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all flex items-center"
             >
               <svg className="w-3 h-3 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-              导出 EXCEL
+              导出
             </button>
           </div>
         </div>
@@ -1015,7 +1015,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
               <tr>
                 <th className="px-4 py-4 md:py-6">申报编号</th>
                 <th className="px-3 py-6 text-center">业务月份</th>
-                <th className="px-3 py-6 text-center">业务日期</th>
+                <th className="px-3 py-6 text-center">提报日期</th>
                 <th className="px-4 py-6 text-center">矿山编号</th>
                 <th className="px-4 py-6 font-bold text-slate-800">采集主体</th>
                 <th className="px-3 py-6 text-right text-blue-600">A</th>

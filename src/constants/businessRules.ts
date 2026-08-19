@@ -54,7 +54,7 @@ export const B2_HEDGE_RULES = {
   title: "B2 动态对冲规则 (产值端)",
   definition: "B2对冲权重被定义为“产值端动态抵减项”，代表项目实施中的刚性采购费用。",
   weightFormula: "B2对冲权重(X) = (项目总产初 - 已审批B2消耗) / 项目总产初",
-  netValueFormula: "实际净值(¥) = 注入总量 * B2对冲权重 * 提炼因子",
+  netValueFormula: "产兑包 = 注入积分 * B2对冲权重 * 提炼因子",
   impact: "B2 的抵减通过降低该项目下所有采集主体的“B2对冲权重”，等比例影响所有关联主体的已确权产值包。"
 };
 

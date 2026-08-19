@@ -40,6 +40,9 @@ export interface SingleMonthUnitMetrics {
   row1ValuePackage: number;
   row1IncomeValuePackage: number;
   row1MonthlyProfit: number;
+  row2ValuePackage: number;
+  row2IncomeValuePackage: number;
+  row2MonthlyProfit: number;
   isNoActivity: boolean;
 }
 
@@ -180,14 +183,23 @@ export function computeUnitSingleMonth(
   // 直接费用＝丙类＋乙一类
   const directCost = cCost + b1Cost;
 
-  // 第一行产兑包 = 已确权产兑包 + 待确权产兑包(联动确权)
-  const row1ValuePackage = confirmedValuePackage + pendingLinkageValuePackage;
+  // 第一行「已确权」：只含已确权
+  const row1ValuePackage = confirmedValuePackage;
 
   // 第一行收产包 = 收款包 + 第一行产兑包
   const row1IncomeValuePackage = revenuePackage + row1ValuePackage;
 
-  // 月度盈亏 = 第一行收产包 - 总成本 - 直接费用
+  // 第一行月度盈亏 = 第一行收产包 - 总成本 - 直接费用
   const row1MonthlyProfit = row1IncomeValuePackage - totalCost - directCost;
+
+  // 第二行「已确权+待确权」：产兑包 = 已确权 + 联动待确权
+  const row2ValuePackage = confirmedValuePackage + pendingLinkageValuePackage;
+
+  // 第二行收产包 = 收款包 + 第二行产兑包
+  const row2IncomeValuePackage = revenuePackage + row2ValuePackage;
+
+  // 第二行月度盈亏 = 第二行收产包 - 总成本 - 直接费用
+  const row2MonthlyProfit = row2IncomeValuePackage - totalCost - directCost;
 
   // 判断是否无活动（无工资且无包/无成本）
   const isNoActivity = (
@@ -216,6 +228,9 @@ export function computeUnitSingleMonth(
     row1ValuePackage,
     row1IncomeValuePackage,
     row1MonthlyProfit,
+    row2ValuePackage,
+    row2IncomeValuePackage,
+    row2MonthlyProfit,
     isNoActivity
   };
 }
@@ -248,38 +263,36 @@ export function computeBusinessUnitProfitRanking(
     computeUnitSingleMonth(unitName, selectedMonth, users, auditLogs, resources, transactions)
   );
 
-  // 2. 计算每个单元从当年 1 月至选定月的年度累计盈亏
-  const yearlyProfitMap: Record<string, number> = {};
+  // 2. 计算每个单元从当年 1 月至选定月的年度累计盈亏 (区分口径)
+  const yearlyConfirmedProfitMap: Record<string, number> = {};
+  const yearlyTotalProfitMap: Record<string, number> = {};
   businessUnits.forEach(unitName => {
-    let yearSum = 0;
+    let row1YearSum = 0;
+    let row2YearSum = 0;
     monthsInYearToSelected.forEach(mStr => {
       const mMetrics = computeUnitSingleMonth(unitName, mStr, users, auditLogs, resources, transactions);
-      yearSum += mMetrics.row1MonthlyProfit;
+      row1YearSum += mMetrics.row1MonthlyProfit;
+      row2YearSum += mMetrics.row2MonthlyProfit;
     });
-    yearlyProfitMap[unitName] = yearSum;
+    yearlyConfirmedProfitMap[unitName] = row1YearSum;
+    yearlyTotalProfitMap[unitName] = row2YearSum;
   });
 
-  // 3. 排序与排名逻辑 (写死逻辑：无工资且无包的单元固定排在最后)
-  // 排名次序：
-  // 1. 活跃状态 (有数据/工资在前的优先)
-  // 2. 月度盈亏从高到低
-  // 3. 年度盈亏从高到低
-  // 4. 第一行收产包从高到低
-  // 5. 单元名称升序
+  // 3. 排序与排名逻辑 (基于第二行月度盈亏排序)
   const sortedMetrics = [...currentMonthMetrics].sort((a, b) => {
     if (a.isNoActivity !== b.isNoActivity) {
       return a.isNoActivity ? 1 : -1; // 无活动的排在后面
     }
-    if (Math.abs(a.row1MonthlyProfit - b.row1MonthlyProfit) > 0.0001) {
-      return b.row1MonthlyProfit - a.row1MonthlyProfit;
+    if (Math.abs(a.row2MonthlyProfit - b.row2MonthlyProfit) > 0.0001) {
+      return b.row2MonthlyProfit - a.row2MonthlyProfit;
     }
-    const aYearly = yearlyProfitMap[a.unitName] || 0;
-    const bYearly = yearlyProfitMap[b.unitName] || 0;
+    const aYearly = yearlyTotalProfitMap[a.unitName] || 0;
+    const bYearly = yearlyTotalProfitMap[b.unitName] || 0;
     if (Math.abs(aYearly - bYearly) > 0.0001) {
       return bYearly - aYearly;
     }
-    if (Math.abs(a.row1IncomeValuePackage - b.row1IncomeValuePackage) > 0.0001) {
-      return b.row1IncomeValuePackage - a.row1IncomeValuePackage;
+    if (Math.abs(a.row2IncomeValuePackage - b.row2IncomeValuePackage) > 0.0001) {
+      return b.row2IncomeValuePackage - a.row2IncomeValuePackage;
     }
     return a.unitName.localeCompare(b.unitName, 'zh-CN');
   });
@@ -289,10 +302,11 @@ export function computeBusinessUnitProfitRanking(
   let currentRank = 1;
 
   sortedMetrics.forEach((m) => {
-    const yearlyProfit = yearlyProfitMap[m.unitName] || 0;
+    const yearlyConfirmedProfit = yearlyConfirmedProfitMap[m.unitName] || 0;
+    const yearlyTotalProfit = yearlyTotalProfitMap[m.unitName] || 0;
     const assignedRank = m.isNoActivity ? '—' : currentRank++;
 
-    // 第一行：「含背书合计」
+    // 第一行：「已确权」
     rows.push({
       unitName: m.unitName,
       managers: m.managers,
@@ -304,25 +318,25 @@ export function computeBusinessUnitProfitRanking(
       incomeValuePackage: Math.round(m.row1IncomeValuePackage),
       totalCost: Math.round(m.totalCost),
       monthlyProfit: Math.round(m.row1MonthlyProfit),
-      yearlyProfit: Math.round(yearlyProfit),
+      yearlyProfit: Math.round(yearlyConfirmedProfit),
       rank: assignedRank,
       isNoActivity: m.isNoActivity
     });
 
-    // 第二行：「收款背书在途」
+    // 第二行：「已确权+待确权」
     rows.push({
       unitName: m.unitName,
       managers: m.managers,
       rowType: 'in_transit',
-      revenue: null, // —
-      outputValue: null, // —
-      revenuePackage: null, // —
-      valuePackage: Math.round(m.pendingLinkageValuePackage), // 仅待确权产兑包
-      incomeValuePackage: null, // —
-      totalCost: null, // —
-      monthlyProfit: null, // —
-      yearlyProfit: null, // —
-      rank: null, // —
+      revenue: Math.round(m.revenuePackage), // 收款包两行同值
+      outputValue: Math.round(m.confirmedValuePackage + m.pendingLinkageValuePackage), // 已确权+联动待确权
+      revenuePackage: Math.round(m.revenuePackage), // 收款包两行同值
+      valuePackage: Math.round(m.row2ValuePackage), // 已确权+联动待确权
+      incomeValuePackage: Math.round(m.row2IncomeValuePackage), // 收产
+      totalCost: Math.round(m.totalCost), // 成本也填
+      monthlyProfit: Math.round(m.row2MonthlyProfit), // 月度盈亏
+      yearlyProfit: Math.round(yearlyTotalProfit), // 年度盈亏
+      rank: assignedRank, // 排名按第二行排序后的对应数值
       isNoActivity: m.isNoActivity
     });
   });

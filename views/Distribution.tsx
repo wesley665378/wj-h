@@ -28,6 +28,7 @@ import {
 } from "../types";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
+import { CityGuardianModal, useCityGuardianModal } from "../src/components/CityGuardianModal";
 import { useCostPrivacy } from "../src/hooks/useCostPrivacy";
 import {
   TrendingUp,
@@ -121,6 +122,7 @@ const Distribution: React.FC<DistributionProps> = ({
   acceptanceRecords = [],
   onAddAcceptanceRecord,
 }) => {
+  const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [bonusTarget, setBonusTarget] = useState<BonusCalculation | null>(null);
   const [bonusForm, setBonusForm] = useState({
@@ -170,51 +172,56 @@ const Distribution: React.FC<DistributionProps> = ({
   const handleBonusSubmit = async () => {
     if (!bonusTarget) return;
     if (!bonusForm.amount || bonusForm.amount <= 0) {
-      toast.error("请输入有效的发放金额");
+      showAlert("请输入有效的发放金额");
       return;
     }
 
     const diff = bonusForm.amount - bonusForm.theoreticalAmount;
     if (Math.abs(diff) > 0.01 && !bonusForm.diffReason.trim()) {
-      toast.error("发放金额与理论金额不一致时，必须填写差异说明");
+      showAlert("发放金额与理论金额不一致时，必须填写差异说明");
       return;
     }
 
-    const newRecord: AcceptanceRecord = {
-      id: `ACC-${Date.now()}`,
-      userId: bonusTarget.userId,
-      userName: bonusTarget.userName,
-      category: bonusForm.category,
-      miningId: bonusForm.miningId || undefined,
-      theoreticalAmount: bonusForm.theoreticalAmount,
-      amount: bonusForm.amount,
-      diffType: bonusForm.diffType,
-      diffReason: bonusForm.diffReason,
-      approvalRef: bonusForm.approvalRef,
-      description: bonusForm.description,
-      timestamp: Date.now(),
-      month: filterMonth || getLocalMonthString(),
-      businessDate: getLocalDateString(),
-      status: '已承兑',
-      operatorId: currentUser.id
-    };
+    showConfirm(
+      `确定确认提交奖金发放？\n\n【人员】${bonusTarget.userName} (${bonusTarget.category})\n【类别】${bonusForm.category}\n【实际发放金额】${fmtAmount(bonusForm.amount)}`,
+      async () => {
+        const newRecord: AcceptanceRecord = {
+          id: `ACC-${Date.now()}`,
+          userId: bonusTarget.userId,
+          userName: bonusTarget.userName,
+          category: bonusForm.category,
+          miningId: bonusForm.miningId || undefined,
+          theoreticalAmount: bonusForm.theoreticalAmount,
+          amount: bonusForm.amount,
+          diffType: bonusForm.diffType,
+          diffReason: bonusForm.diffReason,
+          approvalRef: bonusForm.approvalRef,
+          description: bonusForm.description,
+          timestamp: Date.now(),
+          month: filterMonth || getLocalMonthString(),
+          businessDate: getLocalDateString(),
+          status: '已承兑',
+          operatorId: currentUser.id
+        };
 
-    if (onAddAcceptanceRecord) {
-      onAddAcceptanceRecord(newRecord);
-    }
+        if (onAddAcceptanceRecord) {
+          onAddAcceptanceRecord(newRecord);
+        }
 
-    try {
-      await createCdtzRecord(newRecord);
-      if (onAddAcceptanceRecord) {
-        onAddAcceptanceRecord(newRecord);
+        try {
+          await createCdtzRecord(newRecord);
+          if (onAddAcceptanceRecord) {
+            onAddAcceptanceRecord(newRecord);
+          }
+          showAlert(`已成功写入承兑台账 cdtz！对 [${bonusTarget.userName}] 的 ${bonusForm.category} 发放：${fmtAmount(bonusForm.amount)}`);
+        } catch (err) {
+          showAlert("写入承兑台账 cdtz 失败，请重试");
+          return;
+        }
+
+        setBonusTarget(null);
       }
-      toast.success(`已成功写入承兑台账 cdtz！对 [${bonusTarget.userName}] 的 ${bonusForm.category} 发放：${fmtAmount(bonusForm.amount)}`);
-    } catch (err) {
-      toast.error("写入承兑台账 cdtz 失败，请重试");
-      return;
-    }
-
-    setBonusTarget(null);
+    );
   };
 
   const [filterMonth, setFilterMonth] = useState<string>(() => getLocalMonthString()); // 默认当月
@@ -651,7 +658,7 @@ const Distribution: React.FC<DistributionProps> = ({
       workbook,
       `价值分配_${effectiveMonth || "全部"}_${new Date().toLocaleDateString()}.xlsx`,
     );
-    toast.success("导出成功");
+    showAlert("导出成功");
   };
 
   if (!users || !logs) {
@@ -1767,7 +1774,8 @@ const Distribution: React.FC<DistributionProps> = ({
       <StandardModal
         isOpen={!!bonusTarget}
         onClose={() => setBonusTarget(null)}
-        title={`登记承兑发放 - ${bonusTarget?.userName || ""}`}
+        title="城市守护者"
+        subtitle={`登记承兑发放 - ${bonusTarget?.userName || ""}`}
       >
         {bonusTarget && (
           <div className="space-y-4">
@@ -1905,6 +1913,7 @@ const Distribution: React.FC<DistributionProps> = ({
           </div>
         )}
       </StandardModal>
+      <CityGuardianModal state={modalState} onClose={closeModal} />
     </div>
   );
 };
