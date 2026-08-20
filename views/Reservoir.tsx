@@ -39,37 +39,38 @@ const ReservoirVisualizer: React.FC<{
   const centerCoord = viewBoxSize / 2;
 
   return (
-    <Card className="p-8 md:p-10 rounded-[3.5rem] bg-white border border-slate-100 shadow-2xl relative overflow-hidden">
-      <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-500 via-indigo-500 via-purple-500 to-amber-500"></div>
+    <div className="p-6 md:p-8 rounded-[2rem] bg-white border border-slate-200/60 shadow-sm relative overflow-hidden group">
+      <div className="absolute top-0 left-0 w-full h-1 bg-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"></div>
       
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 relative z-40">
-        <div>
-          <h3 className="text-xl md:text-2xl font-black text-slate-900 tracking-tighter uppercase flex items-center">
-            <span className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white text-xl mr-4 shadow-lg">🌀</span>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-10 relative z-40">
+        <div className="space-y-1">
+          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-blue-50 border border-blue-100 mb-2">
+            <Activity className="w-3.5 h-3.5 text-blue-600" />
+            <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wider">流量动态</span>
+          </div>
+          <h3 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight flex items-center">
             统筹水库流向示意图
           </h3>
-          <p className="text-slate-400 text-[10px] font-bold mt-2 uppercase tracking-[0.2em]">
-            统筹池：蓝色管道 经营单元确权流入；琥珀色管道刚性补足流出
+          <p className="text-slate-500 text-[11px] font-medium leading-relaxed max-w-md">
+            可视化各经营单元对统筹池的价值贡献及刚性成本补足的实时流向
           </p>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center space-x-2 bg-blue-50 px-3 py-1.5 rounded-full border border-blue-100">
-            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-            <span className="text-[10px] font-black text-blue-700 uppercase">经营单元流入</span>
+        <div className="flex items-center gap-3 bg-slate-50/80 p-1.5 rounded-2xl border border-slate-100">
+          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm">
+            <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+            <span className="text-[10px] font-bold text-slate-600 uppercase">单元流入</span>
           </div>
-          <div className="flex items-center space-x-2 bg-amber-50 px-3 py-1.5 rounded-full border border-amber-100">
+          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm">
             <div className="w-2 h-2 rounded-full bg-amber-500"></div>
-            <span className="text-[10px] font-black text-amber-700 uppercase">刚性补足流出</span>
+            <span className="text-[10px] font-bold text-slate-600 uppercase">刚性流出</span>
           </div>
         </div>
       </div>
 
-      <div className="relative w-full min-h-[560px] md:min-h-[600px] flex items-center justify-center bg-slate-50/30 rounded-[3rem] border border-slate-100/50 p-4">
-        {/* 背景网格 */}
-        <div 
-          className="absolute inset-0 opacity-[0.03] pointer-events-none" 
-          style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '30px 30px' }}
-        ></div>
+      <div className="relative w-full min-h-[500px] flex items-center justify-center bg-slate-50/50 rounded-[2.5rem] border border-slate-200/40 p-4 overflow-hidden">
+        {/* 背景装饰 */}
+        <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '24px 24px' }}></div>
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-white/50 to-transparent"></div>
 
         {/* SVG 连线与动画粒子 */}
         <svg 
@@ -221,7 +222,7 @@ const ReservoirVisualizer: React.FC<{
           );
         })}
       </div>
-    </Card>
+    </div>
   );
 };
 
@@ -313,184 +314,195 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
   };
 
   return (
-    <div className="p-6 md:p-12 space-y-8 md:space-y-12 bg-[#F8FAFC] min-h-screen">
-      <div className="flex justify-between items-center bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100">
-        <div>
-          <h2 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tighter uppercase">统筹水库管理</h2>
-        </div>
-      </div>
-
-      {/* 统筹池全盘概览 */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] bg-white border border-slate-100 shadow-md">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">经营单元流入</p>
-          <h4 className="text-4xl font-black tracking-tighter font-mono text-slate-900">
-            {Math.round(platformCoordinationInflow).toLocaleString()}
-          </h4>
-        </Card>
-
-        <Card className="p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] bg-white border border-slate-100 shadow-md">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">全盘刚性薪资包</p>
-          <h4 className="text-4xl font-black tracking-tighter font-mono text-slate-900">
-            {Math.round(totalRigidSalary).toLocaleString()}
-          </h4>
-        </Card>
-
-        <Card className="p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] bg-white border border-slate-100 shadow-md">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">全盘统筹补足额</p>
-          <h4 className="text-4xl font-black tracking-tighter font-mono text-slate-900">
-            {Math.round(fhctzRecord ? fhctzRecord.amount : totalSupplement).toLocaleString()}
-          </h4>
-        </Card>
-      </div>
-
-      {/* 消耗积分全盘总览 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card className="p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] bg-white border border-slate-100 shadow-md">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">C 类已确权/入库消耗积分</p>
-          <h4 className="text-4xl font-black tracking-tighter font-mono text-slate-900">
-            {Math.round(totalCPoints).toLocaleString()}
-          </h4>
-        </Card>
-
-        <Card className="p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] bg-white border border-slate-100 shadow-md">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">B2 类已确权/入库消耗积分</p>
-          <h4 className="text-4xl font-black tracking-tighter font-mono text-slate-900">
-            {Math.round(totalB2Points).toLocaleString()}
-          </h4>
-        </Card>
-      </div>
-
-      {/* 统筹水库流向示意图 */}
-      <ReservoirVisualizer 
-        metrics={centerMetrics} 
-        totalInflow={platformCoordinationInflow} 
-        totalSupplement={totalSupplement}
-      />
-
-      {/* 经营单元统筹明细 */}
-      <Card className="p-8 md:p-10 rounded-[3.5rem] bg-white border border-slate-100 shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-amber-500"></div>
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-10">
-          <div>
-            <h3 className="text-2xl font-black text-slate-900 tracking-tighter uppercase flex items-center">
-              <span className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white text-xl mr-4 shadow-lg">📊</span>
-              经营单元统筹明细 ({startDate && endDate ? `${startDate}~${endDate}` : effectiveMonth})
-            </h3>
-            <p className="text-slate-400 text-[10px] font-bold mt-2 uppercase tracking-[0.2em]">
-              实时穿透：基于专家归属单元的收产包与刚性补足核算
-            </p>
+    <div className="p-4 md:p-8 space-y-6 md:space-y-8 bg-slate-50/50 min-h-screen">
+      {/* Header Section */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white p-6 md:p-8 rounded-[2rem] border border-slate-200/60 shadow-sm">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-blue-600">
+            <ShieldCheck className="w-5 h-5" />
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em]">平台资产治理</span>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-             <BusinessDateFilter
-               month={startDate || endDate ? '' : selectedMonth}
-               onMonthChange={(m) => {
-                 setSelectedMonth(m);
-                 setStartDate('');
-                 setEndDate('');
-               }}
-               startDate={startDate}
-               endDate={endDate}
-               onDateRangeChange={(s, e) => {
-                 setStartDate(s);
-                 setEndDate(e);
-                 setSelectedMonth('');
-               }}
-               onClear={() => {
-                 setSelectedMonth(getLocalMonthString());
-                 setStartDate('');
-                 setEndDate('');
-               }}
-             />
-             <button 
-               onClick={handleExport}
-               className="px-4 py-2 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all flex items-center"
-             >
-               <Download className="w-3.5 h-3.5 mr-1.5" />
-               导出 EXCEL
-             </button>
-             <div className="flex space-x-2 pl-2 border-l border-slate-200">
-                <div className="px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-100 flex items-center">
-                   <div className="w-2 h-2 rounded-full bg-blue-500 mr-2"></div>
-                   <span className="text-[9px] font-black text-slate-600 uppercase">经营单元流入</span>
-                </div>
-                <div className="px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-100 flex items-center">
-                   <div className="w-2 h-2 rounded-full bg-amber-500 mr-2"></div>
-                   <span className="text-[9px] font-black text-slate-600 uppercase">统筹补足</span>
-                </div>
-             </div>
-          </div>
+          <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">统筹水库管理</h2>
+          <p className="text-slate-500 text-xs font-medium">全盘资产分配、统筹补足及消耗积分的可视化监管中心</p>
+        </div>
+        
+        <div className="flex items-center gap-3">
+          <BusinessDateFilter
+            month={startDate || endDate ? '' : selectedMonth}
+            onMonthChange={(m) => {
+              setSelectedMonth(m);
+              setStartDate('');
+              setEndDate('');
+            }}
+            startDate={startDate}
+            endDate={endDate}
+            onDateRangeChange={(s, e) => {
+              setStartDate(s);
+              setEndDate(e);
+              setSelectedMonth('');
+            }}
+            onClear={() => {
+              setSelectedMonth(getLocalMonthString());
+              setStartDate('');
+              setEndDate('');
+            }}
+          />
+          <button 
+            onClick={handleExport}
+            className="h-10 px-4 bg-slate-900 text-white rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center shadow-lg shadow-slate-200"
+          >
+            <Download className="w-3.5 h-3.5 mr-2" />
+            数据导出
+          </button>
+        </div>
+      </div>
+
+      {/* Stats Summary Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <StatCard 
+            label="经营单元流入" 
+            value={platformCoordinationInflow} 
+            color="blue"
+            icon={<Droplets className="w-4 h-4" />}
+          />
+          <StatCard 
+            label="全盘刚性薪资包" 
+            value={totalRigidSalary} 
+            color="slate"
+            icon={<Users className="w-4 h-4" />}
+          />
+          <StatCard 
+            label="全盘统筹补足额" 
+            value={fhctzRecord ? fhctzRecord.amount : totalSupplement} 
+            color="amber"
+            icon={<Activity className="w-4 h-4" />}
+          />
+        </div>
+        <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <StatCard 
+            label="C 类入库消耗积分" 
+            value={totalCPoints} 
+            color="indigo"
+          />
+          <StatCard 
+            label="B2 类入库消耗积分" 
+            value={totalB2Points} 
+            color="emerald"
+          />
+        </div>
+      </div>
+
+      {/* Main Content Layout */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+        <div className="xl:col-span-7 space-y-6">
+          <ReservoirVisualizer 
+            metrics={centerMetrics} 
+            totalInflow={platformCoordinationInflow} 
+            totalSupplement={totalSupplement}
+          />
+          
+          <BusinessUnitProfitRankingTable
+            businessUnits={businessUnits}
+            selectedMonth={selectedMonth}
+            users={users}
+            auditLogs={auditLogs || logs}
+            resources={resources}
+            transactions={transactions}
+            currentUser={currentUser}
+            startDate={startDate}
+            endDate={endDate}
+          />
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="border-b border-slate-100">
-                <th className="pb-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">经营单元</th>
-                <th className="pb-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">已确权收款包</th>
-                <th className="pb-6 text-[10px] font-black text-blue-500 uppercase tracking-widest text-right">经营单元流入</th>
-                <th className="pb-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">单元收产包</th>
-                <th className="pb-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">单元刚性工资</th>
-                <th className="pb-6 text-[10px] font-black text-amber-600 uppercase tracking-widest text-right">统筹补足</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {centerMetrics.map((m, idx) => (
-                <tr key={idx} className="group hover:bg-slate-50/50 transition-colors">
-                  <td className="py-6">
-                    <div className="flex items-center">
-                      <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 font-black text-xs mr-3 group-hover:bg-slate-900 group-hover:text-white transition-all">
-                        {m.center.slice(-2)}
-                      </div>
-                      <span className="text-sm font-black text-slate-800">{m.center}</span>
-                    </div>
-                  </td>
-                  <td className="py-6 text-right font-mono text-xs font-bold text-slate-600">
-                    {Math.round(m.confirmedRevenuePackage).toLocaleString()}
-                  </td>
-                  <td className="py-6 text-right font-mono text-xs font-black text-blue-600">
-                    {Math.round(m.inflow20).toLocaleString()}
-                  </td>
-                  <td className="py-6 text-right font-mono text-xs font-bold text-slate-600">
-                    {Math.round(m.incomeProductionPackage).toLocaleString()}
-                  </td>
-                  <td className="py-6 text-right font-mono text-xs font-bold text-slate-600">
-                    {Math.round(m.unitSalary).toLocaleString()}
-                  </td>
-                  <td className="py-6 text-right">
-                    <span className={`font-mono text-sm font-black px-3 py-1 rounded-lg ${m.unitSupplement > 0 ? 'bg-amber-100 text-amber-700' : 'text-slate-300'}`}>
-                      {m.unitSupplement > 0 ? Math.round(m.unitSupplement).toLocaleString() : '0'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {centerMetrics.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="py-20 text-center">
-                    <div className="flex flex-col items-center">
-                      <Activity className="w-12 h-12 text-slate-200 mb-4" />
-                      <p className="text-xs font-black text-slate-400 uppercase tracking-widest">暂无选定月份({selectedMonth})经营单元统筹数据</p>
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+        <div className="xl:col-span-5">
+          <Card className="p-0 rounded-[2rem] bg-white border border-slate-200/60 shadow-sm overflow-hidden h-full">
+            <div className="p-6 md:p-8 border-b border-slate-100 flex items-center justify-between bg-slate-50/30">
+              <div className="space-y-1">
+                <h3 className="text-lg font-bold text-slate-900 tracking-tight uppercase">经营单元统筹明细</h3>
+                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">
+                  {startDate && endDate ? `${startDate}~${endDate}` : effectiveMonth}
+                </p>
+              </div>
+            </div>
 
-      {/* 经营单元盈利排名榜 */}
-      <BusinessUnitProfitRankingTable
-        businessUnits={businessUnits}
-        selectedMonth={selectedMonth}
-        users={users}
-        auditLogs={auditLogs || logs}
-        resources={resources}
-        transactions={transactions}
-        currentUser={currentUser}
-        startDate={startDate}
-        endDate={endDate}
-      />
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
+                  <tr>
+                    <th className="px-6 py-5">经营单元</th>
+                    <th className="px-4 py-5 text-right">单元流入</th>
+                    <th className="px-4 py-5 text-right">统筹补足</th>
+                    <th className="px-4 py-5 text-right">明细</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {centerMetrics.map((m, idx) => (
+                    <tr key={idx} className="group hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-5">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-[10px] group-hover:bg-slate-900 group-hover:text-white transition-all">
+                            {idx + 1}
+                          </div>
+                          <span className="text-sm font-bold text-slate-800">{m.center}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-5 text-right">
+                        <div className="text-xs font-bold text-blue-600 font-mono">
+                          {Math.round(m.inflow20).toLocaleString()}
+                        </div>
+                      </td>
+                      <td className="px-4 py-5 text-right">
+                        <div className={`text-xs font-bold font-mono ${m.unitSupplement > 0 ? 'text-amber-600' : 'text-slate-300'}`}>
+                          {m.unitSupplement > 0 ? Math.round(m.unitSupplement).toLocaleString() : '0'}
+                        </div>
+                      </td>
+                      <td className="px-4 py-5 text-right">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[9px] text-slate-400 font-medium">收款: {Math.round(m.confirmedRevenuePackage).toLocaleString()}</span>
+                          <span className="text-[9px] text-slate-400 font-medium">薪资: {Math.round(m.unitSalary).toLocaleString()}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {centerMetrics.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-20 text-center">
+                        <div className="flex flex-col items-center opacity-40">
+                          <Activity className="w-10 h-10 text-slate-200 mb-2" />
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">无统筹数据</p>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const StatCard: React.FC<{ label: string; value: number; color: string; icon?: React.ReactNode }> = ({ label, value, color, icon }) => {
+  const colorMap: Record<string, string> = {
+    blue: 'bg-blue-50 text-blue-600 border-blue-100 shadow-blue-100/50',
+    slate: 'bg-slate-50 text-slate-600 border-slate-200 shadow-slate-100/50',
+    amber: 'bg-amber-50 text-amber-600 border-amber-200 shadow-amber-100/50',
+    indigo: 'bg-indigo-50 text-indigo-600 border-indigo-100 shadow-indigo-100/50',
+    emerald: 'bg-emerald-50 text-emerald-600 border-emerald-100 shadow-emerald-100/50',
+  };
+
+  return (
+    <div className={`p-5 rounded-2xl border ${colorMap[color] || colorMap.slate} shadow-sm bg-white`}>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{label}</p>
+        {icon && <div className="opacity-50">{icon}</div>}
+      </div>
+      <h4 className="text-xl font-black tracking-tight font-mono text-slate-900">
+        {Math.round(value).toLocaleString()}
+      </h4>
     </div>
   );
 };

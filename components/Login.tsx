@@ -102,22 +102,21 @@ const Login: React.FC<LoginProps> = ({ onLogin, onAuthenticate }) => {
           </div>
 
           {/* 同意短句：密码框下方、「立即登录」按钮正上方 */}
-          <div className="text-center text-[5px] text-slate-400 leading-tight py-0.5 select-none">
-            登录即表示您已阅读并同意
-            <button
-              type="button"
-              onClick={() => handleOpenLegal('agreement')}
-              className="text-slate-400 hover:text-blue-400 transition-colors cursor-pointer underline decoration-slate-600 underline-offset-2 mx-0.5 text-[5px]"
-            >
-              《用户协议》
-            </button>
-            与
+          <div className="text-center text-[11px] text-slate-500 whitespace-nowrap select-none py-1">
+            登录视为您已同意
             <button
               type="button"
               onClick={() => handleOpenLegal('privacy')}
-              className="text-slate-400 hover:text-blue-400 transition-colors cursor-pointer underline decoration-slate-600 underline-offset-2 mx-0.5 text-[5px]"
+              className="text-slate-500 hover:text-blue-400 transition-colors cursor-pointer underline decoration-slate-700 underline-offset-2 mx-1 text-[11px]"
             >
-              《隐私政策》
+              隐私政策
+            </button>
+            <button
+              type="button"
+              onClick={() => handleOpenLegal('agreement')}
+              className="text-slate-500 hover:text-blue-400 transition-colors cursor-pointer underline decoration-slate-700 underline-offset-2 mx-1 text-[11px]"
+            >
+              用户协议
             </button>
           </div>
 

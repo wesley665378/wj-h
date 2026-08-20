@@ -31,7 +31,8 @@ export function calculateHedgeCapacitiesAndWeights(resource: MiningResource, all
       cWeightVal: 1,
       b2Weight: 1,
       C: 0,
-      B2: 0
+      B2: 0,
+      N: 0
     };
   }
 
@@ -39,23 +40,32 @@ export function calculateHedgeCapacitiesAndWeights(resource: MiningResource, all
   const revInitial = getInitialRevenueCapacity(resource);
   const valInitial = getInitialValueCapacity(resource);
 
-  const revCurrent = Math.max(0, revInitial - C);
-  const valCurrent = Math.max(0, valInitial - C - B2);
+  // N = round(款初 × 0.933)
+  const N = Math.round(revInitial * 0.933);
 
-  const cWeightRev = revInitial > 0 ? Math.max(0, (revInitial - C) / revInitial) : 1;
-  const cWeightVal = valInitial > 0 ? Math.max(0, (valInitial - C) / valInitial) : 1;
-  const b2Weight = valInitial > 0 ? Math.max(0, (valInitial - B2) / valInitial) : 1;
+  // C权 = (N − ΣC) / N (N=0 时 C权=1)
+  const cWeight = N > 0 ? Math.max(0, (N - C) / N) : 1;
+
+  // B2权 = (N − ΣC − ΣB2) / (N − ΣC) (N−ΣC=0 时 B2权=1)
+  const denominatorB2 = N - C;
+  const b2Weight = denominatorB2 > 0 ? Math.max(0, (denominatorB2 - B2) / denominatorB2) : 1;
+
+  // 款当 = max(0, 款初 - C)
+  const revCurrent = Math.max(0, revInitial - C);
+  // 产当 = max(0, 产初 - C - B2)
+  const valCurrent = Math.max(0, valInitial - C - B2);
 
   return {
     revInitial,
     valInitial,
     revCurrent,
     valCurrent,
-    cWeightRev,
-    cWeightVal,
+    cWeightRev: cWeight,
+    cWeightVal: cWeight,
     b2Weight,
     C,
-    B2
+    B2,
+    N
   };
 }
 
@@ -153,20 +163,20 @@ export function applyConsumptionHedgeToLogs(
       ? (log.rawAmount !== undefined && log.rawAmount !== null ? Number(log.rawAmount) * 0.933 : Number(log.amount))
       : rawAmount;
 
-    // 权重: 已确权收款流水：只乘 C权(款)；已确权产值流水：乘 B2权，若 C权(产)<1 则再乘 C权(产)
+    // 收款：只乘 C权；产值：始终乘 C权 × B2权
     const weight = isRevenue
       ? cWeightRev
-      : b2Weight * (cWeightVal < 1 ? cWeightVal : 1);
+      : cWeightVal * b2Weight;
 
     const newAmount = Math.round(baseAmount * weight);
-    const newNetValue = Math.round(newAmount * factor);
+    const newNetValue = Math.round(baseAmount * weight * factor);
 
     return {
       ...log,
       rawAmount,
       amount: newAmount,
       netValue: newNetValue,
-      cClassRatio: isRevenue ? cWeightRev : cWeightVal,
+      cClassRatio: cWeightRev,
       b2ClassRatio: isRevenue ? 1 : b2Weight
     };
   });

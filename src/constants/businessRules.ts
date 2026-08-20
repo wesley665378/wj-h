@@ -52,16 +52,17 @@ export const PURITY_RULES = {
 
 export const B2_HEDGE_RULES = {
   title: "B2 动态对冲规则 (产值端)",
-  definition: "B2对冲权重被定义为“产值端动态抵减项”，代表项目实施中的刚性采购费用。",
-  weightFormula: "B2对冲权重(X) = (项目总产初 - 已审批B2消耗) / 项目总产初",
-  netValueFormula: "产兑包 = 注入积分 * B2对冲权重 * 提炼因子",
-  impact: "B2 的抵减通过降低该项目下所有采集主体的“B2对冲权重”，等比例影响所有关联主体的已确权产值包。"
+  definition: "B2权被定义为“产值端动态抵减项”，代表项目实施中的刚性采购费用。",
+  weightFormula: "B2权 = (N − ΣC − ΣB2) / (N − ΣC)",
+  netValueFormula: "产兑包 = round(注入积分 * C权 * B2权 * 提炼因子)",
+  impact: "B2 的抵减通过降低该项目下所有采集主体的“B2权”，等比例影响所有关联主体的已确权产值包。"
 };
 
 export const C_HEDGE_RULES = {
   title: "C 动态对冲规则 (收款端/产值端)",
-  definition: "C对冲权重代表项目实施中的通用运营扣除比例，按剩余额度比例动态计算。",
-  formula: "C对冲权重(CWeight) = (初限(Limit) - ΣC积分) / 初限(Limit)"
+  definition: "C权代表项目实施中的通用运营扣除比例，按基数 N 动态计算。",
+  formula: "C权 = (N − ΣC) / N",
+  baseFormula: "N = round(款初 × 0.933)"
 };
 
 export const FORMULA_FACTOR_RULES = {

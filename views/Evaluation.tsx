@@ -60,9 +60,11 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
         <div className="flex flex-col sm:flex-row sm:items-center gap-4 md:gap-6">
           <h3 className="text-base md:text-lg font-bold text-slate-800 tracking-tight uppercase">全员价值贡献评价矩阵</h3>
         </div>
-        <span className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase tracking-widest self-start sm:self-center">
-          综合价值评价与效率审计
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+            综合价值评价与效率审计
+          </span>
+        </div>
       </div>
 
       {/* KPI 卡片组：四格小白块 */}

@@ -23,6 +23,7 @@ import { UI_LABELS } from '../src/constants/uiLabels';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
 import * as XLSX from 'xlsx';
 import { calculateHistoricalNetValue, calculateDualTrackCoreMatrices, calculateT1PlusValue, calculateT1PlusRevenue } from '../src/utils/business';
+import { calculateHedgeCapacitiesAndWeights } from '../src/utils/consumptionHedge';
 import { deriveProjectStatus, isProjectWritable } from '../src/utils/projectStatus';
 import { syncWorkspace } from '../src/services/api';
 import { toast } from 'sonner';
@@ -551,64 +552,21 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   }, [selectedCategory, selectedTier, managedUsers, selectedResource, selectedRefineType]);
 
   const getHedgeWeight = React.useCallback((collectorId: string, amount: number) => {
-    const isValue = selectedCategory === RefineCategory.Value;
-    const collector = managedUsers.find(u => u.id === collectorId);
-    const isProdSpecialist = collector && isValueExpert(collector);
-
     if (!selectedResource) return { cWeight: 1, b2Weight: 1, combined: 1 };
 
-    // 获取并计算双轨矩阵
     const allResourceLogs = logs.filter(l => l && l.miningId === selectedMiningId && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved));
-    const allCPoints = allResourceLogs.filter(l => l.costCategory === 'C').map(l => l.dynamicCost || 0);
-
-    const matrices = calculateDualTrackCoreMatrices({
-      miningId: selectedMiningId || '',
-      originalRevenueLimit: getInitialRevenueCapacity(selectedResource),
-      npcRevenueStatus: selectedResource.category === '据实' ? '据实' : '100%',
-      npcRevenueOverrideValue: getCurrentRevenueCapacity(selectedResource),
-      totalConfirmedRevenue: selectedResource.confirmedRevenue || 0,
-      cRevenuePointsList: allCPoints, // 使用全部 C 消耗进行计算
-      originalValueLimit: getInitialValueCapacity(selectedResource),
-      npcValueStatus: selectedResource.category === '据实' ? '据实' : '100%',
-      npcValueOverrideValue: getCurrentValueCapacity(selectedResource),
-      totalConfirmedValue: selectedResource.confirmedValue || 0,
-      cValuePointsList: allCPoints // 使用全部 C 消耗进行计算
-    });
+    const hedgeInfo = calculateHedgeCapacitiesAndWeights(selectedResource, allResourceLogs);
     
-    // B2对冲的“定向性”约束：B2消耗作用于产值权重。如果是收款类，则 B2 对冲权重不参与计算，设为 1
     const isRevenue = selectedCategory === RefineCategory.Revenue;
-    let b2Weight = 1;
-    if (!isRevenue) {
-      const approvedB2 = getB2ClassCostForResource(AuditStatus.Approved);
-      const confirmedB2 = getB2ClassCostForResource(AuditStatus.Confirmed);
-      const totalB2 = approvedB2 + confirmedB2;
-      
-      const approvedC = getCClassCostForResource(AuditStatus.Approved);
-      const confirmedC = getCClassCostForResource(AuditStatus.Confirmed);
-      const totalC = approvedC + confirmedC;
-      
-      // 计算 B2 权重时排除 C 类消耗，获得 C 对冲后的余额上限作为基准
-      const valueLimit = matrices.updatedValueLimit;
-      const limitCAdjusted = Math.max(0, valueLimit - totalC);
-      b2Weight = limitCAdjusted > 0 ? Math.max(0, (limitCAdjusted - totalB2) / limitCAdjusted) : 1;
-    }
-    
-    // 逻辑判定：
-    // 1. 产值类 (Value)：始终受 C 和 B2 复合影响
-    // 2. 收款类 (Revenue)：仅受 C 影响，不参与 B2 对冲
-    const activeCWeight = isRevenue ? matrices.cRevenueWeight : matrices.cValueWeight;
-    
-    // 返回包含两个权重的对象
+    const cWeight = hedgeInfo.cWeightRev;
+    const b2Weight = hedgeInfo.b2Weight;
+
     return {
-      cWeight: activeCWeight,
-      b2Weight: b2Weight,
-      combined: isRevenue 
-        ? activeCWeight
-        : (selectedCategory === RefineCategory.Value || isProdSpecialist 
-          ? Math.min(1, activeCWeight * b2Weight)
-          : activeCWeight)
+      cWeight,
+      b2Weight,
+      combined: isRevenue ? cWeight : cWeight * b2Weight
     };
-  }, [selectedCategory, selectedResource, getCClassCostForResource, getB2ClassCostForResource, managedUsers, isValueExpert, logs, selectedMiningId]);
+  }, [selectedCategory, selectedResource, logs, selectedMiningId]);
 
   const calculateNetValueForCollector = React.useCallback((collectorId: string, amount: number) => {
     const factor = getFactorForCollector(collectorId);
@@ -706,41 +664,23 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   const dataIntegrityStatus = useMemo(() => {
     if (!selectedResource) return { ok: true, msg: '等待选择矿山', stats: null };
     
-    const currentC = getCClassCostForResource(AuditStatus.Confirmed) + getCClassCostForResource(AuditStatus.Approved);
-    const currentB2 = getB2ClassCostForResource(AuditStatus.Confirmed) + getB2ClassCostForResource(AuditStatus.Approved);
-    
-    // Check against resource state if applicable (internal consistency)
-    // Here we can also verify if there are any pending logs that might affect future calculations
+    const allResourceLogs = logs.filter(l => l && l.miningId === selectedMiningId && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved));
+    const hedgeInfo = calculateHedgeCapacitiesAndWeights(selectedResource, allResourceLogs);
+
     const pendingC = getCClassCostForResource(AuditStatus.Pending);
     const pendingB2 = getB2ClassCostForResource(AuditStatus.Pending);
     
-    // Calculate real-time weights for display
-    const allResourceLogs = logs.filter(l => l && l.miningId === selectedMiningId && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved));
-    const allCPoints = allResourceLogs.filter(l => l.costCategory === 'C').map(l => l.dynamicCost || 0);
-
-    const matrices = calculateDualTrackCoreMatrices({
-      miningId: selectedMiningId || '',
-      originalRevenueLimit: getInitialRevenueCapacity(selectedResource),
-      npcRevenueStatus: selectedResource.category === '据实' ? '据实' : '100%',
-      npcRevenueOverrideValue: getCurrentRevenueCapacity(selectedResource),
-      totalConfirmedRevenue: selectedResource.confirmedRevenue || 0,
-      cRevenuePointsList: allCPoints,
-      originalValueLimit: getInitialValueCapacity(selectedResource),
-      npcValueStatus: selectedResource.category === '据实' ? '据实' : '100%',
-      npcValueOverrideValue: getCurrentValueCapacity(selectedResource),
-      totalConfirmedValue: selectedResource.confirmedValue || 0,
-      cValuePointsList: allCPoints
-    });
-
-    const valueLimit = matrices.updatedValueLimit;
-    const limitCAdjusted = Math.max(0, valueLimit - currentC);
-    const b2Weight = limitCAdjusted > 0 ? Math.max(0, (limitCAdjusted - currentB2) / limitCAdjusted) : 1;
-    const activeCWeight = selectedCategory === RefineCategory.Revenue ? matrices.cRevenueWeight : matrices.cValueWeight;
-
     return { 
       ok: true, 
       msg: '数据源同步中',
-      stats: { currentC, currentB2, pendingC, pendingB2, cWeight: activeCWeight, b2Weight }
+      stats: { 
+        currentC: hedgeInfo.C, 
+        currentB2: hedgeInfo.B2, 
+        pendingC, 
+        pendingB2, 
+        cWeight: hedgeInfo.cWeightRev, 
+        b2Weight: hedgeInfo.b2Weight 
+      }
     };
   }, [selectedResource, getCClassCostForResource, getB2ClassCostForResource, logs, selectedMiningId, selectedCategory]);
 
@@ -777,8 +717,8 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
     setAuditData([
         { metric: '申报积分', original: totalAmount, target: totalAmount },
-        ...(selectedCategory === RefineCategory.Revenue ? [] : [{ metric: 'B2对冲权重', original: 0, target: realtimeB2 }]),
-        { metric: 'C对冲权重', original: 0, target: realtimeC },
+        ...(selectedCategory === RefineCategory.Revenue ? [] : [{ metric: 'B2权', original: 0, target: realtimeB2 }]),
+        { metric: 'C权', original: 0, target: realtimeC },
     ]);
     setIsAuditOpen(true);
   };
@@ -1074,8 +1014,8 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         '采集主体': `${collector?.name || log.recordedCollectorId} (${collector?.category || '未定义'})`,
         '确权类型': log.confirmationType || '手动确权',
         '注入积分': displayInjection,
-        'C对冲权重': cWeight.toFixed(4),
-        'B2对冲权重': log.category === RefineCategory.Revenue ? '—' : b2Weight.toFixed(4),
+        'C权': cWeight.toFixed(4),
+        'B2权': log.category === RefineCategory.Revenue ? '—' : b2Weight.toFixed(4),
         '产兑包': valuePackageDisplay,
         '收款包': revenuePackageDisplay,
         '确权日期': log.confirmedAt ? new Date(log.confirmedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-',
@@ -1115,9 +1055,9 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                <span className="text-[9px] font-black text-emerald-700 uppercase tracking-tighter">
                  {dataIntegrityStatus.msg}: 
                  {selectedCategory === RefineCategory.Revenue ? (
-                   <span className="ml-1 font-mono">C对冲权重({dataIntegrityStatus.stats?.cWeight != null ? dataIntegrityStatus.stats.cWeight.toFixed(4) : '1.0000'})</span>
+                   <span className="ml-1 font-mono">C权({dataIntegrityStatus.stats?.cWeight != null ? dataIntegrityStatus.stats.cWeight.toFixed(4) : '1.0000'})</span>
                  ) : (
-                   <span className="ml-1 font-mono">C对冲权重({dataIntegrityStatus.stats?.cWeight != null ? dataIntegrityStatus.stats.cWeight.toFixed(4) : '1.0000'}) | B2对冲权重({dataIntegrityStatus.stats?.b2Weight != null ? dataIntegrityStatus.stats.b2Weight.toFixed(4) : '1.0000'})</span>
+                   <span className="ml-1 font-mono">C权({dataIntegrityStatus.stats?.cWeight != null ? dataIntegrityStatus.stats.cWeight.toFixed(4) : '1.0000'}) | B2权({dataIntegrityStatus.stats?.b2Weight != null ? dataIntegrityStatus.stats.b2Weight.toFixed(4) : '1.0000'})</span>
                  )}
                </span>
                <span className="ml-2 text-[8px] font-bold text-emerald-500 bg-white px-1.5 rounded border border-emerald-100">单一数据源实时校验已开启</span>
@@ -1492,11 +1432,11 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-[9px] font-bold font-mono uppercase">积分</span>
                       </div>
                     </div>
-                    {/* 显示 C对冲权重 和 B2对冲权重 (当有对冲时且不是收款类) */}
+                    {/* 显示 C权 和 B2权 (当有对冲时且不是收款类) */}
                     {hasAnyHedge && (
                       selectedCategory === RefineCategory.Revenue ? (
                         <div className="lg:col-span-2 space-y-1">
-                          <label className={`text-[10px] font-bold uppercase ${weights.cWeight < 1 ? 'text-amber-600' : 'text-slate-400'}`}>C对冲权重</label>
+                          <label className={`text-[10px] font-bold uppercase ${weights.cWeight < 1 ? 'text-amber-600' : 'text-slate-400'}`}>C权</label>
                           <div className="relative">
                             <input
                               type="text"
@@ -1509,7 +1449,18 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                       ) : (
                         <div className="lg:col-span-2 grid grid-cols-2 gap-2">
                           <div className="space-y-1">
-                            <label className={`text-[10px] font-bold uppercase ${weights.cWeight < 1 ? 'text-amber-600' : 'text-slate-400'}`}>C对冲权重</label>
+                            <div className="flex items-center gap-1">
+                              <label className={`text-[10px] font-bold uppercase ${weights.cWeight < 1 ? 'text-amber-600' : 'text-slate-400'}`}>C权</label>
+                              <InfoTip 
+                                title="C权"
+                                content={
+                                  <div className="space-y-1">
+                                    <p>计算：(N − ΣC) / N</p>
+                                    <p className="text-[10px] text-slate-400">N = round(款初 × 0.933)</p>
+                                  </div>
+                                }
+                              />
+                            </div>
                             <div className="relative">
                               <input
                                 type="text"
@@ -1520,7 +1471,13 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                             </div>
                           </div>
                           <div className="space-y-1">
-                            <label className={`text-[10px] font-bold uppercase ${weights.b2Weight < 1 ? 'text-blue-600' : 'text-slate-400'}`}>B2对冲权重</label>
+                            <div className="flex items-center gap-1">
+                              <label className={`text-[10px] font-bold uppercase ${weights.b2Weight < 1 ? 'text-blue-600' : 'text-slate-400'}`}>B2权</label>
+                              <InfoTip 
+                                title="B2权"
+                                content="计算：(N − ΣC − ΣB2) / (N − ΣC)"
+                              />
+                            </div>
                             <div className="relative">
                               <input
                                 type="text"
@@ -1890,8 +1847,8 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 <th className="px-2 py-4">采集主体</th>
                 <th className="px-2 py-4">确权类型</th>
                 <th className="px-2 py-4 text-right">注入积分</th>
-                <th className="px-2 py-4 text-right">C对冲权重</th>
-                <th className="px-2 py-4 text-right">B2对冲权重</th>
+                <th className="px-2 py-4 text-right">C权</th>
+                <th className="px-2 py-4 text-right">B2权</th>
                 <th className="px-2 py-4 text-right">产兑包</th>
                 <th className="px-2 py-4 text-right">收款包</th>
                 <th className="px-2 py-4">确权日期</th>

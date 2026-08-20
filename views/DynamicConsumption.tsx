@@ -33,6 +33,7 @@ import {
   isLogInFilter,
 } from '../src/utils/dateUtils';
 import { formatAmount, formatRatio, formatPercent } from '../src/utils/formatters';
+import { calculateHedgeCapacitiesAndWeights } from '../src/utils/consumptionHedge';
 import { InfoTip } from '../src/components/InfoTip';
 import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
 import { getExecutionType, getExecutionTypeBadgeColor, EXECUTION_TYPE_EXPLANATIONS } from '../src/utils/executionType';
@@ -178,15 +179,14 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
   }, [selectedMiningId, resources]);
 
   // 获取当前选中的权重 (对冲后权重)
-  const revenueWeight = useMemo(() => {
-    if (!selectedResource) return 1;
-    return getCWeightRevenue(selectedResource, logs);
-  }, [selectedResource, logs]);
+  const hedgeInfo = useMemo(() => {
+    if (!selectedResource) return null;
+    const allResourceLogs = logs.filter(l => l && l.miningId === selectedMiningId && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved));
+    return calculateHedgeCapacitiesAndWeights(selectedResource, allResourceLogs);
+  }, [selectedResource, logs, selectedMiningId]);
 
-  const valueWeight = useMemo(() => {
-    if (!selectedResource) return 1;
-    return getB2WeightValue(selectedResource, logs);
-  }, [selectedResource, logs]);
+  const revenueWeight = hedgeInfo ? hedgeInfo.cWeightRev : 1;
+  const valueWeight = hedgeInfo ? hedgeInfo.b2Weight : 1;
 
   const sharedWeight = useMemo(() => {
     return selectedCategory === RefineCategory.Revenue ? revenueWeight : valueWeight;
@@ -264,16 +264,17 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
     if (costCategory === 'C') {
       return Object.values(executorMap).map(exec => {
+        // C 对冲影响收款和产值
         return {
           ...exec,
           afterRevenue: Math.round(exec.revenue * revenueWeight),
           afterRevenueAmount: Math.round(exec.revenueAmount * revenueWeight),
-          afterValue: Math.round(exec.value * valueWeight),
-          afterValueAmount: Math.round(exec.valueAmount * valueWeight)
+          afterValue: Math.round(exec.value * (revenueWeight * valueWeight)), // C权 * B2权
+          afterValueAmount: Math.round(exec.valueAmount * (revenueWeight * valueWeight))
         };
       }).filter(e => e.revenue > 0 || e.value > 0);
     } else if (costCategory === 'B' && valueConsumptionMode === 'B2') {
-      // B2对冲权重消耗对冲产值权重
+      // B2 对冲仅影响产值权重
       return Object.values(executorMap).map(exec => ({
         ...exec,
         afterRevenue: Math.round(exec.revenue),
@@ -430,64 +431,44 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
     const dataToExport = consumptionLogs.map(log => {
       const res = resources.find(r => r.id === log.miningId);
       
-      // Calculate C Weight
-      const getCWeight = (l: ValueCreationLog) => {
-        if (!res) return 1;
-        return l.category === RefineCategory.Revenue 
-          ? getCWeightRevenue(res, logs) 
-          : getCWeightValue(res, logs);
-      };
+      const resLogs = logs.filter(l => l.miningId === log.miningId && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved));
+      const hedgeInfo = res ? calculateHedgeCapacitiesAndWeights(res, resLogs) : null;
       
-      const cWeight = log.costCategory === 'C' ? parseFloat(getCWeight(log).toFixed(4)) : '-';
+      const cWeight = log.costCategory === 'C' ? (hedgeInfo ? parseFloat(hedgeInfo.cWeightRev.toFixed(4)) : 1) : '-';
+      const b2Weight = (log.costCategory === 'B' && log.valueConsumptionMode === 'B2') ? (hedgeInfo ? parseFloat(hedgeInfo.b2Weight.toFixed(4)) : 1) : '-';
 
-      // H: Initial vs Updated Revenue Limit (C)
       let colH = "-";
-      if (res) {
-        const initialRev = getInitialRevenueCapacity(res);
-        const currentRev = getCurrentRevenueCapacity(res, logs);
-        colH = `${Math.round(initialRev)} / ${Math.round(currentRev)}`;
+      if (hedgeInfo) {
+        colH = `${Math.round(hedgeInfo.revInitial)} / ${Math.round(hedgeInfo.revCurrent)}`;
       }
 
-      // I: Initial vs Updated Value Limit (C)
       let colI = "-";
-      if (res) {
-        const initialVal = getInitialValueCapacity(res);
-        const currentVal = getCurrentValueCapacity(res, logs);
-        colI = `${Math.round(initialVal)} / ${Math.round(currentVal)}`;
+      if (hedgeInfo) {
+        colI = `${Math.round(hedgeInfo.valInitial)} / ${Math.round(hedgeInfo.valCurrent)}`;
       }
 
-      // Calculate B2 Weight based on C-adjusted capacity
-      const getB2Weight = () => {
-        if (!res) return 1;
-        return getB2WeightValue(res, logs);
-      };
-
-      const b2Weight = (log.costCategory === 'B' && log.valueConsumptionMode === 'B2') ? parseFloat(getB2Weight().toFixed(4)) : '-';
-
-      // L: Initial vs Updated Value Limit (B2) with both C and B2 subtracted
       let colL = "-";
-      if (res) {
-        const initialVal = getInitialValueCapacity(res);
-        const currentVal = getCurrentValueCapacity(res, logs);
-        colL = `${Math.round(initialVal)} / ${Math.round(currentVal)}`;
+      if (hedgeInfo) {
+        colL = `${Math.round(hedgeInfo.valInitial)} / ${Math.round(hedgeInfo.valCurrent)}`;
       }
 
       return {
         '申报编号': log.id,
-        '业务月份': resolveLogBusinessMonth(log),
         '业务日期': resolveLogBusinessDate(log),
+        '经营单元': users.find(u => u.id === log.rankId)?.center || '-',
         '提报时间': formatSubmissionTime(log.timestamp),
         '矿山编号': log.miningId,
         '采集主体': users.find(u => u.id === log.recordedCollectorId)?.name || log.recordedCollectorId,
         'A': log.costCategory === 'A' ? Math.round(log.dynamicCost) : 0,
         'C': log.costCategory === 'C' ? Math.round(log.dynamicCost) : 0,
-        'C对冲权重': cWeight,
+        'C权': cWeight,
         '款初/款当': colH,
         '产初/产当': colI,
         'B1': (log.costCategory === 'B' && log.valueConsumptionMode === 'B1') ? Math.round(log.dynamicCost) : 0,
         'B2': (log.costCategory === 'B' && log.valueConsumptionMode === 'B2') ? Math.round(log.dynamicCost) : 0,
-        'B2对冲权重': b2Weight,
+        'B2权': b2Weight,
         '产初/产当 ': colL,
+        '确权日期': log.confirmedAt ? new Date(log.confirmedAt).toLocaleString() : '-',
         '确权状态': log.status === AuditStatus.Approved ? '已入库' : log.status
       };
     });
@@ -973,19 +954,20 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
             <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
               <tr>
                 <th className="px-4 py-4 md:py-6">申报编号</th>
-                <th className="px-3 py-6 text-center">业务月份</th>
                 <th className="px-3 py-6 text-center">业务日期</th>
+                <th className="px-4 py-6 text-center">经营单元</th>
                 <th className="px-4 py-6 text-center">矿山编号</th>
                 <th className="px-4 py-6 font-bold text-slate-800">采集主体</th>
                 <th className="px-3 py-6 text-right text-blue-600">A</th>
-                <th className="px-3 py-6 text-right text-amber-600">C</th>
-                <th className="px-4 py-6 text-right text-amber-700">C对冲权重</th>
+                <th className="px-3 py-6 text-right text-amber-600">C积分</th>
+                <th className="px-4 py-6 text-right text-amber-700">C权</th>
                 <th className="px-4 py-6 text-right text-amber-800">款初/款当</th>
                 <th className="px-4 py-6 text-right text-amber-900">产初/产当</th>
                 <th className="px-3 py-6 text-right text-rose-600">B1</th>
-                <th className="px-3 py-6 text-right text-emerald-600">B2</th>
-                <th className="px-4 py-6 text-right text-emerald-700">B2对冲权重</th>
+                <th className="px-3 py-6 text-right text-emerald-600">B2积分</th>
+                <th className="px-4 py-6 text-right text-emerald-700">B2权</th>
                 <th className="px-4 py-6 text-right text-emerald-800">产初/产当</th>
+                <th className="px-6 py-6 text-center">确权日期</th>
                 <th className="px-6 py-6 text-right">确权状态</th>
               </tr>
             </thead>
@@ -1042,13 +1024,13 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                       <span className="text-[8px] font-bold text-slate-400">{formatSubmissionTime(log.timestamp)}</span>
                     </td>
                     <td className="px-3 py-6 text-center">
-                      <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
-                        {resolveLogBusinessMonth(log)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-6 text-center">
                       <span className="font-mono text-xs font-bold text-slate-700">
                         {resolveLogBusinessDate(log)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-6 text-center">
+                      <span className="text-xs font-bold text-slate-600">
+                        {users.find(u => u.id === log.rankId)?.center || '-'}
                       </span>
                     </td>
                     <td className="px-4 py-6 text-center">
@@ -1061,7 +1043,6 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                         <span className="text-xs font-black text-slate-900">{users.find(u => u.id === log.recordedCollectorId)?.name || log.recordedCollectorId}</span>
                         <span className="text-[8px] px-2 py-0.5 rounded font-black bg-slate-100 text-slate-500">{log.type}</span>
                       </div>
-                      <span className="text-[8px] font-black text-slate-300 uppercase block tracking-tighter">分类: {log.costCategory || 'N/A'} | {log.category}池</span>
                     </td>
                     <td className="px-3 py-6 text-right font-mono font-bold text-blue-600">
                       {log.costCategory === 'A' ? maskMoney(Math.round(log.dynamicCost)) : '-'}
@@ -1089,6 +1070,11 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                     </td>
                     <td className="px-4 py-6 text-right font-mono font-bold text-emerald-800 bg-emerald-50/10">
                       {valLimitB2Str}
+                    </td>
+                    <td className="px-6 py-6 text-center">
+                      <span className="text-[10px] font-mono font-bold text-slate-500 whitespace-nowrap">
+                        {log.confirmedAt ? new Date(log.confirmedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
+                      </span>
                     </td>
                     <td className="px-6 py-6 text-right">
                       <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${

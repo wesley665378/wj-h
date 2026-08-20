@@ -269,7 +269,9 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       centers[centerName].value += calculateHistoricalNetValue(l, resources, users);
     });
 
-    // 3. Revenue & Value Limits & Special Pools
+    // 3. Revenue & Value Limits & Special Pools (Period-based)
+    const periodLogs = logs.filter(l => l.timestamp >= periodRange.start && l.timestamp < periodRange.end);
+    
     resources.filter(r => !isManager || r.assignedTo === currentUser.center || r.assignedToRevenue === currentUser.center || r.assignedToValue === currentUser.center).forEach(r => {
       const centerName = r.assignedTo || '未分配';
       if (!centers[centerName]) {
@@ -278,9 +280,19 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       centers[centerName].revenueLimit += r.revenueCapacity;
       centers[centerName].valueLimit += r.valueCapacity;
       
-      // 使用资源中汇总的专项包数据
-      centers[centerName].revenue2Percent += (r.incentiveCollection2 || 0);
-      centers[centerName].value5Percent += (r.incentiveOutput5 || 0);
+      // Calculate period-based extraction
+      const miningLogs = periodLogs.filter(l => l.miningId === r.id && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved));
+      
+      const revLogs = miningLogs.filter(l => l.category === RefineCategory.Revenue);
+      const valLogs = miningLogs.filter(l => l.category === RefineCategory.Value);
+      
+      // 收款计提 (2%) = roundMoney(本笔注入 × C权 × 2%)
+      const rev2 = revLogs.reduce((sum, l) => sum + Math.round((l.rawAmount || l.amount) * (l.cClassRatio || 1) * 0.02), 0);
+      // 产值计提 (5%) = roundMoney(本笔注入 × C权 × B2权 × 5%)
+      const val5 = valLogs.reduce((sum, l) => sum + Math.round((l.rawAmount || l.amount) * (l.cClassRatio || 1) * (l.b2ClassRatio || 1) * 0.05), 0);
+      
+      centers[centerName].revenue2Percent += rev2;
+      centers[centerName].value5Percent += val5;
     });
 
     return Object.values(centers)
@@ -1463,7 +1475,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
                           <div className="p-2.5 bg-blue-50/50 rounded-xl border border-blue-100/50 space-y-2">
                             <div className="flex items-center justify-between">
-                              <span className="text-[9px] font-black text-blue-800 tracking-tight">中心本级</span>
+                              <span className="text-[9px] font-black text-blue-800 tracking-tight">经营单元本级</span>
                               <div className="flex gap-1">
                                  <span className="w-1 h-1 rounded-full bg-blue-400"></span>
                                  <span className="w-1 h-1 rounded-full bg-blue-200"></span>
@@ -1471,29 +1483,29 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                               <div className="flex flex-col">
-                                <span className="text-[8px] text-blue-600 font-bold flex items-center gap-1">
-                                  产值计提 (5%)
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[8px] text-blue-600 font-bold">产值计提 (5%)</span>
                                   <InfoTip 
-                                    title="产值计提口径" 
-                                    content="基于核准产值的 5% 统筹提取，用于中心本级公共运营成本及战略储备。"
+                                    title="产值计提 (5%)" 
+                                    content="产兑包计提 = roundMoney(本笔注入 × C权 × B2权 × 5%)。始终套用 C权 × B2权 对冲系数。"
                                     placement="top"
                                   >
                                     <Info size={10} className="text-blue-300 cursor-help" />
                                   </InfoTip>
-                                </span>
+                                </div>
                                 <span className="text-xs font-black text-blue-900 leading-none mt-1">{Math.round(c.value5Percent).toLocaleString()}</span>
                               </div>
                               <div className="flex flex-col border-l border-blue-100 pl-3">
-                                <span className="text-[8px] text-blue-600 font-bold flex items-center gap-1">
-                                  收款计提 (2%)
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[8px] text-blue-600 font-bold">收款计提 (2%)</span>
                                   <InfoTip 
-                                    title="收款计提口径" 
-                                    content="基于已确权收款的 2% 统筹提取。仅对已通过终审确权的收款额进行实时计提。"
+                                    title="收款计提 (2%)" 
+                                    content="收款包计提 = roundMoney(本笔注入 × C权 × 2%)。仅套用 C权 对冲系数。"
                                     placement="top"
                                   >
                                     <Info size={10} className="text-blue-300 cursor-help" />
                                   </InfoTip>
-                                </span>
+                                </div>
                                 <div className="flex items-baseline gap-1.5 mt-1">
                                   <span className="text-xs font-black text-blue-900 leading-none">{Math.round(c.revenue2Percent).toLocaleString()}</span>
                                   {c.revenue2Percent === 0 && (

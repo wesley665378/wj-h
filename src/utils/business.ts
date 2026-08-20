@@ -36,16 +36,15 @@ export function calculateDualTrackCoreMatrices(mining: DualTrackMiningContext) {
     mining.totalConfirmedValue
   );
 
+  // N = round(款初 × 0.933)
+  const N = Math.round(updatedRevenueLimit * 0.933);
+
   const sumCRevenuePoints = mining.cRevenuePointsList.reduce((sum, p) => sum + p, 0);
   const sumCValuePoints = mining.cValuePointsList.reduce((sum, p) => sum + p, 0);
 
-  const cRevenueWeight = updatedRevenueLimit > 0 
-    ? Math.max(0, (updatedRevenueLimit - sumCRevenuePoints) / updatedRevenueLimit)
-    : 0;
-
-  const cValueWeight = updatedValueLimit > 0 
-    ? Math.max(0, (updatedValueLimit - sumCValuePoints) / updatedValueLimit)
-    : 0;
+  // C权 = (N − ΣC) / N (N=0 时 C权=1)
+  const cRevenueWeight = N > 0 ? Math.max(0, (N - sumCRevenuePoints) / N) : 1;
+  const cValueWeight = N > 0 ? Math.max(0, (N - sumCValuePoints) / N) : 1;
 
   return {
     updatedRevenueLimit: Number(updatedRevenueLimit.toFixed(2)),
@@ -135,7 +134,7 @@ export const calculateHistoricalNetValue = (log: ValueCreationLog, resources: Mi
   return baseAmount * weight * b2Weight * factor;
 };
 
-import { applyConsumptionHedgeToLogs } from './consumptionHedge';
+import { applyConsumptionHedgeToLogs, calculateHedgeCapacitiesAndWeights } from './consumptionHedge';
 
 export { applyConsumptionHedgeToLogs };
 export function recalibrateLogsForMiningId(
@@ -176,19 +175,16 @@ export const calculateConsumptionMirrorFields = (log: ValueCreationLog, resource
     };
   }
   
-  const cw = log.category === RefineCategory.Revenue ? getCWeightRevenue(res, allLogs) : getCWeightValue(res, allLogs);
-  const bw = getB2WeightValue(res, allLogs);
+  const hedgeInfo = calculateHedgeCapacitiesAndWeights(res, allLogs);
+  const cw = hedgeInfo.cWeightRev;
+  const bw = hedgeInfo.b2Weight;
+
   const cWeightValue = cw < 1 ? cw.toFixed(4) : '1.0000';
   const b2WeightValue = log.category === RefineCategory.Revenue ? '-' : (bw < 1 ? bw.toFixed(4) : '1.0000');
 
-  const initialRev = getInitialRevenueCapacity(res);
-  const currentRev = getCurrentRevenueCapacity(res);
-  const revLimitStr = `${Math.round(initialRev).toLocaleString()} / ${Math.round(currentRev).toLocaleString()}`;
-
-  const initialVal = getInitialValueCapacity(res);
-  const currentVal = getCurrentValueCapacity(res);
-  const valLimitCStr = `${Math.round(initialVal).toLocaleString()} / ${Math.round(currentVal).toLocaleString()}`;
-  const valLimitB2Str = `${Math.round(initialVal).toLocaleString()} / ${Math.round(currentVal).toLocaleString()}`;
+  const revLimitStr = `${Math.round(hedgeInfo.revInitial).toLocaleString()} / ${Math.round(hedgeInfo.revCurrent).toLocaleString()}`;
+  const valLimitCStr = `${Math.round(hedgeInfo.valInitial).toLocaleString()} / ${Math.round(hedgeInfo.valCurrent).toLocaleString()}`;
+  const valLimitB2Str = `${Math.round(hedgeInfo.valInitial).toLocaleString()} / ${Math.round(hedgeInfo.valCurrent).toLocaleString()}`;
 
   return {
     cWeightValue,

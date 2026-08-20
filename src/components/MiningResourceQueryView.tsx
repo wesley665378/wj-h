@@ -12,6 +12,8 @@ import { Card, ProjectStatusBadge } from './UI';
 import { deriveProjectStatus } from '../utils/projectStatus';
 import { calculateSingleResourceQuadrants } from '../utils/purification';
 import { calculateHistoricalNetValue } from '../utils/business';
+import { calculateHedgeCapacitiesAndWeights } from '../utils/consumptionHedge';
+import { InfoTip } from './InfoTip';
 import * as XLSX from 'xlsx';
 import { BusinessDateFilter } from './BusinessDateFilter';
 import { isLogInFilter, getLocalMonthString } from '../utils/dateUtils';
@@ -70,36 +72,21 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
   // 【1 矿山主档数据计算】
   const projectStatusInfo = useMemo(() => deriveProjectStatus(resource), [resource]);
 
-  const initialRev = resource.initialRevenueCapacity !== undefined ? resource.initialRevenueCapacity : (resource.revenueCapacity || 0);
-  const initialVal = resource.initialValueCapacity !== undefined ? resource.initialValueCapacity : (resource.valueCapacity || 0);
+  const hedgeInfo = useMemo(() => {
+    return calculateHedgeCapacitiesAndWeights(resource, allRelevantLogs);
+  }, [resource, allRelevantLogs]);
 
-  // 已确权或入库的 C 合计
-  const confirmedCLogs = useMemo(() => {
-    return allRelevantLogs.filter(l => 
-      (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved || (l.status as any) === '已确权' || (l.status as any) === '已入库') &&
-      (l.costCategory === 'C' || (l as any).consumptionType === 'C')
-    );
-  }, [allRelevantLogs]);
-  const totalC = useMemo(() => confirmedCLogs.reduce((sum, l) => sum + (l.dynamicCost || l.amount || 0), 0), [confirmedCLogs]);
-
-  // 已确权或入库的 B2 合计
-  const confirmedB2Logs = useMemo(() => {
-    return allRelevantLogs.filter(l => 
-      (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved || (l.status as any) === '已确权' || (l.status as any) === '已入库') &&
-      ((l.costCategory === 'B' && l.valueConsumptionMode === 'B2') || (l as any).consumptionType === 'B2')
-    );
-  }, [allRelevantLogs]);
-  const totalB2 = useMemo(() => confirmedB2Logs.reduce((sum, l) => sum + (l.dynamicCost || l.amount || 0), 0), [confirmedB2Logs]);
-
-  // 款当 = max(0, 款初 - C)
-  const currentRev = Math.max(0, initialRev - totalC);
-  // 产当 = max(0, 产初 - C - B2)
-  const currentVal = Math.max(0, initialVal - totalC - totalB2);
-
-  // 权计算
-  const cWeightRev = initialRev > 0 ? Math.max(0, (initialRev - totalC) / initialRev) : 1;
-  const cWeightVal = initialVal > 0 ? Math.max(0, (initialVal - totalC) / initialVal) : 1;
-  const b2Weight = initialVal > 0 ? Math.max(0, (initialVal - totalB2) / initialVal) : 1;
+  const {
+    revInitial: initialRev,
+    valInitial: initialVal,
+    revCurrent: currentRev,
+    valCurrent: currentVal,
+    cWeightRev,
+    cWeightVal,
+    b2Weight,
+    C: totalC,
+    B2: totalB2
+  } = hedgeInfo;
 
   // 收款轨/产值轨进度四格 (与创造页同矿四格同源：用 jzcz 流水聚合，禁止只读矿山 JSON confirmed*)
   const quadrants = useMemo(() => {
@@ -196,8 +183,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
       { '属性': '产当', '数值': Math.round(currentVal) },
       { '属性': '已确权/入库C合计', '数值': Math.round(totalC) },
       { '属性': '已确权/入库B2合计', '数值': Math.round(totalB2) },
-      { '属性': 'C权(款)', '数值': `${(cWeightRev * 100).toFixed(2)}%` },
-      { '属性': 'C权(产)', '数值': `${(cWeightVal * 100).toFixed(2)}%` },
+      { '属性': 'C权', '数值': `${(cWeightRev * 100).toFixed(2)}%` },
       { '属性': 'B2权', '数值': `${(b2Weight * 100).toFixed(2)}%` },
       { '属性': '收款轨_待确权', '数值': Math.round(quadrants.revenue.pending) },
       { '属性': '收款轨_已确权', '数值': Math.round(quadrants.revenue.confirmed) },
@@ -240,7 +226,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
       const costType = (l as any).consumptionType || (l.costCategory === 'B' ? (l as any).valueConsumptionMode || 'B2' : l.costCategory) || 'A';
       let relatedWeight = '—';
       if (costType === 'C') {
-        relatedWeight = `C权款 ${(cWeightRev * 100).toFixed(2)}% / C权产 ${(cWeightVal * 100).toFixed(2)}%`;
+        relatedWeight = `C权 ${(cWeightRev * 100).toFixed(2)}%`;
       } else if (costType === 'B2') {
         relatedWeight = `B2权 ${(b2Weight * 100).toFixed(2)}%`;
       }
@@ -414,7 +400,13 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
             </span>
           </div>
           <div className="p-3.5 bg-amber-100/70 border border-amber-300/80 rounded-2xl">
-            <span className="text-[10px] font-bold text-amber-800 block">款当 (max(0,款初−C))</span>
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] font-bold text-amber-800 block">款当 (max(0,款初−C))</span>
+              <InfoTip 
+                title="款当说明"
+                content="款当表示当前可用于对冲 C 类成本的收款额度。计算公式：max(0, 款初 - ΣC)。"
+              />
+            </div>
             <span className="text-base font-black text-amber-950 font-mono mt-0.5 block">
               {Math.round(currentRev).toLocaleString()}
             </span>
@@ -426,7 +418,13 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
             </span>
           </div>
           <div className="p-3.5 bg-emerald-100/70 border border-emerald-300/80 rounded-2xl">
-            <span className="text-[10px] font-bold text-emerald-800 block">产当 (max(0,产初−C−B2))</span>
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] font-bold text-emerald-800 block">产当 (max(0,产初−C−B2))</span>
+              <InfoTip 
+                title="产当说明"
+                content="产当表示当前可用于对冲 C 类及 B2 类成本的产值额度。计算公式：max(0, 产初 - ΣC - ΣB2)。"
+              />
+            </div>
             <span className="text-base font-black text-emerald-950 font-mono mt-0.5 block">
               {Math.round(currentVal).toLocaleString()}
             </span>
@@ -444,10 +442,22 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
             </span>
           </div>
           <div className="p-3.5 bg-indigo-50/70 border border-indigo-200 rounded-2xl col-span-2 sm:col-span-4 lg:col-span-1">
-            <span className="text-[10px] font-bold text-indigo-700 block">权累计指标</span>
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] font-bold text-indigo-700 block">权累计指标</span>
+              <InfoTip 
+                title="权指标说明"
+                content={
+                  <div className="space-y-2">
+                    <p><b>N (基数)</b> = round(款初 × 0.933)</p>
+                    <p><b>C权</b> = (N − ΣC) / N <span className="text-slate-400 font-normal">(N=0时为1)</span></p>
+                    <p><b>B2权</b> = (N − ΣC − ΣB2) / (N − ΣC) <span className="text-slate-400 font-normal">(分母=0时为1)</span></p>
+                    <p className="border-t border-slate-700 pt-1 mt-1 text-amber-400">收款套 C权；产值套 C权 × B2权。</p>
+                  </div>
+                }
+              />
+            </div>
             <div className="text-[11px] font-mono font-black text-indigo-950 space-y-0.5 mt-0.5">
-              <div>C权款: {(cWeightRev * 100).toFixed(2)}%</div>
-              <div>C权产: {(cWeightVal * 100).toFixed(2)}%</div>
+              <div>C权: {(cWeightRev * 100).toFixed(2)}%</div>
               <div>B2权: {(b2Weight * 100).toFixed(2)}%</div>
             </div>
           </div>
@@ -675,7 +685,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
                   const costType = (l as any).consumptionType || (l.costCategory === 'B' ? (l as any).valueConsumptionMode || 'B2' : l.costCategory) || 'A';
                   let relatedWeight = '—';
                   if (costType === 'C') {
-                    relatedWeight = `C权款 ${(cWeightRev * 100).toFixed(2)}% / C权产 ${(cWeightVal * 100).toFixed(2)}%`;
+                    relatedWeight = `C权 ${(cWeightRev * 100).toFixed(2)}%`;
                   } else if (costType === 'B2') {
                     relatedWeight = `B2权 ${(b2Weight * 100).toFixed(2)}%`;
                   }

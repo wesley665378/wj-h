@@ -256,7 +256,9 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
       salaryPackage: formData.salaryPackage,
       salaryHistory: updatedHistory,
       permissions: formData.permissions,
-      userStatus: existingUser?.userStatus || 'active'
+      userStatus: existingUser?.userStatus || 'active',
+      // If it's a new user, include the password for one-shot sync
+      ...( (!editingUserId && formData.password) ? { password: formData.password } : {} )
     };
 
     const nextUsers = editingUserId 
@@ -265,16 +267,19 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
 
     isSyncing.current = true;
     try {
-      // 先更新内存
-      onUpdateUsers(nextUsers);
-
       await syncWorkspace({ users: nextUsers });
-      if (formData.password) {
+      
+      // If editing existing user, still use onUpdatePassword for clarity/legacy
+      if (editingUserId && formData.password) {
         const pwSuccess = await onUpdatePassword(formData.id, formData.password);
         if (!pwSuccess) {
           throw new Error('密码修改失败，请重试');
         }
       }
+      
+      // 成功后更新内存
+      onUpdateUsers(nextUsers);
+      
       showAlert(editingUserId ? '用户信息更新成功。' : '新的人格实体已成功注入矩阵。');
       resetForm();
     } catch (err) {

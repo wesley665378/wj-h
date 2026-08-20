@@ -390,9 +390,9 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
                 onChange={(e) => setFilterType(e.target.value)}
                 className="w-full bg-white border border-slate-200 text-xs text-slate-700 font-bold rounded-xl px-3 py-2 outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
               >
-                <option value="all">全部类别</option>
-                <option value="revenue">收款类</option>
-                <option value="value">产值类</option>
+                <option value="all">全部</option>
+                <option value="revenue">收款</option>
+                <option value="value">产值</option>
               </select>
             </div>
 
@@ -449,7 +449,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
                   <Filter className="w-3.5 h-3.5 text-slate-300 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
-                    placeholder="搜索流水单号..."
+                    placeholder="单号模糊匹配..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="w-full bg-white border border-slate-200 text-xs rounded-xl pl-8 pr-3 py-2 outline-none focus:border-blue-500 text-slate-800 shadow-2xs"
@@ -457,12 +457,28 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
                 </div>
                 <button
                   onClick={handleClearFilters}
-                  title="重置全部筛选"
                   className="p-2 bg-white border border-slate-200 text-slate-400 hover:text-slate-600 hover:border-slate-300 rounded-xl transition-all shadow-2xs"
+                  title="一键清除筛选"
                 >
                   <RefreshCw className="w-4 h-4" />
                 </button>
               </div>
+            </div>
+
+            {/* 导出与笔数 - 移动到筛条右侧 */}
+            <div className="ml-auto flex items-center gap-4 self-end mb-0.5">
+              <div className="text-right">
+                <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">筛选笔数</div>
+                <div className="text-sm font-black font-mono text-slate-700">{filteredSummary.count}</div>
+              </div>
+              <div className="h-8 w-px bg-slate-200"></div>
+              <button
+                onClick={handleExportExcel}
+                className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm hover:shadow-md"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                导出账单
+              </button>
             </div>
           </div>
 
@@ -485,7 +501,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               <div className="space-y-1">
                 <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
                   <div className="w-1 h-1 bg-rose-400 rounded-full"></div>
-                  本期支出/成本
+                  本期支出/成本合计
                 </span>
                 <div className="text-xl font-black font-mono text-rose-400">
                   {isCostVisible ? formatAmount(filteredSummary.expense) : '****'}
@@ -505,27 +521,12 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               <div className="space-y-1">
                 <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
                   <div className="w-1 h-1 bg-amber-400 rounded-full"></div>
-                  本期结余
+                  期末结余 ({effectiveMonth})
                 </span>
-                <div className="text-xl font-black font-mono text-white">
-                  {isCostVisible ? formatAmount(filteredSummary.income - filteredSummary.expense) : '****'}
+                <div className={`text-xl font-black font-mono ${currentBalance >= 0 ? 'text-white' : 'text-rose-400'}`}>
+                  {isCostVisible ? formatAmount(currentBalance) : '****'}
                 </div>
               </div>
-            </div>
-
-            <div className="flex items-center gap-4 relative z-10">
-              <div className="text-right">
-                <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">筛选笔数</div>
-                <div className="text-lg font-black font-mono">{filteredSummary.count}</div>
-              </div>
-              <div className="h-10 w-px bg-slate-800"></div>
-              <button
-                onClick={handleExportExcel}
-                className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black transition-all shadow-lg active:scale-95"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span>导出报告</span>
-              </button>
             </div>
           </div>
         </div>

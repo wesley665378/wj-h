@@ -386,28 +386,28 @@ const Auditing: React.FC<AuditingProps> = ({
         
         return {
           '申报编号': log.id,
-          '业务月份': resolveLogBusinessMonth(log),
           '提报日期': resolveLogBusinessDate(log),
           '提报时间': formatSubmissionTime(log.timestamp),
           '矿山编号': log.miningId,
           '采集主体': users.find(u => u.id === log.recordedCollectorId)?.name || log.recordedCollectorId,
           '经营单元': users.find(u => u.id === log.rankId)?.center || "未分配",
           'A': log.costCategory === 'A' ? log.dynamicCost : '-',
-          'C': log.costCategory === 'C' ? log.dynamicCost : '-',
-          'C对冲权重': cWeightValue,
+          'C积分': log.costCategory === 'C' ? log.dynamicCost : '-',
+          'C权': cWeightValue,
           '款初/款当': revLimitStr,
           '产初/产当': valLimitCStr,
           'B1': (log.costCategory === 'B' && log.valueConsumptionMode === 'B1') ? log.dynamicCost : '-',
-          'B2': (log.costCategory === 'B' && log.valueConsumptionMode === 'B2') ? log.dynamicCost : '-',
-          'B2对冲权重': b2WeightValue,
+          'B2积分': (log.costCategory === 'B' && log.valueConsumptionMode === 'B2') ? log.dynamicCost : '-',
+          'B2权': b2WeightValue,
           '产初/产当 ': valLimitB2Str,
+          '确权日期': log.confirmedAt ? new Date(log.confirmedAt).toLocaleString() : '-',
           '确权状态': log.status === AuditStatus.Approved ? '已入库' : log.status
         };
       } else {
         return {
           编号: log.id,
-          业务月份: resolveLogBusinessMonth(log),
           业务日期: resolveLogBusinessDate(log),
+          确权日期: log.confirmedAt ? new Date(log.confirmedAt).toLocaleString() : '-',
           提交日期: formatSubmissionDate(log.timestamp),
           类别: log.type,
           矿山编号: log.miningId,
@@ -987,14 +987,15 @@ const Auditing: React.FC<AuditingProps> = ({
                     <th className="px-4 py-6 font-bold text-slate-800">采集主体</th>
                     <th className="px-4 py-6 text-center">经营单元</th>
                     <th className="px-3 py-6 text-right text-blue-600">A</th>
-                    <th className="px-3 py-6 text-right text-amber-600">C</th>
-                    <th className="px-4 py-6 text-right text-amber-700 font-extrabold bg-amber-50/20">C对冲权重</th>
+                    <th className="px-3 py-6 text-right text-amber-600">C积分</th>
+                    <th className="px-4 py-6 text-right text-amber-700 font-extrabold bg-amber-50/20">C权</th>
                     <th className="px-4 py-6 text-right text-amber-800 font-extrabold bg-amber-50/10">款初/款当</th>
                     <th className="px-4 py-6 text-right text-amber-900 font-extrabold bg-amber-50/15">产初/产当</th>
                     <th className="px-3 py-6 text-right text-rose-600">B1</th>
-                    <th className="px-3 py-6 text-right text-emerald-600">B2</th>
-                    <th className="px-4 py-6 text-right text-emerald-700 font-extrabold bg-emerald-50/20">B2对冲权重</th>
+                    <th className="px-3 py-6 text-right text-emerald-600">B2积分</th>
+                    <th className="px-4 py-6 text-right text-emerald-700 font-extrabold bg-emerald-50/20">B2权</th>
                     <th className="px-4 py-6 text-right text-emerald-800 font-extrabold bg-emerald-50/10">产初/产当</th>
+                    <th className="px-6 py-6 text-center">确权日期</th>
                     <th className="px-6 py-6 text-right">确权状态</th>
                     {activeTab === "consumption" && <th className="px-4 py-6 text-right">操作控制</th>}
                   </tr>
@@ -1025,7 +1026,6 @@ const Auditing: React.FC<AuditingProps> = ({
                             <span className="text-xs font-black text-slate-900">{users.find(u => u.id === log.recordedCollectorId)?.name || log.recordedCollectorId}</span>
                             <span className="text-[8px] px-2 py-0.5 rounded font-black bg-slate-100 text-slate-500">{log.type}</span>
                           </div>
-                          <span className="text-[8px] font-black text-slate-300 uppercase block tracking-tighter">分类: {log.costCategory || 'N/A'} | {log.category}池</span>
                         </td>
                         <td className="px-4 py-6 text-center">
                             <span className="text-xs font-black text-slate-900 block">
@@ -1058,6 +1058,11 @@ const Auditing: React.FC<AuditingProps> = ({
                         </td>
                         <td className="px-4 py-6 text-right font-mono font-bold text-emerald-800 bg-emerald-50/10">
                           {valLimitB2Str}
+                        </td>
+                        <td className="px-6 py-6 text-center">
+                          <span className="text-[10px] font-mono font-bold text-slate-500 whitespace-nowrap">
+                            {log.confirmedAt ? new Date(log.confirmedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
+                          </span>
                         </td>
                         <td className="px-6 py-6 text-right">
                           <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${
