@@ -92,6 +92,11 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
           <div className="flex items-center space-x-2">
             <span className="text-[11px] font-bold text-slate-900 uppercase tracking-widest">全量价值贡献审计记录</span>
           </div>
+        </div>
+
+        {/* 自定义查询控制栏 */}
+        <div className="p-4 bg-slate-50/50 border-b border-slate-100 flex flex-wrap items-center gap-4">
+          {/* 时间筛选 */}
           <div className="flex items-center gap-2">
             <BusinessDateFilter 
               month={filterStartDate || filterEndDate ? '' : filterMonth}
@@ -117,10 +122,7 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
               }}
             />
           </div>
-        </div>
 
-        {/* 自定义查询控制栏 */}
-        <div className="p-4 bg-slate-50/50 border-b border-slate-100 flex flex-wrap items-center gap-4">
           {/* 姓名/编号输入搜索 */}
           <div className="flex-1 min-w-[200px] relative">
             <input

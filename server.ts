@@ -211,7 +211,15 @@ async function startServer() {
       }
 
       // Check passwords gracefully
-      const expectedPassword = MOCK_PASSWORDS[user.userId] || MOCK_PASSWORDS[user.id] || "123";
+      let expectedPassword = MOCK_PASSWORDS[user.userId] || MOCK_PASSWORDS[user.id] || "123";
+      
+      // If user came from DB, priority use password_hash
+      if (user.password_hash) {
+        expectedPassword = user.password_hash;
+      } else if (user.password) {
+        // Fallback for mock storage or objects that haven't been hashed yet
+        expectedPassword = user.password;
+      }
       
       // Allow fallback passwords for requested accounts
       if (password !== expectedPassword && password !== "666888" && password !== "123") {
@@ -306,9 +314,23 @@ async function startServer() {
           // Sync Users
           if (users) {
             for (const user of users) {
+              if (user.password) {
+                // Validate password on backend as well
+                if (user.password.length < 8) {
+                  throw new Error(`用户 [${user.name}] 密码设置失败：未设置密码或密码长度不足 8 位`);
+                }
+                const weakList = ['666888', '12345678', '88888888', '11111111', '00000000', 'qwertyui', 'password'];
+                if (weakList.includes(user.password.trim())) {
+                  throw new Error(`用户 [${user.name}] 密码设置失败：弱密码`);
+                }
+              }
+
               await connection.execute(
-                'INSERT INTO users (id, userId, name, role, center, category, userStatus) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE userId=?, name=?, role=?, center=?, category=?, userStatus=?',
-                [user.id, user.userId || user.id, user.name, user.role, user.center || '', user.category || '', user.userStatus || 'active', user.userId || user.id, user.name, user.role, user.center || '', user.category || '', user.userStatus || 'active']
+                'INSERT INTO users (id, userId, name, role, center, category, userStatus, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE userId=?, name=?, role=?, center=?, category=?, userStatus=?, password_hash = IFNULL(?, password_hash)',
+                [
+                  user.id, user.userId || user.id, user.name, user.role, user.center || '', user.category || '', user.userStatus || 'active', user.password || null,
+                  user.userId || user.id, user.name, user.role, user.center || '', user.category || '', user.userStatus || 'active', user.password || null
+                ]
               );
             }
           }
@@ -455,7 +477,7 @@ async function startServer() {
       res.json({ success: true });
     } catch (error) {
       console.error('Sync process error:', error);
-      res.json({ success: false, error: (error as Error).message });
+      res.status(400).json({ success: false, error: (error as Error).message });
     }
   });
 
@@ -1308,7 +1330,8 @@ async function startServer() {
           role VARCHAR(64) NOT NULL,
           center VARCHAR(128),
           category VARCHAR(128),
-          userStatus ENUM('active', 'inactive') NOT NULL DEFAULT 'active'
+          userStatus ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
+          password_hash VARCHAR(255)
         )
       `);
 

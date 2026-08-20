@@ -11,7 +11,7 @@ import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
 import { InfoTip } from '../src/components/InfoTip';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
-import { Wallet, TrendingUp, ShieldCheck, ArrowRight, Eye, EyeOff, FileSpreadsheet, Search, Filter, Calendar } from 'lucide-react';
+import { Wallet, TrendingUp, ShieldCheck, ArrowRight, Eye, EyeOff, FileSpreadsheet, Search, Filter, Calendar, RefreshCw } from 'lucide-react';
 
 interface MyAccountProps {
   currentUser: User;
@@ -32,6 +32,8 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
   // 流水明细筛选项
   const [filterType, setFilterType] = useState<string>('all'); // all, revenue, value
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterMiningId, setFilterMiningId] = useState<string>('');
+  const [filterDirection, setFilterDirection] = useState<string>('all'); // all, income, expense
   const [searchTerm, setSearchTerm] = useState<string>('');
 
   // 1. 口径计算：仅限本人 (recordedCollectorId === currentUser.id)
@@ -51,7 +53,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
         resolvedDate: bDate,
         calculatedNetValue: netVal
       };
-    }).sort((a, b) => b.timestamp - a.timestamp);
+    }).sort((a, b) => b.resolvedDate.localeCompare(a.resolvedDate) || b.timestamp - a.timestamp);
   }, [myLogs, resources, users]);
 
   // 按维度模式过滤的当前活跃日志
@@ -146,17 +148,59 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
       // 状态过滤
       if (filterStatus !== 'all' && l.status !== filterStatus) return false;
 
-      // 关键字搜索
+      // 矿山编号过滤
+      if (filterMiningId && !l.miningId.toLowerCase().includes(filterMiningId.toLowerCase())) return false;
+
+      // 收支方向过滤
+      if (filterDirection === 'income' && l.calculatedNetValue <= 0) return false;
+      if (filterDirection === 'expense' && l.calculatedNetValue >= 0) return false;
+
+      // 关键字搜索 (单号)
       if (searchTerm) {
         const term = searchTerm.toLowerCase();
-        const matchId = l.id.toLowerCase().includes(term);
-        const matchMining = l.miningId.toLowerCase().includes(term);
-        if (!matchId && !matchMining) return false;
+        if (!l.id.toLowerCase().includes(term)) return false;
       }
 
       return true;
     });
-  }, [activeLogs, filterType, filterStatus, searchTerm]);
+  }, [activeLogs, filterType, filterStatus, filterMiningId, filterDirection, searchTerm]);
+
+  // 筛选后汇总计算
+  const filteredSummary = useMemo(() => {
+    let income = 0;
+    let expense = 0;
+    let revenuePkg = 0;
+    let valuePkg = 0;
+
+    filteredDetailLogs.forEach(l => {
+      const val = Math.round(l.calculatedNetValue || 0);
+      if (val > 0) income += val;
+      else expense += Math.abs(val);
+
+      if (l.category === RefineCategory.Revenue) revenuePkg += val;
+      if (l.category === RefineCategory.Value) valuePkg += val;
+    });
+
+    return {
+      income,
+      expense,
+      revenuePkg,
+      valuePkg,
+      combinedPkg: revenuePkg + valuePkg,
+      count: filteredDetailLogs.length
+    };
+  }, [filteredDetailLogs]);
+
+  const handleClearFilters = () => {
+    setFilterType('all');
+    setFilterStatus('all');
+    setFilterMiningId('');
+    setFilterDirection('all');
+    setSearchTerm('');
+    setSelectedMonth(getLocalMonthString());
+    setStartDate('');
+    setEndDate('');
+  };
 
   // 导出表格
   const handleExportExcel = () => {
@@ -170,18 +214,45 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
       '类别': l.category,
       '类型/项目': l.type,
       '矿山编号': l.miningId,
-      '收产包': Math.round(l.calculatedNetValue || l.amount || 0),
+      '净额': Math.round(l.calculatedNetValue || 0),
       '状态': l.status
     }));
+
+    // 汇总行
+    exportData.push({
+      '序号': '汇总' as any,
+      '单号': `共 ${filteredSummary.count} 笔` as any,
+      '业务日期': '' as any,
+      '业务月份': '' as any,
+      '提交日期': '' as any,
+      '提交时间': '' as any,
+      '类别': `总收入: ${filteredSummary.income}` as any,
+      '类型/项目': `总支出: ${filteredSummary.expense}` as any,
+      '矿山编号': `收产包合计: ${filteredSummary.combinedPkg}` as any,
+      '净额': filteredSummary.income - filteredSummary.expense as any,
+      '状态': '' as any
+    });
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, '我的账户流水明细');
 
+    // 增加汇总页签
+    const summaryData = [
+      ['项目', '数值', '说明'],
+      ['本期收入合计', filteredSummary.income, '筛选范围内正向流水总和'],
+      ['本期支出/成本合计', filteredSummary.expense, '筛选范围内负向流水总和'],
+      ['收产包合计', filteredSummary.combinedPkg, '收款包 + 产兑包'],
+      ['交易笔数', filteredSummary.count, '条记录'],
+      ['筛选条件', `时间: ${startDate && endDate ? `${startDate}至${endDate}` : (selectedMonth || '全部')} | 类别: ${filterType} | 状态: ${filterStatus} | 方向: ${filterDirection}`, '']
+    ];
+    const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(workbook, summarySheet, '汇总报告');
+
     const modeStr = startDate && endDate ? `${startDate}_至_${endDate}` : (selectedMonth || effectiveMonth);
     const todayStr = getLocalDateString();
     XLSX.writeFile(workbook, `我的账户流水明细_${currentUser.name}_${modeStr}_导出${todayStr}.xlsx`);
-    toast.success('已导出');
+    toast.success('已导出流水报告（含汇总页签）');
   };
 
   return (
@@ -275,81 +346,187 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
       {/* 2. 流水明细区 */}
       <Card
         title="本人流水明细"
-        className="p-8 rounded-[2.5rem] bg-white shadow-sm border border-slate-100"
-        headerAction={
-          <BusinessDateFilter
-            month={startDate || endDate ? '' : selectedMonth}
-            onMonthChange={(m) => {
-              setSelectedMonth(m);
-              setStartDate('');
-              setEndDate('');
-            }}
-            startDate={startDate}
-            endDate={endDate}
-            onDateRangeChange={(s, e) => {
-              setStartDate(s);
-              setEndDate(e);
-              setSelectedMonth('');
-            }}
-            onClear={() => {
-              setSelectedMonth(getLocalMonthString());
-              setStartDate('');
-              setEndDate('');
-            }}
-          />
-        }
+        className="p-8 rounded-[2.5rem] bg-white shadow-sm border border-slate-100 overflow-hidden"
       >
-        {/* 筛选与导出工具栏 */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-100">
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* 关键词搜索 */}
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="搜索单号、矿山..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-44 sm:w-56 bg-slate-50 border border-slate-200 text-xs rounded-xl pl-8 pr-3 py-2 outline-none focus:border-blue-500 text-slate-800"
+        {/* 高级筛选工具栏 - 银行式布局 */}
+        <div className="space-y-4 mb-8">
+          <div className="flex flex-wrap items-end gap-4 p-4 bg-slate-50/50 rounded-2xl border border-slate-100">
+            {/* 1. 业务时间筛选 - 核心引擎 */}
+            <div className="space-y-1.5 min-w-fit">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-1">
+                <Calendar className="w-3 h-3" />
+                业务日期窗口
+              </label>
+              <BusinessDateFilter
+                month={startDate || endDate ? '' : selectedMonth}
+                onMonthChange={(m) => {
+                  setSelectedMonth(m);
+                  setStartDate('');
+                  setEndDate('');
+                }}
+                startDate={startDate}
+                endDate={endDate}
+                onDateRangeChange={(s, e) => {
+                  setStartDate(s);
+                  setEndDate(e);
+                  setSelectedMonth('');
+                }}
+                onClear={() => {
+                  setSelectedMonth(getLocalMonthString());
+                  setStartDate('');
+                  setEndDate('');
+                }}
               />
             </div>
 
-            {/* 类型筛选 */}
-            <select
-              value={filterType}
-              onChange={(e) => setFilterType(e.target.value)}
-              className="bg-slate-50 border border-slate-200 text-xs text-slate-700 font-bold rounded-xl px-3 py-2 outline-none focus:border-blue-500 cursor-pointer"
-            >
-              <option value="all">全部类型</option>
-              <option value="revenue">收款</option>
-              <option value="value">产值</option>
-            </select>
+            {/* 分隔符 (可选) */}
+            <div className="hidden lg:block h-10 w-px bg-slate-200 self-end mb-1 mx-2"></div>
 
-            {/* 状态筛选 */}
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="bg-slate-50 border border-slate-200 text-xs text-slate-700 font-bold rounded-xl px-3 py-2 outline-none focus:border-blue-500 cursor-pointer"
-            >
-              <option value="all">全部确权状态</option>
-              <option value={AuditStatus.Confirmed}>{AuditStatus.Confirmed}</option>
-              <option value={AuditStatus.Approved}>{AuditStatus.Approved}</option>
-              <option value={AuditStatus.Pending}>{AuditStatus.Pending}</option>
-              <option value={AuditStatus.Rejected}>{AuditStatus.Rejected}</option>
-            </select>
+            {/* 2. 业务类别筛选 */}
+            <div className="space-y-1.5 flex-1 min-w-[120px]">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">业务类别</label>
+              <select
+                value={filterType}
+                onChange={(e) => setFilterType(e.target.value)}
+                className="w-full bg-white border border-slate-200 text-xs text-slate-700 font-bold rounded-xl px-3 py-2 outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+              >
+                <option value="all">全部类别</option>
+                <option value="revenue">收款类</option>
+                <option value="value">产值类</option>
+              </select>
+            </div>
+
+            {/* 3. 确权状态筛选 */}
+            <div className="space-y-1.5 flex-1 min-w-[120px]">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">确权状态</label>
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="w-full bg-white border border-slate-200 text-xs text-slate-700 font-bold rounded-xl px-3 py-2 outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+              >
+                <option value="all">全部状态</option>
+                <option value={AuditStatus.Confirmed}>{AuditStatus.Confirmed}</option>
+                <option value={AuditStatus.Approved}>{AuditStatus.Approved}</option>
+                <option value={AuditStatus.Pending}>{AuditStatus.Pending}</option>
+                <option value={AuditStatus.Rejected}>{AuditStatus.Rejected}</option>
+              </select>
+            </div>
+
+            {/* 4. 矿山搜索 */}
+            <div className="space-y-1.5 flex-1 min-w-[140px]">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">矿山筛选</label>
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-300 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="ID / 名称..."
+                  value={filterMiningId}
+                  onChange={(e) => setFilterMiningId(e.target.value)}
+                  className="w-full bg-white border border-slate-200 text-xs rounded-xl pl-8 pr-3 py-2 outline-none focus:border-blue-500 text-slate-800 shadow-2xs"
+                />
+              </div>
+            </div>
+
+            {/* 5. 收支方向 */}
+            <div className="space-y-1.5 flex-1 min-w-[100px]">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">方向</label>
+              <select
+                value={filterDirection}
+                onChange={(e) => setFilterDirection(e.target.value)}
+                className="w-full bg-white border border-slate-200 text-xs text-slate-700 font-bold rounded-xl px-3 py-2 outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+              >
+                <option value="all">全部</option>
+                <option value="income">收入</option>
+                <option value="expense">支出</option>
+              </select>
+            </div>
+
+            {/* 6. 单号搜索 */}
+            <div className="space-y-1.5 flex-[1.5] min-w-[160px]">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">单号关键词</label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Filter className="w-3.5 h-3.5 text-slate-300 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="搜索流水单号..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full bg-white border border-slate-200 text-xs rounded-xl pl-8 pr-3 py-2 outline-none focus:border-blue-500 text-slate-800 shadow-2xs"
+                  />
+                </div>
+                <button
+                  onClick={handleClearFilters}
+                  title="重置全部筛选"
+                  className="p-2 bg-white border border-slate-200 text-slate-400 hover:text-slate-600 hover:border-slate-300 rounded-xl transition-all shadow-2xs"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-bold text-slate-500">
-              共 <span className="text-blue-600 font-mono font-black">{filteredDetailLogs.length}</span> 条记录
-            </span>
-            <button
-              onClick={handleExportExcel}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95"
-            >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-              <span>导出</span>
-            </button>
+
+          {/* 筛选结果汇总展示区 - 银行固定面板样式 */}
+          <div className="bg-slate-900 rounded-2xl p-6 text-white flex flex-wrap items-center justify-between gap-6 shadow-xl relative overflow-hidden group">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-20 -mt-20 blur-3xl group-hover:bg-white/10 transition-all duration-1000"></div>
+            
+            <div className="flex flex-wrap items-center gap-8 md:gap-12 relative z-10">
+              <div className="space-y-1">
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                  <div className="w-1 h-1 bg-emerald-400 rounded-full"></div>
+                  本期收入合计
+                </span>
+                <div className="text-xl font-black font-mono text-emerald-400">
+                  {formatAmount(filteredSummary.income)}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                  <div className="w-1 h-1 bg-rose-400 rounded-full"></div>
+                  本期支出/成本
+                </span>
+                <div className="text-xl font-black font-mono text-rose-400">
+                  {isCostVisible ? formatAmount(filteredSummary.expense) : '****'}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                  <div className="w-1 h-1 bg-blue-400 rounded-full"></div>
+                  收产包合计
+                </span>
+                <div className="text-xl font-black font-mono text-blue-400">
+                  {formatAmount(filteredSummary.combinedPkg)}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                  <div className="w-1 h-1 bg-amber-400 rounded-full"></div>
+                  本期结余
+                </span>
+                <div className="text-xl font-black font-mono text-white">
+                  {isCostVisible ? formatAmount(filteredSummary.income - filteredSummary.expense) : '****'}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4 relative z-10">
+              <div className="text-right">
+                <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">筛选笔数</div>
+                <div className="text-lg font-black font-mono">{filteredSummary.count}</div>
+              </div>
+              <div className="h-10 w-px bg-slate-800"></div>
+              <button
+                onClick={handleExportExcel}
+                className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black transition-all shadow-lg active:scale-95"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>导出报告</span>
+              </button>
+            </div>
           </div>
         </div>
 

@@ -47,10 +47,28 @@ export function computePersonEvaluation(
   const monthlyLogs = logs.filter(l => 
     matchUser(l) && 
     isIncomeLog(l) &&
-    ((startDate || endDate) 
-      ? isLogInFilter(l, '', startDate, endDate)
-      : l.month === filterMonth)
+    isLogInFilter(l, filterMonth, startDate, endDate)
   );
+
+  // 成本相关流水筛选 (A/B1/B2/C)
+  const costLogs = logs.filter(l => 
+    l.recordedCollectorId === user.id &&
+    [AuditStatus.Confirmed, AuditStatus.Approved].includes(l.status as AuditStatus) &&
+    isLogInFilter(l, filterMonth, startDate, endDate)
+  );
+
+  let aCost = 0;
+  let b1Cost = 0;
+  let b2Cost = 0;
+  let cCost = 0;
+
+  costLogs.forEach(l => {
+    if (l.costCategory === 'A') aCost += l.dynamicCost || 0;
+    else if (l.costCategory === 'B') {
+      if (l.valueConsumptionMode === 'B1') b1Cost += l.dynamicCost || 0;
+      else if (l.valueConsumptionMode === 'B2') b2Cost += l.dynamicCost || 0;
+    } else if (l.costCategory === 'C') cCost += l.dynamicCost || 0;
+  });
 
   // 年度流水 (至当前月)
   const yearlyLogs = logs.filter(l => 
@@ -70,26 +88,17 @@ export function computePersonEvaluation(
     return acc + calculateHistoricalNetValue(log, resources, allUsers);
   }, 0);
 
-  // 成本计算：复用 aggregateUserMonthMetrics，款专成本=工资+A，产专成本=工资+B1，完美对账分配侧
+  // 成本计算：款专成本=工资+A，产专成本=工资+B1
   const category = user.category || '';
   const isRevenueExpert = category.includes('款专');
   const isProdExpert = category.includes('产专') || category === '经管员高产专';
 
-  const mMetrics = aggregateUserMonthMetrics(
-    logs,
-    user,
-    refMonth,
-    resources,
-    allUsers,
-    [AuditStatus.Confirmed, AuditStatus.Approved]
-  );
-
   const baseSalary = getUserSalaryByMonth(user, refMonth);
   let monthlyCost = baseSalary;
   if (isRevenueExpert) {
-    monthlyCost += mMetrics.aCost;
+    monthlyCost += aCost;
   } else if (isProdExpert) {
-    monthlyCost += mMetrics.b1Cost;
+    monthlyCost += b1Cost;
   }
   
   // 年度成本 = 从 1 月到 refMonth 累计月度成本 (工资 + A/B1)
@@ -159,10 +168,10 @@ export function computePersonEvaluation(
     timestamp: Date.now(),
     contributionStatus: contribution > 0 ? '优秀' : (contribution > -1000 ? '观察' : '预警'),
     baseSalary,
-    aCost: mMetrics.aCost,
-    b1Cost: mMetrics.b1Cost,
-    b2Cost: mMetrics.b2Cost,
-    cCost: mMetrics.cCost || 0
+    aCost,
+    b1Cost,
+    b2Cost,
+    cCost
   };
 }
 

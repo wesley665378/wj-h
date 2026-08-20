@@ -140,19 +140,16 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
         salaryPackage: newUserFormData.salaryPackage,
         salaryHistory: [{ effectiveMonth: currentMonth, salary: newUserFormData.salaryPackage }],
         permissions: [],
-        userStatus: 'active'
+        userStatus: 'active',
+        password: newUserFormData.password // 新建时直接带入密码字段
       };
-
-      const updatedUsers = [...users, newUser];
+      
       try {
-        // 先更新内存再 sync
-        onUpdateUsers(updatedUsers);
+        // 直接一次性落库，由后端 syncWorkspace 处理 password_hash
+        await syncWorkspace({ users: [...users, newUser] });
         
-        await syncWorkspace({ users: updatedUsers });
-        const pwSuccess = await onUpdatePassword(newUser.id, newUserFormData.password);
-        if (!pwSuccess) {
-          throw new Error('密码设置失败，请检查网络或权限');
-        }
+        // 成功后更新本地内存
+        onUpdateUsers([...users, newUser]);
         
         showAlert('新人格实体创建成功，并已成功注入矩阵。');
         setNewUserFormData({ 
@@ -168,6 +165,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
         });
         if (showAddAccountForm) setShowAddAccountForm(false);
       } catch (err) {
+        // 失败展示后端「未设置密码/弱密码」原文
         showAlert(`实体创建同步失败：${(err as Error).message || '未知错误'}`);
       } finally {
         isSyncing.current = false;

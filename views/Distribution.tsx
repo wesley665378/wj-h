@@ -94,6 +94,7 @@ interface BonusCalculation {
 
   salaryPackage: number;
   cWeight: number;
+  centerLevelBonus?: number;
   theoreticalBonus?: number;
   isRevenueExpert?: boolean;
   isChan?: boolean;
@@ -443,6 +444,16 @@ const Distribution: React.FC<DistributionProps> = ({
         const netBonusApprovedVal = serverItem?.theoreticalBonusApproved ?? (allocApproved.ratio > 0 ? allocApproved.theoreticalBonus : 0);
         const netBonusConfirmedVal = serverItem?.theoreticalBonusConfirmed ?? (allocConfirmed.ratio > 0 ? allocConfirmed.theoreticalBonus : 0); 
 
+        const userObj = users.find((u) => u.id === user.id);
+        const userCenter = userObj?.center || "";
+
+        let centerLevelBonus = 0;
+        if (user.category === "经管员高款专" || user.category === "经管员高产专") {
+          centerLevelBonus = resources
+            .filter((r) => r.assignedTo === userCenter)
+            .reduce((sum, r) => sum + (r.incentiveOutput5 || 0) + (r.incentiveCollection2 || 0), 0);
+        }
+
         return {
           userId: user.id,
           userName: user.name,
@@ -455,6 +466,7 @@ const Distribution: React.FC<DistributionProps> = ({
           nextDebt,
           theoreticalBonus,
           ratio: allocConfirmed.ratio,
+          centerLevelBonus,
 
           historyRecordsConfirmed,
           historyRecordsApproved,
@@ -981,6 +993,14 @@ const Distribution: React.FC<DistributionProps> = ({
                                 </div>
                               );
                             })()}
+                          {data.centerLevelBonus !== undefined && data.centerLevelBonus > 0 && (
+                            <div className="text-[10px] font-normal text-[#64748b] flex flex-col items-center mt-1.5 border-t border-slate-100 pt-1 w-full">
+                              <span className="text-slate-400">中心本级</span>
+                              <span className="font-semibold text-indigo-600">
+                                {fmtAmount(data.centerLevelBonus)}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </td>
 

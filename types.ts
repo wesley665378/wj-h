@@ -30,6 +30,7 @@ export interface User {
   salaryHistory?: SalaryHistoryRecord[]; // 工资变更履历
   permissions?: string[]; // 可访问的组件/标签页 ID 列表
   userStatus?: 'active' | 'inactive'; // 用户状态：active(在职), inactive(离职)
+  password?: string; // 初始密码 (仅用于同步落库)
 }
 
 export interface SystemOperationLog {
