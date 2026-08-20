@@ -6,6 +6,7 @@ import {
   Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend
 } from 'recharts';
+import { InfoTip } from '../src/components/InfoTip';
 import { RefreshCw, Info, LayoutGrid, List, AlertTriangle, Wallet, Eye, EyeOff, FileSpreadsheet, Sparkles, Lock, CheckCircle2 } from 'lucide-react';
 import { useCostPrivacy } from '../src/hooks/useCostPrivacy';
 import { useCityGuardianModal, CityGuardianModal } from '../src/components/CityGuardianModal';
@@ -1462,7 +1463,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
                           <div className="p-2.5 bg-blue-50/50 rounded-xl border border-blue-100/50 space-y-2">
                             <div className="flex items-center justify-between">
-                              <span className="text-[9px] font-black text-blue-800 tracking-tight">中心本级 (公共统筹)</span>
+                              <span className="text-[9px] font-black text-blue-800 tracking-tight">中心本级</span>
                               <div className="flex gap-1">
                                  <span className="w-1 h-1 rounded-full bg-blue-400"></span>
                                  <span className="w-1 h-1 rounded-full bg-blue-200"></span>
@@ -1472,18 +1473,26 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                               <div className="flex flex-col">
                                 <span className="text-[8px] text-blue-600 font-bold flex items-center gap-1">
                                   产值计提 (5%)
-                                  <span title="基于核准产值的 5% 统筹提取" className="cursor-help shrink-0">
-                                    <Info size={10} className="text-blue-300" />
-                                  </span>
+                                  <InfoTip 
+                                    title="产值计提口径" 
+                                    content="基于核准产值的 5% 统筹提取，用于中心本级公共运营成本及战略储备。"
+                                    placement="top"
+                                  >
+                                    <Info size={10} className="text-blue-300 cursor-help" />
+                                  </InfoTip>
                                 </span>
                                 <span className="text-xs font-black text-blue-900 leading-none mt-1">{Math.round(c.value5Percent).toLocaleString()}</span>
                               </div>
                               <div className="flex flex-col border-l border-blue-100 pl-3">
                                 <span className="text-[8px] text-blue-600 font-bold flex items-center gap-1">
                                   收款计提 (2%)
-                                  <span title="基于已确权收款的 2% 统筹提取" className="cursor-help shrink-0">
-                                    <Info size={10} className="text-blue-300" />
-                                  </span>
+                                  <InfoTip 
+                                    title="收款计提口径" 
+                                    content="基于已确权收款的 2% 统筹提取。仅对已通过终审确权的收款额进行实时计提。"
+                                    placement="top"
+                                  >
+                                    <Info size={10} className="text-blue-300 cursor-help" />
+                                  </InfoTip>
                                 </span>
                                 <div className="flex items-baseline gap-1.5 mt-1">
                                   <span className="text-xs font-black text-blue-900 leading-none">{Math.round(c.revenue2Percent).toLocaleString()}</span>
