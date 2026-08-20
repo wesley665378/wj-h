@@ -1437,16 +1437,62 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                      {salaryByCenter.map(c => (
-                       <div key={c.name} className="bg-white p-3 rounded-xl border border-slate-200 hover:border-blue-400 transition-colors space-y-2">
-                          <div className="flex justify-between items-center">
-                            <span className="text-[10px] font-black text-slate-900 truncate">{c.name}</span>
-                            <span className="text-[10px] font-black font-mono text-slate-500">月刚性工资包: {maskMoney(Math.round(c.value))}</span>
+                       <div key={c.name} className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-blue-400 transition-all shadow-sm hover:shadow-md space-y-3">
+                          <div className="flex justify-between items-start">
+                            <div className="flex flex-col">
+                              <span className="text-[11px] font-black text-slate-900 truncate max-w-[120px]">{c.name}</span>
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">经营单元</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[10px] font-black font-mono text-slate-700 block">{maskMoney(Math.round(c.value))}</span>
+                              <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter">月刚性工资包</span>
+                            </div>
                           </div>
-                          <div className="grid grid-cols-2 gap-1 text-[9px] text-slate-500">
-                            <span>产初: {Math.round(c.valueLimit).toLocaleString()}</span>
-                            <span>款初: {Math.round(c.revenueLimit).toLocaleString()}</span>
-                            <span>产值5%: {Math.round(c.value5Percent).toLocaleString()}</span>
-                            <span>收款2%: {Math.round(c.revenue2Percent).toLocaleString()}</span>
+                          
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-2 border-t border-slate-50">
+                            <div className="flex justify-between items-center">
+                              <span className="text-[9px] text-slate-500">产值初限</span>
+                              <span className="text-[9px] font-bold text-slate-700">{Math.round(c.valueLimit).toLocaleString()}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-[9px] text-slate-500">收款初限</span>
+                              <span className="text-[9px] font-bold text-slate-700">{Math.round(c.revenueLimit).toLocaleString()}</span>
+                            </div>
+                          </div>
+
+                          <div className="p-2.5 bg-blue-50/50 rounded-xl border border-blue-100/50 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[9px] font-black text-blue-800 tracking-tight">中心本级 (公共统筹)</span>
+                              <div className="flex gap-1">
+                                 <span className="w-1 h-1 rounded-full bg-blue-400"></span>
+                                 <span className="w-1 h-1 rounded-full bg-blue-200"></span>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="flex flex-col">
+                                <span className="text-[8px] text-blue-600 font-bold flex items-center gap-1">
+                                  产值计提 (5%)
+                                  <span title="基于核准产值的 5% 统筹提取" className="cursor-help shrink-0">
+                                    <Info size={10} className="text-blue-300" />
+                                  </span>
+                                </span>
+                                <span className="text-xs font-black text-blue-900 leading-none mt-1">{Math.round(c.value5Percent).toLocaleString()}</span>
+                              </div>
+                              <div className="flex flex-col border-l border-blue-100 pl-3">
+                                <span className="text-[8px] text-blue-600 font-bold flex items-center gap-1">
+                                  收款计提 (2%)
+                                  <span title="基于已确权收款的 2% 统筹提取" className="cursor-help shrink-0">
+                                    <Info size={10} className="text-blue-300" />
+                                  </span>
+                                </span>
+                                <div className="flex items-baseline gap-1.5 mt-1">
+                                  <span className="text-xs font-black text-blue-900 leading-none">{Math.round(c.revenue2Percent).toLocaleString()}</span>
+                                  {c.revenue2Percent === 0 && (
+                                    <span className="text-[7px] font-bold text-blue-400 whitespace-nowrap bg-blue-100/50 px-1 rounded">待确权触发</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
                           </div>
                        </div>
                      ))}
