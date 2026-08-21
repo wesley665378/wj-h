@@ -54,6 +54,7 @@ interface AuditingProps {
   onAudit: (logId: string, status: AuditStatus) => void;
   processingLogIds?: Set<string>;
   onRefreshWorkspace?: () => Promise<void>;
+  onDeleteLog?: (logId: string) => void;
 }
 
 const Auditing: React.FC<AuditingProps> = ({
@@ -64,6 +65,7 @@ const Auditing: React.FC<AuditingProps> = ({
   onAudit,
   processingLogIds = new Set(),
   onRefreshWorkspace,
+  onDeleteLog,
 }) => {
   const { isCostVisible, toggleCostVisible, maskMoney, maskText } = useCostPrivacy();
   const [activeTab, setActiveTab] = useState<
@@ -534,7 +536,7 @@ const Auditing: React.FC<AuditingProps> = ({
             <h3 className="text-xl md:text-2xl font-black text-slate-800 tracking-tighter uppercase">
               价值确权与月度结算
             </h3>
-            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-1">
+            <p className="hidden text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-1">
               角色：{user.name} ({user.role}) · 依据 7.1 分配律实时校验确权
             </p>
           </div>
@@ -983,6 +985,8 @@ const Auditing: React.FC<AuditingProps> = ({
                 <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
                   <tr>
                     <th className="px-4 py-6">申报编号 / 时间</th>
+                    <th className="px-4 py-6">删除</th>
+                    <th className="px-4 py-6">删除时间</th>
                     <th className="px-4 py-6 text-center">矿山编号</th>
                     <th className="px-4 py-6 font-bold text-slate-800">采集主体</th>
                     <th className="px-4 py-6 text-center">经营单元</th>
@@ -1014,6 +1018,29 @@ const Auditing: React.FC<AuditingProps> = ({
                           </span>
                           <span className="text-[8px] text-slate-400 block">
                             提报: {formatSubmissionDate(log.timestamp)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-6">
+                          {log.deleted ? (
+                            <span className="text-[10px] font-black text-rose-500">已删除</span>
+                          ) : (
+                            onDeleteLog ? (
+                              <button
+                                onClick={() => {
+                                  if (window.confirm("确定要删除审计记录 #" + log.id + " 吗？")) {
+                                    onDeleteLog(log.id);
+                                  }
+                                }}
+                                className="px-3 py-1 bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white rounded text-[9px] font-black uppercase transition-all"
+                              >
+                                删除
+                              </button>
+                            ) : '-'
+                          )}
+                        </td>
+                        <td className="px-4 py-6">
+                          <span className="text-[10px] font-mono font-bold text-slate-500 whitespace-nowrap">
+                            {log.deletedAt || '-'}
                           </span>
                         </td>
                         <td className="px-4 py-6 text-center">
@@ -1097,7 +1124,7 @@ const Auditing: React.FC<AuditingProps> = ({
                   })}
                   {(activeTab === "history" ? historyTasks.length : consumptionTasks.length) === 0 && (
                     <tr>
-                      <td colSpan={activeTab === "consumption" ? 15 : 14} className="py-20 text-center opacity-20 text-xs font-black uppercase tracking-widest">
+                      <td colSpan={activeTab === "consumption" ? 17 : 16} className="py-20 text-center opacity-20 text-xs font-black uppercase tracking-widest">
                         当前结算周期内无任何{activeTab === "consumption" ? "消耗确权任务" : "成本审计记录"}
                       </td>
                     </tr>

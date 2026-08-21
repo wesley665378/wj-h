@@ -268,15 +268,17 @@ export const RANK_CONFIG: Record<string, { cluster: PermissionCluster; salaryTyp
 export const checkUserPermission = (user: User, menuId: string): boolean => {
   if (!user) return false;
 
-  // 1. 如果用户对象中显式包含手动配置的 permissions 数组，完全以手动 RBAC 矩阵配置为准
-  if (user.permissions && Array.isArray(user.permissions)) {
-    return user.permissions.includes(menuId);
-  }
-
-  // 2. 未设置自定义 permissions 时，回退至系统角色与职级默认权限规则
+  // 1. 系统管理员默认全开菜单
   const isAdmin = user.role === Role.Admin || user.category === '系统管理员';
   if (isAdmin) return true;
 
+  // 2. 仅当 permissions 数组存在且长度 > 0 时，才视为手动自定义配置
+  // 空 permissions 数组（[]）视为未自定义，按职级/角色默认权限，禁止把 [] 当成「一项都不开」
+  if (user.permissions && Array.isArray(user.permissions) && user.permissions.length > 0) {
+    return user.permissions.includes(menuId);
+  }
+
+  // 3. 未自定义 permissions 时（包括 [] 或 undefined），回退至系统角色与职级默认权限规则
   const isNpcxie = user.role === Role.npcxie || user.category === 'NPC';
   if (isNpcxie && (menuId === 'personnel' || menuId === 'transactions')) return false;
 

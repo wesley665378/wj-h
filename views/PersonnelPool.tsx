@@ -485,6 +485,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
   };
 
   const processExcelFile = (file: File) => {
+    if (!isSystemAdmin(user)) {
+      showAlert('权限不足：仅系统管理员有权执行批量导入。');
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const bstr = event.target?.result;
@@ -497,22 +502,24 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
         const rowKeys = Object.keys(row);
         const findValue = (possibleKeys: string[]) => {
           for (const pk of possibleKeys) {
-            if (row[pk] !== undefined && row[pk] !== null) return row[pk];
+            if (row[pk] !== undefined && row[pk] !== null && String(row[pk]).trim() !== '') return row[pk];
             const normalizedPK = pk.toLowerCase().replace(/\s/g, '');
             const foundKey = rowKeys.find(rk => rk.toLowerCase().replace(/\s/g, '') === normalizedPK);
-            if (foundKey && row[foundKey] !== undefined && row[foundKey] !== null) return row[foundKey];
+            if (foundKey && row[foundKey] !== undefined && row[foundKey] !== null && String(row[foundKey]).trim() !== '') return row[foundKey];
           }
           return undefined;
         };
 
-        const userId = String(findValue(['loginid', 'userId', '登录名', '登录账号']) || '');
-        const id = String(findValue(['工号', '矿山编号', '实体ID', 'ID', 'id', '实体 ID', '用户名']) || '');
-        const name = String(findValue(['名称', '姓名', 'Name', 'name', '采集主体']) || '');
-        const roleStr = String(findValue(['角色', 'Role', 'role']) || '').toLowerCase();
-        const center = String(findValue(['责任人（单元负责）', '责任人', '经营单元', 'Center', 'center', '所属单元']) || '');
+        const userId = String(findValue(['loginid', 'userId', '登录名', '登录账号']) || '').trim();
+        const id = String(findValue(['工号', '矿山编号', '实体ID', 'ID', 'id', '实体 ID', '用户名']) || '').trim();
+        const name = String(findValue(['名称', '姓名', 'Name', 'name', '采集主体']) || '').trim();
+        const roleStr = String(findValue(['角色', 'Role', 'role']) || '').toLowerCase().trim();
+        const center = String(findValue(['责任人（单元负责）', '责任人', '经营单元', 'Center', 'center', '所属单元']) || '').trim();
         const rawCategory = String(findValue(['职级', '分类', 'Category', 'category', '人格分类', '人格等级分类']) || '').trim();
+        
         let category: User['category'] = '初款专';
-        if (rawCategory.toUpperCase().includes('VP') || rawCategory.includes('副总')) {
+        const upperCat = rawCategory.toUpperCase();
+        if (upperCat.includes('VP') || rawCategory.includes('副总')) {
           category = 'VP';
         } else if (rawCategory.includes('经管员NPC') || (rawCategory.includes('经管') && rawCategory.includes('NPC'))) {
           category = '经管员NPC';
@@ -522,27 +529,39 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
           const matched = RANK_DICTIONARY.find(r => rawCategory.includes(r));
           if (matched) category = matched as any;
         }
+
+        // 职级 VP（副总裁）时，工资包类型须填「VP工资包」，勿填「NPC工资包」
+        const rawPackageType = String(findValue(['单月刚性工资包类型', '工资包类型', 'PackageType', '工资包类别']) || '').trim();
+        let salaryPackageType: User['salaryPackageType'] = '收款工资包';
         
-        let salaryPackageType = (findValue(['单月刚性工资包类型', '工资包类型', 'PackageType', '工资包类别']) || (category === 'VP' ? 'VP工资包' : '收款工资包')) as User['salaryPackageType'];
-        const lowerType = String(salaryPackageType).toLowerCase();
-        if (lowerType.includes('vp') || lowerType.includes('副总')) {
+        if (category === 'VP') {
           salaryPackageType = 'VP工资包';
-        } else if (lowerType.includes('责任人') || lowerType.includes('经营单元') || lowerType.includes('经管') || lowerType.includes('经营')) {
-          salaryPackageType = '经管员工资包';
-        } else if (lowerType.includes('npc') || lowerType.includes('管理员') || lowerType.includes('刚性包') || lowerType.includes('系统') || lowerType.includes('水库')) {
-          salaryPackageType = 'NPC工资包';
-        } else if (lowerType.includes('产值') || lowerType.includes('产专') || lowerType.includes('value')) {
-          salaryPackageType = '产值工资包';
-        } else if (lowerType.includes('收款') || lowerType.includes('款专') || lowerType.includes('revenue') || lowerType.includes('collection')) {
-          salaryPackageType = '收款工资包';
+        } else if (rawPackageType) {
+          const lowerType = rawPackageType.toLowerCase();
+          if (lowerType.includes('vp') || lowerType.includes('副总')) {
+            salaryPackageType = 'VP工资包';
+          } else if (lowerType.includes('责任人') || lowerType.includes('经营单元') || lowerType.includes('经管') || lowerType.includes('经营')) {
+            salaryPackageType = '经管员工资包';
+          } else if (lowerType.includes('npc') || lowerType.includes('管理员') || lowerType.includes('刚性包') || lowerType.includes('系统') || lowerType.includes('水库')) {
+            salaryPackageType = 'NPC工资包';
+          } else if (lowerType.includes('产值') || lowerType.includes('产专') || lowerType.includes('value')) {
+            salaryPackageType = '产值工资包';
+          } else if (lowerType.includes('收款') || lowerType.includes('款专') || lowerType.includes('revenue') || lowerType.includes('collection')) {
+            salaryPackageType = '收款工资包';
+          } else {
+            salaryPackageType = rawPackageType as any;
+          }
         } else {
-          salaryPackageType = category === 'VP' ? 'VP工资包' : '收款工资包'; // Default fallback
+          salaryPackageType = (category as string) === 'VP' ? 'VP工资包' : '收款工资包';
         }
         
         const salaryPackageRaw = findValue(['单月刚性工资包金额', '工资包金额', '工资包', 'Salary', 'salaryPackage', '金额', 'Amount', '刚性工资包金额']);
-        const salaryPackage = typeof salaryPackageRaw === 'string' 
-          ? Number(salaryPackageRaw.replace(/[^0-9.]/g, '')) 
-          : Number(salaryPackageRaw || 0);
+        // 金额空则按 0 落库
+        const salaryPackage = (salaryPackageRaw === undefined || salaryPackageRaw === null || String(salaryPackageRaw).trim() === '')
+          ? 0
+          : (typeof salaryPackageRaw === 'string' 
+              ? Number(salaryPackageRaw.replace(/[^0-9.]/g, '')) || 0 
+              : Number(salaryPackageRaw) || 0);
         
         const isAutoAccount = AUTO_ACCOUNT_CATEGORIES.includes(category || '');
         const password = isAutoAccount ? '66668888' : 'Guardian@2026';
@@ -724,7 +743,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
     if (!targetUser) return;
 
     let currentPermissions = targetUser.permissions;
-    if (!currentPermissions) {
+    if (!currentPermissions || currentPermissions.length === 0) {
       currentPermissions = MENU_ITEMS.map(item => item.id).filter(id => checkUserPermission(targetUser, id));
     }
 
@@ -1422,7 +1441,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                  </div>
                ) : (
                  filteredRbacUsers.map((u) => {
-                   const isCustom = Array.isArray(u.permissions);
+                   const isCustom = Array.isArray(u.permissions) && u.permissions.length > 0;
                    const enabledCount = MENU_ITEMS.filter(item => checkUserPermission(u, item.id)).length;
                    
                    return (

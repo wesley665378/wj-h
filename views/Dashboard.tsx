@@ -66,8 +66,15 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
   const [filterType, setFilterType] = useState<string | null>(null);
   const [filterPurity, setFilterPurity] = useState<string | null>(null);
 
+  const isAdminOrNPC = useMemo(() => {
+    return currentUser?.role === Role.Admin || 
+           currentUser?.category === '系统管理员' || 
+           currentUser?.role === Role.npcxie || 
+           currentUser?.category === 'NPC';
+  }, [currentUser]);
+
   const isManager = useMemo(() => 
-    currentUser.category === '经管员高款专' || currentUser.category === '经管员高产专',
+    currentUser?.category === '经管员高款专' || currentUser?.category === '经管员高产专',
   [currentUser]);
 
   const handleRefresh = () => {
@@ -79,8 +86,11 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
   };
 
   const uniqueCenters = useMemo(() => {
-    return businessUnits;
-  }, [businessUnits]);
+    if (isAdminOrNPC) {
+      return businessUnits;
+    }
+    return currentUser?.center ? [currentUser.center] : [];
+  }, [businessUnits, currentUser, isAdminOrNPC]);
 
   const uniqueTypes = useMemo(() => {
     const types = new Set<string>();
@@ -224,32 +234,50 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       value5Percent: number;
     }> = {};
     
-    // Initialize
-    users.forEach(u => {
-      const centerName = u.center || '未分配';
-      if (!centers[centerName]) {
-        centers[centerName] = {
-          name: centerName,
-          value: 0,
-          revenueLimit: 0,
-          valueLimit: 0,
-          revenue2Percent: 0,
-          value5Percent: 0
-        };
-      }
-    });
+    const targetUserCenter = currentUser?.center || '未分配';
 
-    // 1. 基础工资包 (按月累加)
-    users.filter(u => !isManager || u.center === currentUser.center).forEach(u => {
-      if (u.category === 'VP') return;
-      
-      const centerName = u.center || '未分配';
-      monthsInPeriod.forEach(m => {
-        if (isSalaryActiveForMonth(u, m)) {
-          centers[centerName].value += getUserSalaryByMonth(u, m);
+    if (!isAdminOrNPC) {
+      // 经营单元/经管员账号登录后，「经营单元效率看板」只显示本账号 User.center 一张卡
+      centers[targetUserCenter] = {
+        name: targetUserCenter,
+        value: 0,
+        revenueLimit: 0,
+        valueLimit: 0,
+        revenue2Percent: 0,
+        value5Percent: 0
+      };
+    } else {
+      // Admin / npcxie 可多单元：根据 users 出现过的 center 建卡
+      users.forEach(u => {
+        const centerName = u.center || '未分配';
+        if (!centers[centerName]) {
+          centers[centerName] = {
+            name: centerName,
+            value: 0,
+            revenueLimit: 0,
+            valueLimit: 0,
+            revenue2Percent: 0,
+            value5Percent: 0
+          };
         }
       });
-    });
+    }
+
+    // 1. 基础工资包 (按月累加)
+    users
+      .filter(u => isAdminOrNPC || u.center === targetUserCenter)
+      .forEach(u => {
+        if (u.category === 'VP') return;
+        
+        const centerName = u.center || '未分配';
+        if (centers[centerName]) {
+          monthsInPeriod.forEach(m => {
+            if (isSalaryActiveForMonth(u, m)) {
+              centers[centerName].value += getUserSalaryByMonth(u, m);
+            }
+          });
+        }
+      });
 
     // 2. 扣除已核准的非有效工时对冲 (冲抵刚性工资包)
     const approvedDeductions = logs.filter(l => 
@@ -257,7 +285,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       l.type === RefineType.NonEffectiveHours &&
       l.timestamp >= periodRange.start &&
       l.timestamp < periodRange.end &&
-      (!isManager || (users.find(u => u.id === l.recordedCollectorId)?.center === currentUser.center))
+      (isAdminOrNPC || (users.find(u => u.id === l.recordedCollectorId)?.center === targetUserCenter))
     );
 
     approvedDeductions.forEach(l => {
@@ -265,6 +293,8 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       if (collector?.category === 'VP') return;
       
       const centerName = collector?.center || '未分配';
+      if (!isAdminOrNPC && centerName !== targetUserCenter) return;
+
       if (!centers[centerName]) {
         centers[centerName] = { name: centerName, value: 0, revenueLimit: 0, valueLimit: 0, revenue2Percent: 0, value5Percent: 0 };
       }
@@ -275,39 +305,43 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     // 3. Revenue & Value Limits & Special Pools (Period-based)
     const periodLogs = logs.filter(l => l.timestamp >= periodRange.start && l.timestamp < periodRange.end);
     
-    resources.filter(r => !isManager || r.assignedTo === currentUser.center || r.assignedToRevenue === currentUser.center || r.assignedToValue === currentUser.center).forEach(r => {
-      const centerName = r.assignedTo || '未分配';
-      if (!centers[centerName]) {
-        centers[centerName] = { name: centerName, value: 0, revenueLimit: 0, valueLimit: 0, revenue2Percent: 0, value5Percent: 0 };
-      }
-      centers[centerName].revenueLimit += r.revenueCapacity;
-      centers[centerName].valueLimit += r.valueCapacity;
-      
-      // Calculate period-based extraction
-      const miningLogs = periodLogs.filter(l => l.miningId === r.id && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved));
-      
-      const revLogs = miningLogs.filter(l => l.category === RefineCategory.Revenue);
-      const valLogs = miningLogs.filter(l => l.category === RefineCategory.Value);
-      
-      // 收款专项计提 (2%) = amount × 2%（含款专且不含经管员，不乘 C权、B2权）
-      const rev2 = revLogs.reduce((sum, l) => {
-        const u = users.find(user => user.id === l.recordedCollectorId);
-        return sum + computeCollection2Incentive(l, u);
-      }, 0);
-      // 产值专项计提 (5%) = amount × 5%（仅初产专/中产专触发，中产专也是5%，不乘 C权、B2权）
-      const val5 = valLogs.reduce((sum, l) => {
-        const u = users.find(user => user.id === l.recordedCollectorId);
-        return sum + computeValueOutput5Incentive(l, u);
-      }, 0);
-      
-      centers[centerName].revenue2Percent += rev2;
-      centers[centerName].value5Percent += val5;
-    });
+    resources
+      .filter(r => isAdminOrNPC || r.assignedTo === targetUserCenter || r.assignedToRevenue === targetUserCenter || r.assignedToValue === targetUserCenter)
+      .forEach(r => {
+        const centerName = r.assignedTo || targetUserCenter;
+        if (!isAdminOrNPC && centerName !== targetUserCenter) return;
+
+        if (!centers[centerName]) {
+          centers[centerName] = { name: centerName, value: 0, revenueLimit: 0, valueLimit: 0, revenue2Percent: 0, value5Percent: 0 };
+        }
+        centers[centerName].revenueLimit += r.revenueCapacity;
+        centers[centerName].valueLimit += r.valueCapacity;
+        
+        // Calculate period-based extraction
+        const miningLogs = periodLogs.filter(l => l.miningId === r.id && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved));
+        
+        const revLogs = miningLogs.filter(l => l.category === RefineCategory.Revenue);
+        const valLogs = miningLogs.filter(l => l.category === RefineCategory.Value);
+        
+        // 收款专项计提 (2%) = amount × 2%（含款专且不含经管员，不乘 C权、B2权）
+        const rev2 = revLogs.reduce((sum, l) => {
+          const u = users.find(user => user.id === l.recordedCollectorId);
+          return sum + computeCollection2Incentive(l, u);
+        }, 0);
+        // 产值专项计提 (5%) = amount × 5%（仅初产专/中产专触发，中产专也是5%，不乘 C权、B2权）
+        const val5 = valLogs.reduce((sum, l) => {
+          const u = users.find(user => user.id === l.recordedCollectorId);
+          return sum + computeValueOutput5Incentive(l, u);
+        }, 0);
+        
+        centers[centerName].revenue2Percent += rev2;
+        centers[centerName].value5Percent += val5;
+      });
 
     return Object.values(centers)
-      .filter(c => c.name !== '未分配')
+      .filter(c => isAdminOrNPC ? c.name !== '未分配' : true)
       .sort((a, b) => b.value - a.value);
-  }, [users, logs, periodRange, monthsInPeriod, resources]);
+  }, [users, logs, periodRange, monthsInPeriod, resources, currentUser, isAdminOrNPC]);
 
   const totalSalaryFlow = useMemo(() => {
     return salaryByCenter.reduce((acc, curr) => acc + curr.value, 0);

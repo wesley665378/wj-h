@@ -671,13 +671,30 @@ const App: React.FC = () => {
     addSystemLog('资源管理', `删除了矿山资源 ${id}`);
   }, []);
 
+  const onDeleteLog = React.useCallback((logId: string) => {
+    const nowStr = new Date().toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setLogs(prev => prev.map(l => l.id === logId ? { ...l, deleted: true, deletedAt: nowStr } : l));
+    toast.success("审计记录 #" + logId + " 已删除");
+    addSystemLog("删除审计记录", "删除编号 #" + logId + "，时间: " + nowStr);
+  }, [addSystemLog]);
+
   const onUpdateUsers = React.useCallback((newUsers: User[]) => {
     setManagedUsers(newUsers);
-    // 如果当前登录用户在更新列表中，同步更新当前用户信息
+    // 如果当前登录用户在更新列表中，同步更新当前用户信息（勿用空 permissions 盖掉当前会话）
     if (currentUser) {
       const updatedSelf = newUsers.find(u => u.id === currentUser.id);
       if (updatedSelf) {
-        setCurrentUser(updatedSelf);
+        setCurrentUser(prev => {
+          if (!prev) return updatedSelf;
+          let finalPermissions = updatedSelf.permissions;
+          if ((!finalPermissions || finalPermissions.length === 0) && (prev.permissions && prev.permissions.length > 0)) {
+            finalPermissions = prev.permissions;
+          }
+          return {
+            ...updatedSelf,
+            permissions: finalPermissions
+          };
+        });
       }
     }
     addSystemLog('用户管理', `同步了 ${newUsers.length} 位用户信息`);
@@ -1047,6 +1064,7 @@ const App: React.FC = () => {
         resources: filteredResources,
         onAudit: processAudit,
         processingLogIds,
+        onDeleteLog,
         onRefreshWorkspace: async () => {
           const res = await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/workspace`);
           if (res.ok) {
