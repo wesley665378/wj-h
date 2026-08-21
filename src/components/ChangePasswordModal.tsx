@@ -70,6 +70,9 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClo
         icon={<Lock className="w-6 h-6" />}
         maxWidthClassName="max-w-md"
       >
+        <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl mb-4 text-xs font-bold text-amber-800">
+          🔒 初始密码/首次登录提示：如果您使用的是初始默认密码 (66668888)，请及时设置新的安全密码。
+        </div>
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">当前密码</label>

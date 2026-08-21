@@ -15,7 +15,8 @@ import { Card, StatItem, ProgressBar } from '../src/components/UI';
 import { UI_LABELS } from '../src/constants/uiLabels';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
 import { PURITY_RULES, LINKED_CONFIRMATION_RULES } from '../src/constants/businessRules';
-import { getPurityInfo, calculateHistoricalNetValue, getUserSalaryByMonth } from '../src/utils/business';
+import { getPurityInfo, calculateHistoricalNetValue, getUserSalaryByMonth, computeValueOutput5Incentive, computeCollection2Incentive } from '../src/utils/business';
+import { isSalaryActiveForMonth } from '../src/utils/employmentStatus';
 import { 
   sumConfirmedRevenuePackage, 
   sumValueConversionPackage, 
@@ -240,11 +241,13 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
     // 1. 基础工资包 (按月累加)
     users.filter(u => !isManager || u.center === currentUser.center).forEach(u => {
-      if (u.category === '水库管理员') return;
+      if (u.category === 'VP') return;
       
       const centerName = u.center || '未分配';
       monthsInPeriod.forEach(m => {
-        centers[centerName].value += getUserSalaryByMonth(u, m);
+        if (isSalaryActiveForMonth(u, m)) {
+          centers[centerName].value += getUserSalaryByMonth(u, m);
+        }
       });
     });
 
@@ -259,7 +262,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
     approvedDeductions.forEach(l => {
       const collector = users.find(u => u.id === l.recordedCollectorId);
-      if (collector?.category === '水库管理员') return;
+      if (collector?.category === 'VP') return;
       
       const centerName = collector?.center || '未分配';
       if (!centers[centerName]) {
@@ -286,10 +289,16 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       const revLogs = miningLogs.filter(l => l.category === RefineCategory.Revenue);
       const valLogs = miningLogs.filter(l => l.category === RefineCategory.Value);
       
-      // 收款计提 (2%) = roundMoney(本笔注入 × C权 × 2%)
-      const rev2 = revLogs.reduce((sum, l) => sum + Math.round((l.rawAmount || l.amount) * (l.cClassRatio || 1) * 0.02), 0);
-      // 产值计提 (5%) = roundMoney(本笔注入 × C权 × B2权 × 5%)
-      const val5 = valLogs.reduce((sum, l) => sum + Math.round((l.rawAmount || l.amount) * (l.cClassRatio || 1) * (l.b2ClassRatio || 1) * 0.05), 0);
+      // 收款专项计提 (2%) = amount × 2%（含款专且不含经管员，不乘 C权、B2权）
+      const rev2 = revLogs.reduce((sum, l) => {
+        const u = users.find(user => user.id === l.recordedCollectorId);
+        return sum + computeCollection2Incentive(l, u);
+      }, 0);
+      // 产值专项计提 (5%) = amount × 5%（仅初产专/中产专触发，中产专也是5%，不乘 C权、B2权）
+      const val5 = valLogs.reduce((sum, l) => {
+        const u = users.find(user => user.id === l.recordedCollectorId);
+        return sum + computeValueOutput5Incentive(l, u);
+      }, 0);
       
       centers[centerName].revenue2Percent += rev2;
       centers[centerName].value5Percent += val5;
@@ -358,7 +367,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
           if (l.type === RefineType.NonEffectiveHours) {
             const collector = userMap.get(l.recordedCollectorId || '');
-            if (collector?.category !== '水库管理员') {
+            if (collector?.category !== 'VP') {
               totalRigidDeduction += netValue;
             }
           }
@@ -439,7 +448,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     let totalRigidExpenses = 0;
     monthsInPeriod.forEach(m => {
       totalRigidExpenses += users
-        .filter(u => u.category !== '水库管理员' && (u.userStatus === 'active' || u.userStatus === undefined))
+        .filter(u => u.category !== 'VP' && isSalaryActiveForMonth(u, m))
         .reduce((acc, u) => acc + getUserSalaryByMonth(u, m), 0);
     });
     const rigidSalaryPackage = totalRigidExpenses;
@@ -458,24 +467,18 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     }
     const operatingLoss = aCosts + b1Costs + b2Costs + cCostsDynamic + dCosts;
 
-    // 4. 已产出总奖金池 (totalBonusPool) - 遍历并累加全量采集专家的【收产包冗余】
+    // 4. 已产出总奖金池 (totalBonusPool) - 遍历并累加全量采集专家的【专项计提】
     let totalRedundancySum = 0;
     users.forEach(u => {
-      const isRankKuan = u.category === '中款专' || u.category === '初款专';
-      const isRankChan = u.category === '中产专' || u.category === '初产专';
-      
       const uLogs = logs.filter(l => 
         l.recordedCollectorId === u.id && 
-        l.status === AuditStatus.Approved && 
+        (l.status === AuditStatus.Approved || l.status === AuditStatus.Confirmed) && 
         l.timestamp >= periodRange.start &&
         l.timestamp < periodRange.end
       );
       
-      const rxPoints = uLogs.filter(l => l.category === RefineCategory.Revenue).reduce((sum, l) => sum + (l.amount || 0), 0);
-      const vxPoints = uLogs.filter(l => l.category === RefineCategory.Value).reduce((sum, l) => sum + (l.amount || 0), 0);
-      
-      const kuanContribution = isRankKuan ? (rxPoints * 0.02) : 0;
-      const chanContribution = isRankChan ? (vxPoints * 0.05) : 0;
+      const kuanContribution = uLogs.reduce((sum, l) => sum + computeCollection2Incentive(l, u), 0);
+      const chanContribution = uLogs.reduce((sum, l) => sum + computeValueOutput5Incentive(l, u), 0);
       
       totalRedundancySum += (kuanContribution + chanContribution);
     });
@@ -709,7 +712,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       [3, '产兑包 (Value Conversion Package)', totalVal, '已确权产值提炼产兑包'],
       [4, '刚性保底工资包 (Rigid Salary Package)', maskCost(rigidSalary), '专家保障底薪及硬性人工开支（按月累加）'],
       [5, '运营直接损耗 (Operating Loss)', maskCost(operatingLossVal), 'A/B1/B2/C/D 动态运维消耗总和'],
-      [6, '专家收产包冗余奖金池 (Bonus Pool)', totalBonus, '采集专家收产包冗余激励及理论分配池'],
+      [6, '专家专项计提奖金池 (Bonus Pool)', totalBonus, '采集专家专项计提激励及理论分配池'],
       [7, '平台统筹留用池 (Platform Pool)', coordPool, '已确权收款20%提取与分红沉淀，用于刚性补足与对冲'],
       [8, '分红池纯结余 (Dividend Pool)', divPool, '覆盖成本与承兑后的净盈余沉淀（80%二次分配，20%注入统筹池）'],
       [9, '组织造血对冲能力 (蓄水入库 / 刚性支出)', `${reservoirInflowVal} / ${isCostVisible ? totalRigidExpensesVal : '***'}`, '入库总蓄水对冲刚性底线开支能力比率'],
@@ -1449,74 +1452,75 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                      <span className="text-[8px] px-2 py-0.5 bg-rose-100 text-rose-600 rounded font-black uppercase">锁定周期</span>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                     {salaryByCenter.map(c => (
-                       <div key={c.name} className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-blue-400 transition-all shadow-sm hover:shadow-md space-y-3">
-                          <div className="flex justify-between items-start">
-                            <div className="flex flex-col">
-                              <span className="text-[11px] font-black text-slate-900 truncate max-w-[120px]">{c.name}</span>
-                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">经营单元</span>
-                            </div>
-                            <div className="text-right">
-                              <span className="text-[10px] font-black font-mono text-slate-700 block">{maskMoney(Math.round(c.value))}</span>
-                              <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter">月刚性工资包</span>
-                            </div>
-                          </div>
-                          
-                          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-2 border-t border-slate-50">
-                            <div className="flex justify-between items-center">
-                              <span className="text-[9px] text-slate-500">产值初限</span>
-                              <span className="text-[9px] font-bold text-slate-700">{Math.round(c.valueLimit).toLocaleString()}</span>
-                            </div>
-                            <div className="flex justify-between items-center">
-                              <span className="text-[9px] text-slate-500">收款初限</span>
-                              <span className="text-[9px] font-bold text-slate-700">{Math.round(c.revenueLimit).toLocaleString()}</span>
-                            </div>
-                          </div>
-
-                          <div className="p-2.5 bg-blue-50/50 rounded-xl border border-blue-100/50 space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[9px] font-black text-blue-800 tracking-tight">经营单元本级</span>
-                              <div className="flex gap-1">
-                                 <span className="w-1 h-1 rounded-full bg-blue-400"></span>
-                                 <span className="w-1 h-1 rounded-full bg-blue-200"></span>
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-3">
+                     {salaryByCenter.map(c => {
+                       const isExcludedUnit = ['HR', 'FIN', 'QA'].some(dept => c.name.trim().toUpperCase().includes(dept));
+                       return (
+                         <div key={c.name} className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-blue-400 transition-all shadow-sm hover:shadow-md space-y-3">
+                            <div className="flex justify-between items-start">
                               <div className="flex flex-col">
-                                <div className="flex items-center gap-1">
-                                  <span className="text-[8px] text-blue-600 font-bold">产值计提 (5%)</span>
-                                  <InfoTip 
-                                    title="产值计提 (5%)" 
-                                    content="产兑包计提 = roundMoney(本笔注入 × C权 × B2权 × 5%)。始终套用 C权 × B2权 对冲系数。"
-                                    placement="top"
-                                  >
-                                    <Info size={10} className="text-blue-300 cursor-help" />
-                                  </InfoTip>
-                                </div>
-                                <span className="text-xs font-black text-blue-900 leading-none mt-1">{Math.round(c.value5Percent).toLocaleString()}</span>
+                                <span className="text-[11px] font-black text-slate-900 truncate max-w-[120px]">{c.name}</span>
                               </div>
-                              <div className="flex flex-col border-l border-blue-100 pl-3">
-                                <div className="flex items-center gap-1">
-                                  <span className="text-[8px] text-blue-600 font-bold">收款计提 (2%)</span>
-                                  <InfoTip 
-                                    title="收款计提 (2%)" 
-                                    content="收款包计提 = roundMoney(本笔注入 × C权 × 2%)。仅套用 C权 对冲系数。"
-                                    placement="top"
-                                  >
-                                    <Info size={10} className="text-blue-300 cursor-help" />
-                                  </InfoTip>
-                                </div>
-                                <div className="flex items-baseline gap-1.5 mt-1">
-                                  <span className="text-xs font-black text-blue-900 leading-none">{Math.round(c.revenue2Percent).toLocaleString()}</span>
-                                  {c.revenue2Percent === 0 && (
-                                    <span className="text-[7px] font-bold text-blue-400 whitespace-nowrap bg-blue-100/50 px-1 rounded">待确权触发</span>
-                                  )}
-                                </div>
+                              <div className="text-right">
+                                <span className="text-[10px] font-black font-mono text-slate-700 block">{maskMoney(Math.round(c.value))}</span>
+                                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter">月刚性工资包</span>
                               </div>
                             </div>
-                          </div>
-                       </div>
-                     ))}
+                            
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-2 border-t border-slate-50">
+                              <div className="flex justify-between items-center">
+                                <span className="text-[9px] text-slate-500">产值初限</span>
+                                <span className="text-[9px] font-bold text-slate-700">{Math.round(c.valueLimit).toLocaleString()}</span>
+                              </div>
+                              <div className="flex justify-between items-center">
+                                <span className="text-[9px] text-slate-500">收款初限</span>
+                                <span className="text-[9px] font-bold text-slate-700">{Math.round(c.revenueLimit).toLocaleString()}</span>
+                              </div>
+                            </div>
+
+                            {!isExcludedUnit && (
+                              <div className="p-2.5 bg-blue-50/50 rounded-xl border border-blue-100/50 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[9px] font-black text-blue-800 tracking-tight">经营单元本级</span>
+                                  <div className="flex gap-1">
+                                     <span className="w-1 h-1 rounded-full bg-blue-400"></span>
+                                     <span className="w-1 h-1 rounded-full bg-blue-200"></span>
+                                  </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div className="flex flex-col">
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[8px] text-blue-600 font-bold">产值专项计提</span>
+                                      <InfoTip 
+                                        title="产值专项计提" 
+                                        content="产值专项计提 = 已确权产值 × 5%。仅初产专/中产专触发（中产专亦为5%），不乘C权、B2权。"
+                                        placement="top"
+                                      >
+                                        <Info size={10} className="text-blue-300 cursor-help" />
+                                      </InfoTip>
+                                    </div>
+                                    <span className="text-xs font-black text-blue-900 leading-none mt-1">{Math.round(c.value5Percent).toLocaleString()}</span>
+                                  </div>
+                                  <div className="flex flex-col border-l border-blue-100 pl-3">
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[8px] text-blue-600 font-bold">收款专项计提</span>
+                                      <InfoTip 
+                                        title="收款专项计提" 
+                                        content="收款专项计提 = 已确权收款 × 2%。含款专且不含经管员，不乘C权、B2权。"
+                                        placement="top"
+                                      >
+                                        <Info size={10} className="text-blue-300 cursor-help" />
+                                      </InfoTip>
+                                    </div>
+                                    <div className="flex items-baseline gap-1.5 mt-1">
+                                      <span className="text-xs font-black text-blue-900 leading-none">{Math.round(c.revenue2Percent).toLocaleString()}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                         </div>
+                       );
+                     })}
                   </div>
                </div>
             </div>

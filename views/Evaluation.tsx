@@ -183,18 +183,18 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
           )}
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full table-auto text-left border-collapse">
+          <table className="w-full table-auto text-center border-collapse">
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-200">
-                <th className="py-2.5 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-left whitespace-nowrap">采集主体</th>
-                <th className="py-2.5 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right whitespace-nowrap">
-                  <span className="inline-flex items-center justify-end">
+                <th className="py-2.5 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center whitespace-nowrap">采集主体</th>
+                <th className="py-2.5 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center whitespace-nowrap">
+                  <span className="inline-flex items-center justify-center">
                     收产包
                     <InfoTip title="收产包口径" content="当月所有审核通过/已确权的提纯业务积分（收款包/产兑包）总和。" />
                   </span>
                 </th>
-                <th className="py-2.5 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right whitespace-nowrap">
-                  <div className="flex items-center justify-end space-x-1">
+                <th className="py-2.5 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center whitespace-nowrap">
+                  <div className="flex items-center justify-center space-x-1">
                     <span>成本包</span>
                     <InfoTip title="成本包口径" content="刚性工资包 + 对应职级消耗成本（款专：工资+A；产专：工资+B1）。" />
                     <button 
@@ -207,8 +207,8 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                     </button>
                   </div>
                 </th>
-                <th className="py-2.5 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right whitespace-nowrap">
-                  <span className="inline-flex items-center justify-end">
+                <th className="py-2.5 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center whitespace-nowrap">
+                  <span className="inline-flex items-center justify-center">
                     月度贡献
                     <InfoTip title="月度贡献口径" content="月度收产包 - 月度成本包 = 月度贡献。正值代表正向价值积累。" />
                   </span>
@@ -225,7 +225,7 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                     <InfoTip title="年度效率口径" content="当年累计总收产包 ÷ 当年累计总成本包。" />
                   </span>
                 </th>
-                <th className="py-2.5 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right whitespace-nowrap">管理决策路由</th>
+                <th className="py-2.5 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center whitespace-nowrap">管理决策路由</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -238,12 +238,12 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
               ) : (
                 filteredEvaluations.map(e => (
                   <tr key={e.userId} className={`hover:bg-slate-50/70 transition-colors group ${e.tier === 'S' ? 'bg-amber-50/20' : ''}`}>
-                    <td className="py-2.5 px-4 whitespace-nowrap">
-                      <div className="flex items-center space-x-2.5">
+                    <td className="py-2.5 px-4 text-center whitespace-nowrap">
+                      <div className="flex items-center justify-center space-x-2.5">
                         <div className={`w-7 h-7 rounded-sm flex items-center justify-center text-white font-bold text-xs shadow-2xs shrink-0 ${e.tier === 'S' ? 'bg-amber-500' : (e.monthlyEfficiency < 1 ? 'bg-rose-500' : 'bg-slate-900')}`}>
                           {e.userName.charAt(0)}
                         </div>
-                        <div className="min-w-0">
+                        <div className="min-w-0 text-left">
                           <div className="flex items-center space-x-1.5">
                             <span className="font-bold text-slate-900 text-xs tracking-tight truncate">{e.userName}</span>
                             <span className={`text-[8px] font-bold px-1.5 py-0.2 rounded-xs border ${e.tierColor} border-current opacity-85 uppercase whitespace-nowrap shrink-0`}>{e.category}</span>
@@ -252,11 +252,11 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                         </div>
                       </div>
                     </td>
-                    <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                    <td className="py-2.5 px-3 text-center whitespace-nowrap">
                       <span className="font-mono font-bold text-slate-900 text-xs">{formatAmount(e.monthlyIncome)}</span>
                     </td>
-                    <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                      <div className="flex flex-col items-end">
+                    <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                      <div className="flex flex-col items-center">
                         <span className="font-mono font-bold text-slate-900 text-xs">{maskMoney(Math.round(e.monthlyCost))}</span>
                         <span className="text-[9px] text-slate-400 mt-0.5">
                           {maskText(e.category.includes('款专') 
@@ -267,8 +267,8 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                         </span>
                       </div>
                     </td>
-                    <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                      <div className="flex flex-col items-end">
+                    <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                      <div className="flex flex-col items-center">
                         <span className={`font-mono font-bold text-xs ${e.contribution > 0 ? 'text-emerald-600' : (e.contribution < 0 ? 'text-rose-500' : 'text-slate-400')}`}>
                           {e.contribution > 0 ? `+${formatAmount(e.contribution)}` : formatAmount(e.contribution)}
                         </span>
@@ -295,8 +295,8 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                         {formatRatio(e.yearlyEfficiency)}
                       </span>
                     </td>
-                    <td className="py-2.5 px-4 text-right whitespace-nowrap">
-                      <div className="flex flex-col items-end space-y-0.5">
+                    <td className="py-2.5 px-4 text-center whitespace-nowrap">
+                      <div className="flex flex-col items-center space-y-0.5">
                         {e.tier === 'S' && <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-bold rounded-xs uppercase tracking-wider">核心资产/重点保护</span>}
                         {e.tier === 'A' && <span className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 text-[9px] font-bold rounded-xs uppercase tracking-wider">合伙人权杖晋升</span>}
                         {e.tier === 'B' && <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] font-bold rounded-xs uppercase tracking-wider">标准评价/持续激励</span>}

@@ -143,14 +143,14 @@ const Distribution: React.FC<DistributionProps> = ({
     const cat = currentUser.category || "";
 
     // Admin、npcxie（保留）
-    if (role === Role.Admin || role === "admin" || cat === "系统管理员") return true;
-    if (role === Role.npcxie || role === "npcxie" || cat === "NPC") return true;
+    if (role === Role.Admin || role === "admin" || cat === "系统管理员" || cat === "VP") return true;
+    if (role === Role.npcxie || role === "npcxie" || cat === "NPC" || cat === "经管员NPC") return true;
 
-    // 经管员：category 为 经管员高款专 / 经管员高产专（界面可能显示为「经管员｜高×专」）
+    // 经管员：category 为 经管员高款专 / 经管员高产专
     if (cat === "经管员高款专" || cat === "经管员高产专") return true;
 
-    // 水库管理员：category === '水库管理员' 或 role === Role.ReservoirManager
-    if (cat === "水库管理员" || role === Role.ReservoirManager || role === "reservoir_manager") return true;
+    // 水库管理员/管理角色：role === Role.ReservoirManager
+    if (role === Role.ReservoirManager || role === "reservoir_manager") return true;
 
     return false;
   }, [currentUser]);
@@ -970,34 +970,11 @@ const Distribution: React.FC<DistributionProps> = ({
                             {formatCategory(data.category)}
                           </span>
                           {(data.category === "经管员高款专" ||
-                            data.category === "经管员高产专") &&
-                            (() => {
-                              const redundancy = getRedundancyValue(
-                                data.userId,
-                                data.category,
-                              );
-                              const redundancyColor =
-                                redundancy > 0
-                                  ? "text-[#2563eb]"
-                                  : "text-[#ef4444]";
-                              return (
-                                <div className="text-[10px] font-normal text-[#64748b] flex flex-col items-center mt-1.5 border-t border-slate-100 pt-1 w-full">
-                                  <span className="text-slate-400">
-                                    收产包冗余
-                                  </span>
-                                  <span
-                                    className={`font-semibold ${redundancyColor}`}
-                                  >
-                                    {fmtAmount(redundancy)}
-                                  </span>
-                                </div>
-                              );
-                            })()}
-                          {data.centerLevelBonus !== undefined && data.centerLevelBonus > 0 && (
+                            data.category === "经管员高产专") && (
                             <div className="text-[10px] font-normal text-[#64748b] flex flex-col items-center mt-1.5 border-t border-slate-100 pt-1 w-full">
-                              <span className="text-slate-400">中心本级</span>
+                              <span className="text-slate-400">经营单元本级</span>
                               <span className="font-semibold text-indigo-600">
-                                {fmtAmount(data.centerLevelBonus)}
+                                {fmtAmount(data.centerLevelBonus || 0)}
                               </span>
                             </div>
                           )}
@@ -1284,10 +1261,10 @@ const Distribution: React.FC<DistributionProps> = ({
                                       ];
                                       if (kuanTiers.isManagerKuan) {
                                         steps.push({
-                                          label: "收产包冗余",
+                                          label: "单元冗余",
                                           value: fmtAmount(kuanTiers.redundancy),
                                           color: "text-blue-600 font-bold",
-                                          desc: "名下收产包冗余归集",
+                                          desc: "名下单元冗余归集",
                                         });
                                       }
                                       steps.push(
@@ -1606,32 +1583,21 @@ const Distribution: React.FC<DistributionProps> = ({
 
                         {/* 第 3 行【资产绑定层 - 新增核心】 */}
                         {(data.category === "经管员高款专" ||
-                          data.category === "经管员高产专") &&
-                          (() => {
-                            const redundancy = getRedundancyValue(
-                              data.userId,
-                              data.category,
-                            );
-                            const redundancyColor =
-                              redundancy > 0
-                                ? "text-[#2563eb]"
-                                : "text-[#ef4444]";
-                            return (
-                              <div className="text-[11px] font-normal text-[#64748b] flex items-center mt-0.5">
-                                <span>收产包冗余: </span>
-                                <span
-                                  className={`ml-1 font-semibold ${redundancyColor}`}
-                                  style={{
-                                    fontFamily:
-                                      '"DIN Alternate", ui-monospace, monospace',
-                                    fontWeight: 600,
-                                  }}
-                                >
-                                  {fmtAmount(redundancy)}
-                                </span>
-                              </div>
-                            );
-                          })()}
+                          data.category === "经管员高产专") && (
+                          <div className="text-[11px] font-normal text-[#64748b] flex items-center mt-0.5">
+                            <span>经营单元本级: </span>
+                            <span
+                              className="ml-1 font-semibold text-indigo-600"
+                              style={{
+                                fontFamily:
+                                  '"DIN Alternate", ui-monospace, monospace',
+                                fontWeight: 600,
+                              }}
+                            >
+                              {fmtAmount(data.centerLevelBonus || 0)}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="text-right">
@@ -1681,10 +1647,10 @@ const Distribution: React.FC<DistributionProps> = ({
                         data.category === "经管员高产专" ? (
                           <>
                             <span className="text-[9px] font-black text-[#64748b] uppercase">
-                              收产包冗余
+                              经营单元本级
                             </span>
-                            <span className="text-sm font-black text-blue-600 font-mono">
-                              {fmtAmount(data.netRedundancy)}
+                            <span className="text-sm font-black text-indigo-600 font-mono">
+                              {fmtAmount(data.centerLevelBonus || 0)}
                             </span>
                           </>
                         ) : (

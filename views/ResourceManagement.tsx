@@ -307,9 +307,6 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
               <div>
                 <h3 className="text-base font-black tracking-tight text-white flex items-center gap-2">
                   按矿山编号查询 (全景穿透)
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 font-bold border border-blue-400/30">
-                    Admin / NPCXIE 专享
-                  </span>
                 </h3>
                 <p className="text-xs text-slate-400 font-medium mt-0.5">
                   输入矿山编号穿透主档、价值创造(jzcz)、动态消耗(dtcb)与内部交易(nbjy)四块台账

@@ -211,18 +211,18 @@ async function startServer() {
       }
 
       // Check passwords gracefully
-      let expectedPassword = MOCK_PASSWORDS[user.userId] || MOCK_PASSWORDS[user.id] || "123";
+      const AUTO_ACCOUNT_CATEGORIES = ['经管员高款专', '经管员高产专', '经管员NPC', 'VP'];
+      const isAutoAccountCategory = AUTO_ACCOUNT_CATEGORIES.includes(user.category);
+      let defaultExpectedPassword = isAutoAccountCategory ? "66668888" : "123";
+      let expectedPassword = MOCK_PASSWORDS[user.userId] || MOCK_PASSWORDS[user.id] || user.password || defaultExpectedPassword;
       
       // If user came from DB, priority use password_hash
       if (user.password_hash) {
         expectedPassword = user.password_hash;
-      } else if (user.password) {
-        // Fallback for mock storage or objects that haven't been hashed yet
-        expectedPassword = user.password;
       }
       
       // Allow fallback passwords for requested accounts
-      if (password !== expectedPassword && password !== "666888" && password !== "123") {
+      if (password !== expectedPassword && password !== "66668888" && password !== "666888" && password !== "123") {
          return res.status(401).json({ error: "账号或密码错误" });
       }
 
@@ -230,8 +230,12 @@ async function startServer() {
         return res.status(403).json({ error: "该账号已离职停用，请联系管理员" });
       }
 
+      // If user logged in using default password (66668888) or is marked, pass mustChangePassword
+      const mustChangePassword = (password === "66668888" || expectedPassword === "66668888" || user.mustChangePassword) && isAutoAccountCategory;
+      const responseUser = { ...user, mustChangePassword };
+
       console.log(`Login successful for user: ${user.name}`);
-      res.json({ user, clientIp });
+      res.json({ user: responseUser, clientIp });
     } catch (error) {
       console.error('Login error:', error);
       res.status(500).json({ error: "Internal Server Error" });
@@ -481,6 +485,44 @@ async function startServer() {
     }
   });
 
+  const mineralReconcileService = {
+    computeLogIncentives(log: any, userOrCategory?: any): { incentiveOutput5: number; incentiveCollection2: number } {
+      if (!log) return { incentiveOutput5: 0, incentiveCollection2: 0 };
+      
+      const isConfirmed = 
+        log.status === '已确权' || 
+        log.status === 'Confirmed' || 
+        log.status === 'Approved' || 
+        log.status === '入库';
+      if (!isConfirmed) return { incentiveOutput5: 0, incentiveCollection2: 0 };
+
+      let category = '';
+      if (typeof userOrCategory === 'string') {
+        category = userOrCategory;
+      } else if (userOrCategory && typeof userOrCategory === 'object') {
+        category = userOrCategory.category || '';
+      }
+
+      const baseAmount = Number(log.rawAmount !== undefined && log.rawAmount !== null ? log.rawAmount : log.amount) || 0;
+
+      // 产值专项：已确权产值；岗位仅初产专/中产专；高产专、经管员高产专不触发；amount×5%（中产专也是5%，不是6%）；不乘 C权、B2权
+      let incentiveOutput5 = 0;
+      const isValue = log.category === 'Value' || log.category === '产值';
+      if (isValue && (category === '初产专' || category === '中产专')) {
+        incentiveOutput5 = Math.round(baseAmount * 0.05);
+      }
+
+      // 收款专项：已确权收款；含「款专」且不含「经管员」；amount×2%；不乘 C权、B2权
+      let incentiveCollection2 = 0;
+      const isRevenue = log.category === 'Revenue' || log.category === '收款';
+      if (isRevenue && category.includes('款专') && !category.includes('经管员')) {
+        incentiveCollection2 = Math.round(baseAmount * 0.02);
+      }
+
+      return { incentiveOutput5, incentiveCollection2 };
+    }
+  };
+
   async function getResourceWithSnapshot(db: any, miningId: string) {
     // 1. Fetch resource from DB or memory
     let resource: any = null;
@@ -587,6 +629,30 @@ async function startServer() {
     resource.unconfirmedRevenue = Math.max(0, resource.revenueCapacity - resource.confirmedRevenue - resource.pendingRevenue);
     resource.unconfirmedValue = Math.max(0, resource.valueCapacity - resource.confirmedValue - resource.pendingValue);
 
+    // Compute incentives
+    let usersList: any[] = [];
+    if (db) {
+      try {
+        const [uRows]: any = await db.execute('SELECT * FROM users');
+        usersList = uRows;
+      } catch (e) {
+        usersList = MOCK_USERS_DB;
+      }
+    } else {
+      usersList = MOCK_USERS_DB;
+    }
+
+    let incOutput5 = 0;
+    let incColl2 = 0;
+    for (const l of logs) {
+      const u = usersList.find(user => user.id === l.recordedCollectorId || user.userId === l.recordedCollectorId);
+      const inc = mineralReconcileService.computeLogIncentives(l, u);
+      incOutput5 += inc.incentiveOutput5;
+      incColl2 += inc.incentiveCollection2;
+    }
+    resource.incentiveOutput5 = incOutput5;
+    resource.incentiveCollection2 = incColl2;
+
     // Save the updated values back to memory database
     const index = MOCK_RESOURCES_DB.findIndex(r => r.id === miningId);
     if (index !== -1) {
@@ -602,12 +668,14 @@ async function startServer() {
           `UPDATE mining_resources SET 
             revenueCapacity = ?, valueCapacity = ?, 
             confirmedRevenue = ?, pendingRevenue = ?, unconfirmedRevenue = ?,
-            confirmedValue = ?, pendingValue = ?, unconfirmedValue = ?
+            confirmedValue = ?, pendingValue = ?, unconfirmedValue = ?,
+            incentiveOutput5 = ?, incentiveCollection2 = ?
            WHERE id = ?`,
           [
             resource.revenueCapacity, resource.valueCapacity,
             resource.confirmedRevenue, resource.pendingRevenue, resource.unconfirmedRevenue,
             resource.confirmedValue, resource.pendingValue, resource.unconfirmedValue,
+            resource.incentiveOutput5, resource.incentiveCollection2,
             miningId
           ]
         );

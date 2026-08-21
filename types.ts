@@ -23,14 +23,17 @@ export interface User {
   avatar?: string; // 头像
   role: Role;
   center?: string;
-  category?: '初产专' | '中产专' | '高产专' | '初款专' | '中款专' | '高款专' | '经管员高款专' | '经管员高产专' | '水库管理员' | 'NPC' | '系统管理员';
+  category?: '初产专' | '中产专' | '高产专' | '初款专' | '中款专' | '高款专' | '经管员高款专' | '经管员高产专' | 'NPC' | '系统管理员' | 'VP' | '经管员NPC';
   secondaryRoles?: ('高款专' | '高产专')[]; // 兼任专家
-  salaryPackageType?: '收款工资包' | '产值工资包' | '经管员工资包' | 'NPC工资包';
+  salaryPackageType?: '收款工资包' | '产值工资包' | '经管员工资包' | 'NPC工资包' | 'VP工资包';
   salaryPackage?: number; // 工资包（三方核定固定）
   salaryHistory?: SalaryHistoryRecord[]; // 工资变更履历
   permissions?: string[]; // 可访问的组件/标签页 ID 列表
   userStatus?: 'active' | 'inactive'; // 用户状态：active(在职), inactive(离职)
   password?: string; // 初始密码 (仅用于同步落库)
+  mustChangePassword?: boolean; // 首次登录强制改密标识
+  isFirstLogin?: boolean; // 首次登录标识
+  resignDate?: string; // 离职日期 YYYY-MM-DD
 }
 
 export interface SystemOperationLog {
@@ -41,6 +44,17 @@ export interface SystemOperationLog {
   details: string;
   timestamp: number;
   ip?: string; // 操作客户端 IP 地址
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+  publisherName: string;
+  publisherId: string;
+  createdAt: number;
+  priority?: 'normal' | 'important' | 'urgent';
+  isPinned?: boolean;
 }
 
 export enum TransactionType {

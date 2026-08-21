@@ -34,10 +34,12 @@ interface InternalTransactionsProps {
   users: User[];
   allUsers?: User[];
   resources: MiningResource[];
+  allResources?: MiningResource[];
   logs: ValueCreationLog[];
   transactions: InternalTransaction[];
-  onSubmitTransaction: (tx: InternalTransaction) => void;
-  onAuditTransaction: (txId: string, status: TransactionStatus) => void;
+  allTransactions?: InternalTransaction[];
+  onSubmitTransaction: (tx: InternalTransaction | InternalTransaction[], updatedResources?: MiningResource[]) => void;
+  onAuditTransaction: (txId: string | string[], status: TransactionStatus, updatedResource?: MiningResource | MiningResource[]) => void;
   onUpdateResource: (res: MiningResource) => void;
   onLogSubmit: (log: any) => void;
   circuitBreakers: CircuitBreaker[];
@@ -56,8 +58,10 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   users,
   allUsers = [],
   resources,
+  allResources = [],
   logs,
   transactions,
+  allTransactions = [],
   onSubmitTransaction,
   onAuditTransaction,
   onUpdateResource,
@@ -193,10 +197,93 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     return false;
   };
 
-  const businessUnitManagers = useMemo(() => {
-    const sourceUsers = allUsers.length > 0 ? allUsers : users;
-    return sourceUsers.filter(u => u.role === Role.Rank || u.role === Role.Operator || u.center);
-  }, [users, allUsers]);
+  const userList = useMemo(() => {
+    return allUsers.length > 0 ? allUsers : users;
+  }, [allUsers, users]);
+
+  // SSOT: 以 businessUnits 为唯一清单基准构建经营单元列表与主责经管员
+  const unitSelectionList = useMemo(() => {
+    const rawUnits = Array.isArray(businessUnits) && businessUnits.length > 0 
+      ? Array.from(new Set(businessUnits.map(u => (u || '').trim()).filter(Boolean)))
+      : Array.from(new Set(userList.map(u => (u.center || '').trim()).filter(Boolean)));
+
+    return rawUnits.map(unitName => {
+      const unitUsers = userList.filter(u => u.center === unitName && u.userStatus !== 'inactive');
+      
+      // 负责人判定谓词：与后端 isCenterManagerUser 一致 (role=rank，或 category 包含经管员，或职级串含经管员)
+      const candidateManagers = unitUsers.filter(u => {
+        const r = u.role;
+        const cat = u.category || '';
+        const title = (u as any).roleTitle || '';
+        return (
+          r === Role.Rank ||
+          cat === '经管员高款专' ||
+          cat === '经管员高产专' ||
+          cat.includes('经管员') ||
+          cat.includes('经营单元管理员') ||
+          title.includes('经管员') ||
+          title.includes('经营单元管理员')
+        );
+      });
+
+      let manager: User | null = null;
+      if (candidateManagers.length > 0) {
+        // 规则固定：优先 role=rank，其次经管员高款专，再经管员高产专；同级取 id / userId 字典序最小
+        const getPriorityScore = (u: User) => {
+          if (u.role === Role.Rank) return 1;
+          if (u.category === '经管员高款专') return 2;
+          if (u.category === '经管员高产专') return 3;
+          return 4;
+        };
+
+        candidateManagers.sort((a, b) => {
+          const scoreA = getPriorityScore(a);
+          const scoreB = getPriorityScore(b);
+          if (scoreA !== scoreB) return scoreA - scoreB;
+          const idA = a.userId || a.id || '';
+          const idB = b.userId || b.id || '';
+          return idA.localeCompare(idB);
+        });
+
+        manager = candidateManagers[0];
+      }
+
+      const isSelfUnit = !!(currentUser.center && currentUser.center === unitName);
+
+      return {
+        unitName,
+        manager,
+        hasManager: !!manager,
+        isSelfUnit
+      };
+    });
+  }, [businessUnits, userList, currentUser.center]);
+
+  const displayUnitList = useMemo(() => {
+    // 跨单元流转：排除本账号所属单元（避免自己流转给自己）
+    return unitSelectionList.filter(item => !item.isSelfUnit);
+  }, [unitSelectionList]);
+
+  const filteredDisplayUnits = useMemo(() => {
+    if (!receiverSearch.trim()) return displayUnitList;
+    const query = receiverSearch.trim().toLowerCase();
+    return displayUnitList.filter(item => {
+      const matchUnit = item.unitName.toLowerCase().includes(query);
+      const matchManager = item.manager?.name?.toLowerCase().includes(query) || false;
+      return matchUnit || matchManager;
+    });
+  }, [displayUnitList, receiverSearch]);
+
+  const selectedUnitSummary = useMemo(() => {
+    if (receiverIds.length === 0) return '请选择接收经营单元...';
+    const names = receiverIds.map(rid => {
+      const item = unitSelectionList.find(u => u.manager?.id === rid);
+      if (item) return item.unitName;
+      const u = userList.find(usr => usr.id === rid);
+      return u?.center || u?.name || rid;
+    });
+    return `已选择 ${receiverIds.length} 个单元: ${names.join(', ')}`;
+  }, [receiverIds, unitSelectionList, userList]);
 
   const availableMiningResources = useMemo(() => {
     if (isAdmin) return resources;
@@ -215,7 +302,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     return transactions.filter(t => {
       // 接收方确认阶段
       if (t.status === TransactionStatus.PendingTarget) {
-        const receiver = users.find(u => u.id === t.receiverId);
+        const receiver = userList.find(u => u.id === t.receiverId);
         if (receiver && receiver.center && currentUser.center && receiver.center === currentUser.center) return true;
         if (t.receiverId === currentUser.id) return true;
       }
@@ -230,7 +317,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
 
       return false;
     });
-  }, [transactions, currentUser.id, isAdmin, users, currentUser.center]);
+  }, [transactions, currentUser.id, isAdmin, userList, currentUser.center]);
 
   const selectedResource = useMemo(() => {
     return resources.find(r => r.id === miningId);
@@ -262,13 +349,13 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       }
 
       if (targetCenter) {
-        const targetManager = businessUnitManagers.find(u => u.center === targetCenter && u.id !== currentUser.id);
-        if (targetManager) {
-          setReceiverIds([targetManager.id]);
+        const targetItem = unitSelectionList.find(u => u.unitName === targetCenter);
+        if (targetItem && targetItem.manager && targetItem.manager.id !== currentUser.id) {
+          setReceiverIds([targetItem.manager.id]);
         }
       }
     }
-  }, [miningId, selectedResource, type, currentUser.center, currentUser.id, businessUnitManagers]);
+  }, [miningId, selectedResource, type, currentUser.center, currentUser.id, unitSelectionList]);
 
   // 自动匹配核算配方系数逻辑已删除
 
@@ -313,7 +400,12 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       }
     }
 
-    const receiverNames = receiverIds.map(rid => users.find(u => u.id === rid)?.center || users.find(u => u.id === rid)?.name || rid).join(', ');
+    const receiverNames = receiverIds.map(rid => {
+      const item = unitSelectionList.find(u => u.manager?.id === rid);
+      if (item) return item.unitName;
+      const u = userList.find(usr => usr.id === rid);
+      return u?.center || u?.name || rid;
+    }).join(', ');
 
     showConfirm(
       `确定发起内部交易指令？\n\n【交易类别】${type}\n【接收节点】${receiverNames}${miningId ? `\n【关联矿山】${miningId}` : ''}\n【业务月份】${selectedMonth}`,
@@ -336,7 +428,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
             confirmedValue: sharedAllocations[rid]?.confirmedValue,
             unconfirmedValue: sharedAllocations[rid]?.unconfirmedValue,
             description: description,
-            timestamp: Date.now(),
+            timestamp: Date.now() + index,
             status: TransactionStatus.PendingTarget,
             valueQuadrants: type === TransactionType.Resource ? valueQuadrants : undefined,
             revenueQuadrants: type === TransactionType.Resource ? revenueQuadrants : undefined,
@@ -344,8 +436,11 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
             businessDate: selectedDate
           };
           newTxs.push(newTx);
-          onSubmitTransaction(newTx);
         });
+
+        if (newTxs.length > 0) {
+          onSubmitTransaction(newTxs);
+        }
 
         showAlert('交易指令已发起，等待接收方验证。');
 
@@ -367,8 +462,8 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     let list = transactions;
     if (!isAdmin) {
       list = list.filter(t => {
-        const sender = users.find(u => u.id === t.senderId);
-        const receiver = users.find(u => u.id === t.receiverId);
+        const sender = userList.find(u => u.id === t.senderId);
+        const receiver = userList.find(u => u.id === t.receiverId);
         return sender?.center === currentUser.center || receiver?.center === currentUser.center;
       });
     }
@@ -376,7 +471,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     list = list.filter(t => isLogInFilter(t, filterMonth, filterStartDate, filterEndDate));
     
     return list;
-  }, [transactions, currentUser.center, isAdmin, users, filterMonth, filterStartDate, filterEndDate]);
+  }, [transactions, currentUser.center, isAdmin, userList, filterMonth, filterStartDate, filterEndDate]);
 
   const filteredExchangeTransactions = useMemo(() => {
     return transactions.filter(t => {
@@ -437,37 +532,54 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
         }
       }
 
+      let updatedResource: MiningResource | undefined = undefined;
+
       // 状态流转逻辑
       if (tx.status === TransactionStatus.PendingTarget) {
-        // 根据文档：取消 npcxie，管理审核。资源交易直接确权。
+        // 根据业务规则：资源交易接收方确认即直接确权
         if (tx.type === TransactionType.Resource) {
           nextStatus = TransactionStatus.Verified;
-          console.log(`[内部交易] 资源交易 ${tx.id} 已直接确权 (跳过 npcxie/管理审核)`);
+          console.log(`[内部交易] 资源交易 ${tx.id} 已直接确权 (跳过后续审核)`);
         }
         
-        // 当接收方确认时，执行矿山编号流转逻辑
+        // 当接收方确认时，执行矿山指派写入逻辑（矿山编号不变）
         if (tx.miningId) {
-          const resource = resources.find(r => r.id === tx.miningId);
-          if (resource) {
-            const receiver = users.find(u => u.id === tx.receiverId);
-            if (receiver && receiver.center) {
-              const appendCenter = (current: string | undefined, center: string) => {
-                if (!current) return center;
-                const centers = current.split(',').map(c => c.trim());
-                if (centers.includes(center)) return current;
-                return [...centers, center].join(',');
-              };
-
-              const updatedResource = {
-                ...resource,
-                assignedTo: appendCenter(resource.assignedTo, receiver.center),
-                assignedToRevenue: tx.revenueAmount && tx.revenueAmount > 0 ? appendCenter(resource.assignedToRevenue, receiver.center) : resource.assignedToRevenue,
-                assignedToValue: tx.valueAmount && tx.valueAmount > 0 ? appendCenter(resource.assignedToValue, receiver.center) : resource.assignedToValue
-              };
-              onUpdateResource(updatedResource);
-              console.log(`[内部交易] 矿山编号 ${tx.miningId} 已流转至 ${receiver.center}`);
-            }
+          const globalResources = (allResources && allResources.length > 0) ? allResources : resources;
+          const resource = globalResources.find(r => r.id === tx.miningId);
+          if (!resource) {
+            showAlert(`确认失败：未在全量资源库中找到矿山编号 [${tx.miningId}]。操作已中止，交易状态未变更。`);
+            return;
           }
+
+          const receiver = userList.find(u => u.id === tx.receiverId);
+          const targetCenter = receiver?.center?.trim() || '';
+          if (!targetCenter) {
+            showAlert(`确认失败：接收主体 [${receiver?.name || tx.receiverId}] 未配置所属经营单元。操作已中止。`);
+            return;
+          }
+
+          const normalizeCenter = (c: string) => (c || '').trim();
+          const appendCenter = (current: string | undefined, centerToAdd: string) => {
+            const trimmedToAdd = normalizeCenter(centerToAdd);
+            if (!trimmedToAdd) return current || '';
+            const centers = (current || '').split(',').map(c => normalizeCenter(c)).filter(Boolean);
+            if (!centers.includes(trimmedToAdd)) {
+              centers.push(trimmedToAdd);
+            }
+            return centers.join(',');
+          };
+
+          updatedResource = {
+            ...resource,
+            assignedTo: appendCenter(resource.assignedTo, targetCenter),
+            assignedToRevenue: (tx.revenueAmount && tx.revenueAmount > 0) 
+              ? appendCenter(resource.assignedToRevenue, targetCenter) 
+              : (resource.assignedToRevenue || ''),
+            assignedToValue: (tx.valueAmount && tx.valueAmount > 0) 
+              ? appendCenter(resource.assignedToValue, targetCenter) 
+              : (resource.assignedToValue || '')
+          };
+          console.log(`[内部交易] 矿山编号 ${tx.miningId} 已将接收单元 [${targetCenter}] 写入指派`);
         }
       } else if (tx.status === TransactionStatus.Returned) {
         nextStatus = TransactionStatus.PendingTarget; // 发起人重新提交
@@ -477,6 +589,10 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
         nextStatus = TransactionStatus.Verified;
       }
 
+      onAuditTransaction(tx.id, nextStatus, updatedResource);
+      showAlert(`交易 [${tx.id}] 确认成功！${updatedResource ? `矿山 [${tx.miningId}] 已同步指派给 [${userList.find(u => u.id === tx.receiverId)?.center || '接收单元'}]。` : ''}`);
+      setShowConfirmModal({ show: false });
+      return;
     }
 
     onAuditTransaction(tx.id, nextStatus);
@@ -515,8 +631,8 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
         '提交时间': formatSubmissionTime ? formatSubmissionTime(tx.timestamp) : new Date(tx.timestamp).toLocaleTimeString(),
         '交易类型': tx.type,
         '关联矿山': tx.miningId || 'N/A',
-        '发起方': users.find(u => u.id === tx.senderId)?.center || users.find(u => u.id === tx.senderId)?.name || tx.senderId,
-        '经营单元': users.find(u => u.id === tx.receiverId)?.center || users.find(u => u.id === tx.receiverId)?.name || tx.receiverId,
+        '发起方': userList.find(u => u.id === tx.senderId)?.center || userList.find(u => u.id === tx.senderId)?.name || tx.senderId,
+        '经营单元': userList.find(u => u.id === tx.receiverId)?.center || userList.find(u => u.id === tx.receiverId)?.name || tx.receiverId,
         '流转额度': tx.amount,
         '状态': tx.status,
         '备注': tx.description
@@ -669,8 +785,8 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       </div>
 
       {activeTab === 'apply' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-           <div className="lg:col-span-8 bg-white rounded-[3rem] shadow-xl border border-slate-100 overflow-hidden">
+        <div className="w-full">
+           <div className="bg-white rounded-[3rem] shadow-xl border border-slate-100 overflow-hidden">
              <div className="bg-slate-900 p-8 text-white flex justify-between items-center">
                 <h4 className="text-xl font-black flex items-center tracking-tighter uppercase">
                   <span className="w-10 h-10 bg-indigo-500 rounded-xl flex items-center justify-center mr-4 shadow-lg">⚡</span>
@@ -716,11 +832,9 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                         className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold text-left flex justify-between items-center outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
                       >
                         <span className="truncate">
-                          {receiverIds.length === 0 
-                            ? '请选择接收经营单元...' 
-                            : `已选择 ${receiverIds.length} 个单元: ${businessUnitManagers.filter(u => receiverIds.includes(u.id)).map(u => u.center || u.name).join(', ')}`}
+                          {selectedUnitSummary}
                         </span>
-                        <svg className={`w-5 h-5 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className={`w-5 h-5 transition-transform flex-shrink-0 ${isDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                         </svg>
                       </button>
@@ -730,54 +844,63 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                           <div className="p-3 border-b border-slate-100 bg-slate-50">
                             <input
                               type="text"
-                              placeholder="搜索经营单元..."
+                              placeholder="搜索经营单元名称或负责人..."
                               value={receiverSearch}
                               onChange={(e) => setReceiverSearch(e.target.value)}
                               className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20"
                             />
                           </div>
-                          <div className="max-h-60 overflow-y-auto p-2">
-                            {businessUnitManagers
-                              .filter(u => u.id !== currentUser.id)
-                              .filter(u => {
-                                // 资源交易：接收经营单元 筛选所有经营单元管理员
-                                if (type === TransactionType.Resource) {
-                                  return u.role === Role.Rank;
-                                }
-                                return true;
-                              })
-                              .filter(u => 
-                                u.name.toLowerCase().includes(receiverSearch.toLowerCase()) || 
-                                (u.center || '').toLowerCase().includes(receiverSearch.toLowerCase())
-                              )
-                              .map(u => (
-                                <label key={u.id} className="flex items-center space-x-3 cursor-pointer hover:bg-slate-50 p-3 rounded-xl transition-colors group">
+                          <div className="max-h-64 overflow-y-auto p-2 divide-y divide-slate-50">
+                            {filteredDisplayUnits.map(item => {
+                              const isChecked = item.hasManager && receiverIds.includes(item.manager!.id);
+                              return (
+                                <label 
+                                  key={item.unitName} 
+                                  className={`flex items-center space-x-3 p-3 rounded-xl transition-colors group ${
+                                    !item.hasManager 
+                                      ? 'opacity-60 cursor-not-allowed bg-slate-50/40' 
+                                      : 'cursor-pointer hover:bg-slate-50'
+                                  }`}
+                                  title={!item.hasManager ? '该单元未配置经管员' : undefined}
+                                >
                                   <input
                                     type="checkbox"
-                                    checked={receiverIds.includes(u.id)}
+                                    disabled={!item.hasManager}
+                                    checked={isChecked}
                                     onChange={(e) => {
+                                      if (!item.hasManager || !item.manager) return;
                                       if (e.target.checked) {
-                                        setReceiverIds([...receiverIds, u.id]);
+                                        setReceiverIds(prev => [...prev, item.manager!.id]);
                                       } else {
-                                        setReceiverIds(receiverIds.filter(id => id !== u.id));
+                                        setReceiverIds(prev => prev.filter(id => id !== item.manager!.id));
                                       }
                                     }}
-                                    className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 transition-all"
+                                    className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 transition-all disabled:opacity-40"
                                   />
-                                  <div className="flex flex-col">
-                                    <span className="text-sm font-black text-slate-700 group-hover:text-indigo-600 transition-colors">{u.name}</span>
-                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">{u.center || '核心'}</span>
+                                  <div className="flex flex-col flex-1 min-w-0">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="text-sm font-black text-slate-800 group-hover:text-indigo-600 transition-colors truncate">
+                                        {item.unitName}
+                                      </span>
+                                      {item.hasManager ? (
+                                        <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-lg border border-indigo-100 flex-shrink-0">
+                                          {item.manager!.name} ({item.manager!.category || item.manager!.role || '经管员'})
+                                        </span>
+                                      ) : (
+                                        <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-100 flex-shrink-0">
+                                          未配置经管员
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </label>
-                              ))}
-                            {businessUnitManagers.filter(u => u.id !== currentUser.id).filter(u => 
-                                u.name.toLowerCase().includes(receiverSearch.toLowerCase()) || 
-                                (u.center || '').toLowerCase().includes(receiverSearch.toLowerCase())
-                              ).length === 0 && (
-                                <div className="p-6 text-center text-slate-400 text-xs font-bold uppercase tracking-widest">
-                                  未找到匹配的经营单元
-                                </div>
-                              )}
+                              );
+                            })}
+                            {filteredDisplayUnits.length === 0 && (
+                              <div className="p-6 text-center text-slate-400 text-xs font-bold uppercase tracking-widest">
+                                未找到匹配的经营单元
+                              </div>
+                            )}
                           </div>
                           <div className="p-3 bg-slate-50 border-t border-slate-100 flex justify-between items-center">
                             <button 
@@ -926,11 +1049,13 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">共享提炼分配 (多部门)</label>
                     <div className="space-y-4">
                       {receiverIds.map(rid => {
-                        const receiver = businessUnitManagers.find(u => u.id === rid);
+                        const unitItem = unitSelectionList.find(u => u.manager?.id === rid);
+                        const receiver = userList.find(u => u.id === rid);
+                        const unitTitle = unitItem ? `${unitItem.unitName} (${unitItem.manager?.name || '经管员'})` : (receiver?.center ? `${receiver.center} (${receiver.name})` : (receiver?.name || rid));
                         return (
                           <div key={rid} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
                             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                              <span className="text-sm font-black text-slate-700">{receiver?.center || receiver?.name}</span>
+                              <span className="text-sm font-black text-slate-700">{unitTitle}</span>
                               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">分配详情</span>
                             </div>
                             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -1068,33 +1193,8 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                 </button>
              </form>
            </div>
-           
-           <div className="lg:col-span-4 bg-slate-900 rounded-[3rem] p-10 text-white shadow-3xl flex flex-col justify-between overflow-hidden relative">
-              <div className="absolute -right-10 -bottom-10 text-8xl opacity-10 rotate-12">🔱</div>
-              <div>
-                <h5 className="text-xs font-black text-blue-400 uppercase tracking-widest mb-10">流转确权路由规则</h5>
-                <div className="space-y-8 relative z-10">
-                   {[
-                     { step: '01', title: '发起方 (管理员)', desc: '现有经营单元提报申请' },
-                     { step: '02', title: '接收方 (管理员)', desc: '现有经营单元确认并接收变动' },
-                     { step: '03', title: '内部交易流程结束', desc: '取消 npcxie，管理审核。矿山编号匹配交易' }
-                   ].map((s, idx) => (
-                     <div key={idx} className="flex items-start space-x-4">
-                        <span className="text-[10px] font-black text-white/20 font-mono mt-1">{s.step}</span>
-                        <div>
-                           <p className="text-[11px] font-black text-white uppercase tracking-wider">{s.title}</p>
-                           <p className="text-[10px] text-slate-500 mt-1 font-bold">{s.desc}</p>
-                        </div>
-                     </div>
-                   ))}
-                </div>
-              </div>
-              <div className="mt-12 pt-8 border-t border-white/10">
-                 <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">系统合规审计模式</p>
-              </div>
-           </div>
         </div>
-       )}
+      )}
       {activeTab === 'trading' && (
         <TradingTab
           selectedMineId={miningId}
@@ -1260,7 +1360,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                           </td>
                           <td className="px-6 py-6 font-mono font-black text-slate-900">{tx.amount}</td>
                           <td className="px-6 py-6 text-xs font-bold text-slate-800">
-                             {users.find(u => u.id === tx.receiverId)?.center || users.find(u => u.id === tx.receiverId)?.name || tx.receiverId}
+                             {userList.find(u => u.id === tx.receiverId)?.center || userList.find(u => u.id === tx.receiverId)?.name || tx.receiverId}
                           </td>
                           <td className="px-10 py-6 text-right">
                              <button onClick={() => setSelectedTx(tx)} className="text-indigo-600 hover:underline text-[10px] font-black uppercase">详情</button>
@@ -1338,9 +1438,9 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                           </td>
                           <td className="px-6 py-6">
                              <div className="flex items-center space-x-3 text-xs font-bold text-slate-800">
-                                <span>{users.find(u => u.id === tx.senderId)?.center || users.find(u => u.id === tx.senderId)?.name || tx.senderId}</span>
+                                <span>{userList.find(u => u.id === tx.senderId)?.center || userList.find(u => u.id === tx.senderId)?.name || tx.senderId}</span>
                                 <span className="text-slate-300">→</span>
-                                <span>{users.find(u => u.id === tx.receiverId)?.center || users.find(u => u.id === tx.receiverId)?.name || tx.receiverId}</span>
+                                <span>{userList.find(u => u.id === tx.receiverId)?.center || userList.find(u => u.id === tx.receiverId)?.name || tx.receiverId}</span>
                              </div>
                           </td>
                           <td className="px-6 py-6 text-right font-mono font-black text-slate-900">

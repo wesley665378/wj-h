@@ -44,9 +44,10 @@ export const RANK_DICTIONARY = [
   '高款专',
   '经管员高款专',
   '经管员高产专',
-  '水库管理员',
   'NPC',
-  '系统管理员'
+  '系统管理员',
+  'VP',
+  '经管员NPC'
 ];
 
 export const MENU_ITEMS = [

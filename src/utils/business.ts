@@ -243,11 +243,6 @@ export const RANK_CONFIG: Record<string, { cluster: PermissionCluster; salaryTyp
     salaryType: '经管员工资包',
     defaultPermissions: ['kanban', 'consumption', 'creation', 'transactions', 'distribution', 'evaluation', 'account']
   },
-  '水库管理员': { 
-    cluster: PermissionCluster.Management, 
-    salaryType: 'NPC工资包',
-    defaultPermissions: ['kanban', 'evaluation', 'distribution', 'reservoir', 'account']
-  },
   'NPC': { 
     cluster: PermissionCluster.Management, 
     salaryType: 'NPC工资包',
@@ -257,6 +252,16 @@ export const RANK_CONFIG: Record<string, { cluster: PermissionCluster; salaryTyp
     cluster: PermissionCluster.System, 
     salaryType: 'NPC工资包',
     defaultPermissions: ['kanban', 'resources', 'audit', 'transactions', 'personnel', 'distribution', 'evaluation', 'consumption', 'creation', 'account']
+  },
+  'VP': { 
+    cluster: PermissionCluster.Management, 
+    salaryType: 'VP工资包',
+    defaultPermissions: ['kanban', 'resources', 'audit', 'transactions', 'personnel', 'distribution', 'evaluation', 'consumption', 'creation', 'reservoir', 'account']
+  },
+  '经管员NPC': { 
+    cluster: PermissionCluster.Management, 
+    salaryType: 'NPC工资包',
+    defaultPermissions: ['kanban', 'resources', 'audit', 'transactions', 'personnel', 'distribution', 'evaluation', 'reservoir', 'account']
   }
 };
 
@@ -302,3 +307,94 @@ export function getUserSalaryByMonth(user: User, month: string): number {
   // 如果目标月早于所有记录，返回最早的一条记录（或者 0，取决于业务理解，这里返回最早记录以保证历史追溯）
   return sortedHistory[sortedHistory.length - 1].salary;
 }
+
+/**
+ * @businessRule 经营单元本级 - 产值专项计提 (computeValueOutput5Incentive)
+ * @口径 已确权产值；岗位仅初产专/中产专；高产专、经管员高产专不触发；amount×5%（中产专也是5%，不是6%）；不乘 C权、B2权
+ */
+export function computeValueOutput5Incentive(
+  log: ValueCreationLog | any,
+  userOrUsers?: User | User[] | { category?: string } | null
+): number {
+  if (!log) return 0;
+  const isValue = log.category === RefineCategory.Value || log.category === 'Value' || (log.category as string) === '产值';
+  if (!isValue) return 0;
+
+  const isConfirmed = 
+    log.status === AuditStatus.Confirmed || 
+    log.status === AuditStatus.Approved || 
+    (log.status as string) === '已确权' || 
+    (log.status as string) === 'Confirmed' ||
+    (log.status as string) === 'Approved' ||
+    (log.status as string) === '入库';
+  if (!isConfirmed) return 0;
+
+  let collectorCategory = '';
+  if (Array.isArray(userOrUsers)) {
+    const u = userOrUsers.find(user => user.id === log.recordedCollectorId);
+    collectorCategory = u?.category || '';
+  } else if (userOrUsers && typeof userOrUsers === 'object') {
+    collectorCategory = (userOrUsers as any).category || '';
+  }
+
+  // 岗位仅初产专/中产专；高产专、经管员高产专不触发
+  if (collectorCategory !== '初产专' && collectorCategory !== '中产专') {
+    return 0;
+  }
+
+  const baseAmount = Number(log.rawAmount !== undefined && log.rawAmount !== null ? log.rawAmount : log.amount) || 0;
+  // amount × 5%（中产专也是5%，不是6%）；不乘 C权、B2权
+  return Math.round(baseAmount * 0.05);
+}
+
+/**
+ * @businessRule 经营单元本级 - 收款专项计提 (computeCollection2Incentive)
+ * @口径 已确权收款；含「款专」且不含「经管员」；amount×2%；不乘 C权、B2权
+ */
+export function computeCollection2Incentive(
+  log: ValueCreationLog | any,
+  userOrUsers?: User | User[] | { category?: string } | null
+): number {
+  if (!log) return 0;
+  const isRevenue = log.category === RefineCategory.Revenue || log.category === 'Revenue' || (log.category as string) === '收款';
+  if (!isRevenue) return 0;
+
+  const isConfirmed = 
+    log.status === AuditStatus.Confirmed || 
+    log.status === AuditStatus.Approved || 
+    (log.status as string) === '已确权' || 
+    (log.status as string) === 'Confirmed' ||
+    (log.status as string) === 'Approved' ||
+    (log.status as string) === '入库';
+  if (!isConfirmed) return 0;
+
+  let collectorCategory = '';
+  if (Array.isArray(userOrUsers)) {
+    const u = userOrUsers.find(user => user.id === log.recordedCollectorId);
+    collectorCategory = u?.category || '';
+  } else if (userOrUsers && typeof userOrUsers === 'object') {
+    collectorCategory = (userOrUsers as any).category || '';
+  }
+
+  // 含「款专」且不含「经管员」
+  if (!collectorCategory.includes('款专') || collectorCategory.includes('经管员')) {
+    return 0;
+  }
+
+  const baseAmount = Number(log.rawAmount !== undefined && log.rawAmount !== null ? log.rawAmount : log.amount) || 0;
+  // amount × 2%；不乘 C权、B2权
+  return Math.round(baseAmount * 0.02);
+}
+
+/**
+ * @businessRule 矿山专项对账服务
+ */
+export const mineralReconcileService = {
+  computeLogIncentives(log: ValueCreationLog | any, userOrCategory?: User | string | null): { incentiveOutput5: number; incentiveCollection2: number } {
+    const user = typeof userOrCategory === 'string' ? ({ category: userOrCategory } as User) : (userOrCategory || undefined);
+    return {
+      incentiveOutput5: computeValueOutput5Incentive(log, user),
+      incentiveCollection2: computeCollection2Incentive(log, user)
+    };
+  }
+};

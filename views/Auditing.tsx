@@ -197,7 +197,7 @@ const Auditing: React.FC<AuditingProps> = ({
       .filter((l) => {
         if (l.type !== RefineType.NonEffectiveHours) return false;
         const collector = users.find((u) => u.id === l.recordedCollectorId);
-        return collector?.category !== "水库管理员";
+        return collector?.category !== "VP";
       })
       .reduce((acc, curr) => acc + curr.netValue, 0);
 

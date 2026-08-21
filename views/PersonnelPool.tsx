@@ -3,12 +3,19 @@ import { User, Role } from '../types';
 import * as XLSX from 'xlsx';
 import { Card, Badge } from '../src/components/UI';
 import { UserTableRow } from '../src/components/UserTableRow';
-import { MENU_ITEMS } from '../constants';
+import { MENU_ITEMS, RANK_DICTIONARY } from '../constants';
 import { checkUserPermission, RANK_CONFIG } from '../src/utils/business';
 import { getLocalMonthString } from '../src/utils/dateUtils';
 import { syncWorkspace } from '../src/services/api';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { assertAcceptablePassword } from '../src/utils/security';
+import { 
+  suggestResignHedgeAmount, 
+  getResignHedgeFormulaDesc,
+  buildResignNonEffectiveHoursLog,
+  isSalaryActiveForMonth
+} from '../src/utils/employmentStatus';
+import { getLocalDateString } from '../src/utils/dateUtils';
 
 interface PersonnelPoolProps {
   user: User;
@@ -20,6 +27,8 @@ interface PersonnelPoolProps {
   onUpdateBusinessUnits: (units: string[]) => void;
 }
 
+const AUTO_ACCOUNT_CATEGORIES = ['经管员高款专', '经管员高产专', '经管员NPC', 'VP'];
+
 const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUsers, onUpdatePassword, onClearTestData, businessUnits, onUpdateBusinessUnits }) => {
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const isSyncing = useRef(false);
@@ -29,15 +38,22 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
     return u.role === Role.Admin || u.category?.toLowerCase() === '系统管理员';
   };
   const [newCenterName, setNewCenterName] = useState('');
+  const [newCenterCategory, setNewCenterCategory] = useState<'前台' | '后台'>('前台');
   const [editingCenter, setEditingCenter] = useState<string | null>(null);
   const [editCenterValue, setEditCenterValue] = useState('');
   
   const [showForm, setShowForm] = useState(false);
   const [showAddAccountForm, setShowAddAccountForm] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [activeCategory, setActiveCategory] = useState<'全部' | '采集主体' | '水库管理' | '组件权限设置' | '批量导入 EXCEL'>('全部');
+  const [activeCategory, setActiveCategory] = useState<'全部' | '采集主体' | '管理与VP' | '组件权限设置' | '批量导入 EXCEL'>('全部');
   
   const [searchQuery, setSearchQuery] = useState('');
+  const [matrixViewMode, setMatrixViewMode] = useState<'matrix' | 'list'>('matrix');
+  
+  // 离职流程相关状态
+  const [resigningUser, setResigningUser] = useState<User | null>(null);
+  const [resignDate, setResignDate] = useState(getLocalDateString());
+  const [hedgeAmount, setHedgeAmount] = useState<number>(0);
   
   const [formData, setFormData] = useState<{
     id: string;
@@ -85,11 +101,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
     let result = users;
     if (activeCategory === '采集主体') {
       result = users.filter(u => 
-        u.category !== 'NPC' && u.category !== '系统管理员' && 
+        u.category !== 'NPC' && u.category !== '系统管理员' && u.category !== 'VP' && u.category !== '经管员NPC' &&
         (['初款专', '中款专', '高款专', '初产专', '中产专', '高产专', '经管员高款专', '经管员高产专'].includes(u.category || '') || [Role.Rank, Role.RevenueCollector, Role.ValueCollector].includes(u.role))
       );
-    } else if (activeCategory === '水库管理') {
-      result = users.filter(u => u.category === '水库管理员' || u.role === Role.ReservoirManager);
+    } else if (activeCategory === '管理与VP') {
+      result = users.filter(u => ['VP', 'NPC', '系统管理员', '经管员NPC'].includes(u.category || '') || u.role === Role.Admin || u.role === Role.ReservoirManager);
     }
 
     if (searchQuery.trim()) {
@@ -108,32 +124,44 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
       return showAlert('权限不足：仅系统管理员有权执行人格注入。');
     }
 
-    if (!newUserFormData.id || !newUserFormData.name || !newUserFormData.category || !newUserFormData.password) {
+    const isAutoCategory = AUTO_ACCOUNT_CATEGORIES.includes(newUserFormData.category || '');
+    const userPassword = newUserFormData.password || (isAutoCategory ? '66668888' : '');
+
+    if (!newUserFormData.id || !newUserFormData.name || !newUserFormData.category || !userPassword) {
       return showAlert('请填写完整信息（包括工号、姓名、职级和初始密码）');
     }
     
-    const pwCheck = assertAcceptablePassword(newUserFormData.password);
-    if (!pwCheck.acceptable) {
-      return showAlert(pwCheck.message || '密码不符合规范');
+    if (userPassword !== '66668888') {
+      const pwCheck = assertAcceptablePassword(userPassword);
+      if (!pwCheck.acceptable) {
+        return showAlert(pwCheck.message || '密码不符合规范');
+      }
     }
 
     if (users.some(u => u.id === newUserFormData.id)) {
       return showAlert(`ID 冲突：工号 [${newUserFormData.id}] 已被占用。`);
     }
 
-    const confirmMsg = `【人格注入确认】\n\n请核对以下信息：\n工号：${newUserFormData.id}\n姓名：${newUserFormData.name}\n职级：${newUserFormData.category}\n初始密码：${newUserFormData.password}\n\n确定要将此实体注入城市守护者矩阵吗？`;
+    const confirmMsg = `【人格注入确认】\n\n请核对以下信息：\n工号：${newUserFormData.id}\n姓名：${newUserFormData.name}\n职级：${newUserFormData.category}\n初始密码：${userPassword}\n\n确定要将此实体注入城市守护者矩阵吗？`;
     
     showConfirm(confirmMsg, async () => {
       if (isSyncing.current) return;
       isSyncing.current = true;
 
       const currentMonth = getLocalMonthString();
+      let role = Role.Rank;
+      const cat = newUserFormData.category;
+      if (cat === '初款专' || cat === '中款专' || cat === '高款专' || cat === '经管员高款专') role = Role.RevenueCollector;
+      else if (cat === '初产专' || cat === '中产专' || cat === '高产专' || cat === '经管员高产专') role = Role.ValueCollector;
+      else if (cat === 'NPC' || cat === '经管员NPC') role = Role.npcxie;
+      else if (cat === '系统管理员' || cat === 'VP') role = Role.Admin;
+
       const newUser: User = {
         id: newUserFormData.id,
         userId: newUserFormData.userId || newUserFormData.id,
         name: newUserFormData.name,
         center: newUserFormData.center,
-        role: Role.Rank, 
+        role: role, 
         category: newUserFormData.category,
         secondaryRoles: newUserFormData.secondaryRoles,
         salaryPackageType: newUserFormData.salaryPackageType,
@@ -141,7 +169,8 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
         salaryHistory: [{ effectiveMonth: currentMonth, salary: newUserFormData.salaryPackage }],
         permissions: [],
         userStatus: 'active',
-        password: newUserFormData.password // 新建时直接带入密码字段
+        password: userPassword,
+        mustChangePassword: isAutoCategory || userPassword === '66668888'
       };
       
       try {
@@ -225,9 +254,8 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
     const cat = formData.category;
     if (cat === '初款专' || cat === '中款专' || cat === '高款专' || cat === '经管员高款专') role = Role.RevenueCollector;
     else if (cat === '初产专' || cat === '中产专' || cat === '高产专' || cat === '经管员高产专') role = Role.ValueCollector;
-    else if (cat === '水库管理员') role = Role.ReservoirManager;
-    else if (cat === 'NPC') role = Role.npcxie;
-    else if (cat === '系统管理员') role = Role.Admin;
+    else if (cat === 'NPC' || cat === '经管员NPC') role = Role.npcxie;
+    else if (cat === '系统管理员' || cat === 'VP') role = Role.Admin;
 
     const existingUser = users.find(u => u.id === (editingUserId || formData.id));
     const currentMonth = getLocalMonthString();
@@ -314,22 +342,29 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
     }
     if (isSyncing.current) return;
 
-    if (!newCenterName.trim()) {
+    const rawName = newCenterName.trim();
+    if (!rawName) {
       showAlert('请输入单元名称');
       return;
     }
-    if (businessUnits.includes(newCenterName.trim())) {
+
+    let formattedName = rawName;
+    if (!rawName.endsWith('(前台)') && !rawName.endsWith('(后台)')) {
+      formattedName = `${rawName} (${newCenterCategory})`;
+    }
+
+    if (businessUnits.includes(formattedName) || businessUnits.includes(rawName)) {
       showAlert('该经营单元已存在');
       return;
     }
-    const updatedUnits = [...businessUnits, newCenterName.trim()];
+    const updatedUnits = [...businessUnits, formattedName];
     
     isSyncing.current = true;
     try {
       onUpdateBusinessUnits(updatedUnits);
       await syncWorkspace({ businessUnits: updatedUnits });
       setNewCenterName('');
-      showAlert(`成功新增单元: ${newCenterName.trim()}`);
+      showAlert(`成功新增单元: ${formattedName}`);
     } catch (err) {
       showAlert('经营单元同步失败，请重试');
     } finally {
@@ -458,11 +493,24 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
         const name = String(findValue(['名称', '姓名', 'Name', 'name', '采集主体']) || '');
         const roleStr = String(findValue(['角色', 'Role', 'role']) || '').toLowerCase();
         const center = String(findValue(['责任人（单元负责）', '责任人', '经营单元', 'Center', 'center', '所属单元']) || '');
-        const category = (findValue(['职级', '分类', 'Category', 'category', '人格分类', '人格等级分类']) || '初款专') as User['category'];
+        const rawCategory = String(findValue(['职级', '分类', 'Category', 'category', '人格分类', '人格等级分类']) || '').trim();
+        let category: User['category'] = '初款专';
+        if (rawCategory.toUpperCase().includes('VP') || rawCategory.includes('副总')) {
+          category = 'VP';
+        } else if (rawCategory.includes('经管员NPC') || (rawCategory.includes('经管') && rawCategory.includes('NPC'))) {
+          category = '经管员NPC';
+        } else if (RANK_DICTIONARY.includes(rawCategory as any)) {
+          category = rawCategory as any;
+        } else {
+          const matched = RANK_DICTIONARY.find(r => rawCategory.includes(r));
+          if (matched) category = matched as any;
+        }
         
-        let salaryPackageType = (findValue(['单月刚性工资包类型', '工资包类型', 'PackageType', '工资包类别']) || '收款工资包') as User['salaryPackageType'];
+        let salaryPackageType = (findValue(['单月刚性工资包类型', '工资包类型', 'PackageType', '工资包类别']) || (category === 'VP' ? 'VP工资包' : '收款工资包')) as User['salaryPackageType'];
         const lowerType = String(salaryPackageType).toLowerCase();
-        if (lowerType.includes('责任人') || lowerType.includes('经营单元') || lowerType.includes('经管') || lowerType.includes('经营')) {
+        if (lowerType.includes('vp') || lowerType.includes('副总')) {
+          salaryPackageType = 'VP工资包';
+        } else if (lowerType.includes('责任人') || lowerType.includes('经营单元') || lowerType.includes('经管') || lowerType.includes('经营')) {
           salaryPackageType = '经管员工资包';
         } else if (lowerType.includes('npc') || lowerType.includes('管理员') || lowerType.includes('刚性包') || lowerType.includes('系统') || lowerType.includes('水库')) {
           salaryPackageType = 'NPC工资包';
@@ -471,7 +519,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
         } else if (lowerType.includes('收款') || lowerType.includes('款专') || lowerType.includes('revenue') || lowerType.includes('collection')) {
           salaryPackageType = '收款工资包';
         } else {
-          salaryPackageType = '收款工资包'; // Default fallback
+          salaryPackageType = category === 'VP' ? 'VP工资包' : '收款工资包'; // Default fallback
         }
         
         const salaryPackageRaw = findValue(['单月刚性工资包金额', '工资包金额', '工资包', 'Salary', 'salaryPackage', '金额', 'Amount', '刚性工资包金额']);
@@ -479,15 +527,19 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
           ? Number(salaryPackageRaw.replace(/[^0-9.]/g, '')) 
           : Number(salaryPackageRaw || 0);
         
-        const password = 'Guardian@2026';
+        const isAutoAccount = AUTO_ACCOUNT_CATEGORIES.includes(category || '');
+        const password = isAutoAccount ? '66668888' : 'Guardian@2026';
         const currentMonth = getLocalMonthString();
 
+        const resignDateRaw = findValue(['离职日期', 'ResignDate', 'resignDate', '离职时间']);
+        const resignDate = resignDateRaw ? String(resignDateRaw) : undefined;
+        const userStatus = (resignDate || findValue(['状态', 'Status', 'userStatus']) === 'inactive') ? 'inactive' : 'active';
+
         let role = Role.Rank;
-        if (roleStr.includes('admin') || roleStr.includes('管理员') || String(category).includes('管理员')) role = Role.Admin;
-        else if (roleStr.includes('xie') || roleStr.includes('核心') || category === 'NPC') role = Role.npcxie;
+        if (roleStr.includes('admin') || roleStr.includes('管理员') || String(category).includes('管理员') || category === 'VP') role = Role.Admin;
+        else if (roleStr.includes('xie') || roleStr.includes('核心') || category === 'NPC' || category === '经管员NPC') role = Role.npcxie;
         else if (roleStr.includes('revenue') || roleStr.includes('收款') || (category && (String(category).includes('款专')))) role = Role.RevenueCollector;
         else if (roleStr.includes('wood') || roleStr.includes('产值') || (category && (String(category).includes('产专')))) role = Role.ValueCollector;
-        else if (roleStr.includes('reservoir') || roleStr.includes('水库') || category === '水库管理员') role = Role.ReservoirManager;
 
         return { 
           id, 
@@ -499,8 +551,10 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
           salaryPackageType, 
           salaryPackage, 
           salaryHistory: [{ effectiveMonth: currentMonth, salary: salaryPackage }],
-          password, 
-          userStatus: 'active' as const 
+          password,
+          mustChangePassword: isAutoAccount,
+          userStatus: userStatus as any,
+          resignDate
         };
       }).filter(u => u.id && u.name);
 
@@ -546,29 +600,83 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
     processExcelFile(file);
   };
 
-  const toggleUserStatus = async (user: User) => {
-    const isResigning = user.userStatus !== 'inactive';
-    const message = isResigning 
-      ? `【离职操作确认】\n确定要将 [${user.name}] 办理离职注销吗？\n离职后该账号将无法登录，且默认不在业务列表中显示，但历史数据仍可追溯。`
-      : `【复职操作确认】\n确定要将 [${user.name}] 恢复为在职状态吗？`;
+  const toggleUserStatus = async (userToToggle: User) => {
+    const isResigning = userToToggle.userStatus !== 'inactive';
+    
+    if (isResigning) {
+      // 进入离职确认流程
+      setResigningUser(userToToggle);
+      const today = getLocalDateString();
+      setResignDate(today);
+      const suggested = suggestResignHedgeAmount(userToToggle, today);
+      setHedgeAmount(suggested);
+      return;
+    }
+
+    // 复职逻辑
+    const message = `【复职操作确认】\n确定要将 [${userToToggle.name}] 恢复为在职状态吗？\n复职后其离职日期将被清空，系统将恢复其计薪资格。`;
     
     showConfirm(message, async () => {
       if (!isSystemAdmin(user)) return showAlert('权限不足。');
       if (isSyncing.current) return;
       isSyncing.current = true;
 
-      const newStatus = isResigning ? 'inactive' : 'active';
-      const updatedUsers = users.map(u => u.id === user.id ? { ...u, userStatus: newStatus as any } : u);
+      const updatedUsers = users.map(u => u.id === userToToggle.id ? { ...u, userStatus: 'active' as const, resignDate: undefined } : u);
       try {
         onUpdateUsers(updatedUsers);
         await syncWorkspace({ users: updatedUsers });
-        showAlert(`${user.name} 已成功${isResigning ? '离职注销' : '复职'}`);
+        showAlert(`${userToToggle.name} 已成功复职。`, () => {
+          // 提示旧对冲单仍在
+          showAlert('提示：复职操作不会自动冲销原有的离职对冲单，如需调整请在「动态消耗」中手动处理。');
+        });
       } catch (err) {
-        showAlert(`状态更新失败：${(err as Error).message || '网络问题'}`);
+        showAlert(`复职更新失败：${(err as Error).message || '网络问题'}`);
       } finally {
         isSyncing.current = false;
       }
     });
+  };
+
+  /**
+   * 提交离职处理
+   */
+  const handleResignSubmit = async () => {
+    if (!resigningUser || isSyncing.current) return;
+    
+    const userToResign = resigningUser;
+    isSyncing.current = true;
+
+    try {
+      const updatedUser: User = { 
+        ...userToResign, 
+        userStatus: 'inactive', 
+        resignDate: resignDate 
+      };
+      const updatedUsers = users.map(u => u.id === userToResign.id ? updatedUser : u);
+      
+      const syncPayload: any = { users: updatedUsers };
+      
+      // 如果对冲金额 > 0，生成一条非有效工时日志
+      if (hedgeAmount > 0) {
+        const hedgeLog = buildResignNonEffectiveHoursLog(
+          userToResign,
+          resignDate,
+          hedgeAmount,
+          user.id // 操作管理员 ID
+        );
+        syncPayload.logs = [hedgeLog];
+      }
+      
+      await syncWorkspace(syncPayload);
+      onUpdateUsers(updatedUsers);
+      
+      showAlert(`${userToResign.name} 已成功办理离职。${hedgeAmount > 0 ? '\n已自动生成一条「非有效工时对冲」待确权单据。' : ''}`);
+      setResigningUser(null);
+    } catch (err) {
+      showAlert(`离职办理同步失败：${(err as Error).message || '未知错误'}`);
+    } finally {
+      isSyncing.current = false;
+    }
   };
 
   const deleteUser = async (userId: string) => {
@@ -651,7 +759,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                       salaryPackageType: (config?.salaryType as any) || newUserFormData.salaryPackageType
                     });
                   }} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none text-[10px]">
-                    {Object.keys(RANK_CONFIG).filter(r => r.includes('专') || r.includes('管理员') || r === 'NPC').map(rank => <option key={rank} value={rank}>{rank}</option>)}
+                    {RANK_DICTIONARY.map(rank => <option key={rank} value={rank}>{rank}</option>)}
                   </select>
                 </div>
               </div>
@@ -664,6 +772,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                     <option value="产值工资包">产值工资包</option>
                     <option value="经管员工资包">经管员工资包</option>
                     <option value="NPC工资包">NPC工资包</option>
+                    <option value="VP工资包">VP工资包</option>
                   </select>
                 </div>
                 <div className="space-y-1">
@@ -704,14 +813,22 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                     </div>
                     <div className="space-y-1">
                       <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">职级</p>
-                      <select value={formData.category} onChange={e => setFormData({...formData, category: e.target.value as any})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs">
-                        {['系统管理员', 'NPC', '水库管理员', '初款专', '中款专', '高款专', '经管员高款专', '初产专', '中产专', '高产专', '经管员高产专'].map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                      <select value={formData.category} onChange={e => {
+                        const cat = e.target.value as any;
+                        const config = RANK_CONFIG[cat];
+                        setFormData({
+                          ...formData, 
+                          category: cat,
+                          salaryPackageType: (config?.salaryType as any) || formData.salaryPackageType
+                        });
+                      }} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs">
+                        {RANK_DICTIONARY.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                       </select>
                     </div>
                     <div className="space-y-1">
                       <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">工资包类型</p>
                       <select value={formData.salaryPackageType} onChange={e => setFormData({...formData, salaryPackageType: e.target.value as any})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs">
-                        {['收款工资包', '产值工资包', '经管员工资包', 'NPC工资包'].map(type => <option key={type} value={type}>{type}</option>)}
+                        {['收款工资包', '产值工资包', '经管员工资包', 'NPC工资包', 'VP工资包'].map(type => <option key={type} value={type}>{type}</option>)}
                       </select>
                     </div>
                     <div className="space-y-1">
@@ -736,7 +853,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
           )}
 
           <div className="space-y-4">
-             <div className="flex items-center justify-start gap-8 px-2">
+             <div className="flex items-center justify-between gap-4 px-2 flex-wrap">
                <h4 className="text-[10px] font-black text-slate-800 uppercase tracking-widest flex items-center">
                  <span className="w-2 h-2 bg-emerald-500 rounded-full mr-2 animate-pulse"></span>
                  采集主体矩阵
@@ -744,7 +861,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                 <div className="flex items-center space-x-2 flex-wrap gap-y-2">
                   <button onClick={() => setActiveCategory('全部')} className={`px-4 py-1.5 rounded-full text-[9px] font-black transition-all ${activeCategory === '全部' ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-100 text-slate-400'}`}>全部</button>
                   <button onClick={() => setActiveCategory('采集主体')} className={`px-4 py-1.5 rounded-full text-[9px] font-black transition-all ${activeCategory === '采集主体' ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-100 text-slate-400'}`}>采集主体</button>
-                  <button onClick={() => setActiveCategory('水库管理')} className={`px-4 py-1.5 rounded-full text-[9px] font-black transition-all ${activeCategory === '水库管理' ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-100 text-slate-400'}`}>水库管理</button>
+                  <button onClick={() => setActiveCategory('管理与VP')} className={`px-4 py-1.5 rounded-full text-[9px] font-black transition-all ${activeCategory === '管理与VP' ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-100 text-slate-400'}`}>管理与VP</button>
                   <div className="relative ml-2">
                     <input 
                       type="text"
@@ -761,6 +878,20 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                         ×
                       </button>
                     )}
+                  </div>
+                  <div className="flex items-center space-x-1 bg-slate-100 p-0.5 rounded-full border border-slate-200/80 ml-2">
+                    <button 
+                      onClick={() => setMatrixViewMode('matrix')}
+                      className={`px-3 py-1 rounded-full text-[9px] font-black transition-all ${matrixViewMode === 'matrix' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}
+                    >
+                      矩阵视图
+                    </button>
+                    <button 
+                      onClick={() => setMatrixViewMode('list')}
+                      className={`px-3 py-1 rounded-full text-[9px] font-black transition-all ${matrixViewMode === 'list' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}
+                    >
+                      列表视图
+                    </button>
                   </div>
                 </div>
              </div>
@@ -784,40 +915,118 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                       <span className="w-1.5 h-1.5 rounded-full bg-blue-500 mr-2"></span>
                       {center} <span className="ml-2 text-[9px] bg-slate-100 px-2 py-0.5 rounded-full font-mono">{centerUsers.length}</span>
                     </h5>
-                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                      {centerUsers.map((u) => {
-                        const isInactive = u.userStatus === 'inactive';
-                        return (
-                          <div key={u.id} className={`bg-white p-5 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl transition-all group relative ${isInactive ? 'opacity-60 bg-slate-50' : ''}`}>
-                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex space-x-1">
-                              <button onClick={() => handleEdit(u)} className="p-1 px-2 bg-blue-50 text-blue-600 rounded text-[8px] font-black uppercase">属性</button>
-                              <button 
-                                onClick={() => toggleUserStatus(u)} 
-                                className={`p-1 px-2 ${isInactive ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-600'} rounded text-[8px] font-black uppercase`}
-                              >
-                                {isInactive ? '复职' : '离职'}
-                              </button>
-                            </div>
-                            <div className="flex items-center space-x-3">
-                              <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-xl shadow-lg overflow-hidden">
-                                {u.avatar ? <img src={u.avatar} className="w-full h-full object-cover" /> : getRoleIcon(u.role)}
+                    {matrixViewMode === 'matrix' ? (
+                      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                        {centerUsers.map((u) => {
+                          const isInactive = u.userStatus === 'inactive';
+                          return (
+                            <div key={u.id} className={`bg-white p-5 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl transition-all group relative ${isInactive ? 'opacity-60 bg-slate-50' : ''}`}>
+                              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex space-x-1">
+                                <button onClick={() => handleEdit(u)} className="p-1 px-2 bg-blue-50 text-blue-600 rounded text-[8px] font-black uppercase">属性</button>
+                                <button 
+                                  onClick={() => toggleUserStatus(u)} 
+                                  className={`p-1 px-2 ${isInactive ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-600'} rounded text-[8px] font-black uppercase`}
+                                >
+                                  {isInactive ? '复职' : '离职'}
+                                </button>
                               </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2">
-                                  <h5 className="font-black text-slate-900 text-xs truncate">{u.name}</h5>
-                                  {isInactive && <span className="text-[8px] bg-slate-200 text-slate-500 px-1 rounded font-black italic">EXIT</span>}
+                              <div className="flex items-center space-x-3">
+                                <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-xl shadow-lg overflow-hidden">
+                                  {u.avatar ? <img src={u.avatar} className="w-full h-full object-cover" /> : getRoleIcon(u.role)}
                                 </div>
-                                <p className="text-[9px] text-slate-400 font-mono">工号: {u.id}</p>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <h5 className="font-black text-slate-900 text-xs truncate">{u.name}</h5>
+                                    {isInactive && <span className="text-[8px] bg-slate-200 text-slate-500 px-1 rounded font-black italic">EXIT</span>}
+                                  </div>
+                                  <p className="text-[9px] text-slate-400 font-mono">工号: {u.id}</p>
+                                  {u.resignDate && (
+                                    <p className="text-[8px] text-rose-500 font-black mt-0.5">离职日: {u.resignDate}</p>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="mt-4 flex items-center justify-between border-t border-slate-50 pt-3">
+                                <Badge className="text-[8px] px-1.5 bg-blue-50/50 text-blue-600 border-none">{u.category}</Badge>
+                                <span className="text-[10px] font-black text-slate-700 font-mono">{(u.salaryPackage || 0).toLocaleString()}</span>
                               </div>
                             </div>
-                            <div className="mt-4 flex items-center justify-between border-t border-slate-50 pt-3">
-                              <Badge className="text-[8px] px-1.5 bg-blue-50/50 text-blue-600 border-none">{u.category}</Badge>
-                              <span className="text-[10px] font-black text-slate-700 font-mono">{(u.salaryPackage || 0).toLocaleString()}</span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-2xs overflow-hidden">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-center border-collapse">
+                            <thead>
+                              <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                <th className="py-2.5 px-4 text-center whitespace-nowrap">工号</th>
+                                <th className="py-2.5 px-4 text-center whitespace-nowrap">姓名</th>
+                                <th className="py-2.5 px-4 text-center whitespace-nowrap">经营单元</th>
+                                <th className="py-2.5 px-4 text-center whitespace-nowrap">分类/职级</th>
+                                <th className="py-2.5 px-4 text-center whitespace-nowrap">月刚性工资包</th>
+                                <th className="py-2.5 px-4 text-center whitespace-nowrap">在职状态</th>
+                                <th className="py-2.5 px-4 text-center whitespace-nowrap">管理操作</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 text-xs">
+                              {centerUsers.length === 0 ? (
+                                <tr>
+                                  <td colSpan={7} className="py-6 text-slate-400 text-center font-bold">暂无成员数据</td>
+                                </tr>
+                              ) : (
+                                centerUsers.map((u) => {
+                                  const isInactive = u.userStatus === 'inactive';
+                                  return (
+                                    <tr key={u.id} className={`hover:bg-slate-50/70 transition-colors ${isInactive ? 'opacity-60 bg-slate-50/50' : ''}`}>
+                                      <td className="py-2.5 px-4 font-mono text-slate-500 font-bold text-[11px] whitespace-nowrap">{u.id}</td>
+                                      <td className="py-2.5 px-4 whitespace-nowrap">
+                                        <div className="flex items-center justify-center space-x-2">
+                                          <div className="w-6 h-6 bg-slate-900 rounded-md flex items-center justify-center text-xs text-white overflow-hidden shrink-0">
+                                            {u.avatar ? <img src={u.avatar} className="w-full h-full object-cover" /> : getRoleIcon(u.role)}
+                                          </div>
+                                          <span className="font-black text-slate-900">{u.name}</span>
+                                        </div>
+                                      </td>
+                                      <td className="py-2.5 px-4 text-slate-600 font-bold whitespace-nowrap">{center}</td>
+                                      <td className="py-2.5 px-4 whitespace-nowrap">
+                                        <Badge className="text-[8px] px-2 py-0.5 bg-blue-50 text-blue-600 border-none">{u.category}</Badge>
+                                      </td>
+                                      <td className="py-2.5 px-4 font-mono font-bold text-slate-800 whitespace-nowrap">
+                                        {(u.salaryPackage || 0).toLocaleString()}
+                                      </td>
+                                      <td className="py-2.5 px-4 whitespace-nowrap">
+                                        {isInactive ? (
+                                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-black bg-rose-50 text-rose-600 border border-rose-200">
+                                            离职 {u.resignDate ? `(${u.resignDate})` : ''}
+                                          </span>
+                                        ) : (
+                                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-black bg-emerald-50 text-emerald-600 border border-emerald-200">
+                                            在职
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td className="py-2.5 px-4 whitespace-nowrap">
+                                        <div className="flex items-center justify-center space-x-2">
+                                          <button onClick={() => handleEdit(u)} className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded text-[10px] font-black transition-colors">
+                                            属性
+                                          </button>
+                                          <button 
+                                            onClick={() => toggleUserStatus(u)} 
+                                            className={`px-2 py-1 ${isInactive ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600' : 'bg-orange-50 hover:bg-orange-100 text-orange-600'} rounded text-[10px] font-black transition-colors`}
+                                          >
+                                            {isInactive ? '复职' : '离职'}
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))})()}
              </div>
@@ -827,15 +1036,41 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
         <div className="lg:col-span-12 space-y-8 mt-12 pb-12">
           <Card title="经营单元经理" className="p-8 rounded-[3rem] border-2 border-slate-100 shadow-sm">
             <div className="space-y-6">
-              <div className="flex gap-4 max-w-md">
-                <input type="text" value={newCenterName} onChange={e => setNewCenterName(e.target.value)} placeholder="新经营单元名称..." className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none text-sm focus:ring-2 focus:ring-slate-900 transition-all" />
-                <button onClick={addCenter} className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-xs hover:bg-blue-600 transition-all shadow-lg active:scale-95">新增单元</button>
+              <div className="flex flex-wrap items-center gap-3 max-w-2xl">
+                <input 
+                  type="text" 
+                  value={newCenterName} 
+                  onChange={e => setNewCenterName(e.target.value)} 
+                  placeholder="新经营单元名称..." 
+                  className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none text-sm focus:ring-2 focus:ring-slate-900 transition-all min-w-[200px]" 
+                />
+                <div className="flex items-center space-x-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/80">
+                  <span className="text-[10px] font-bold text-slate-400 px-2">属性:</span>
+                  <button
+                    type="button"
+                    onClick={() => setNewCenterCategory('前台')}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all ${newCenterCategory === '前台' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}
+                  >
+                    前台
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewCenterCategory('后台')}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all ${newCenterCategory === '后台' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}
+                  >
+                    后台
+                  </button>
+                </div>
+                <button onClick={addCenter} className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-xs hover:bg-blue-600 transition-all shadow-lg active:scale-95 whitespace-nowrap">
+                  新增单元
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {businessUnits.map((center, index) => {
                   const centerUsers = users.filter(u => u.center === center);
                   const collectors = centerUsers.filter(u => u.category?.includes('专') || u.role === Role.Rank || u.role === Role.RevenueCollector || u.role === Role.ValueCollector);
                   const totalCost = centerUsers.reduce((acc, u) => acc + (u.salaryPackage || 0), 0);
+                  const isBackOffice = center.includes('后台') || ['HR', 'FIN', 'QA', '行政', 'IT'].some(dept => center.toUpperCase().includes(dept));
                   return (
                     <div key={index} className="bg-white p-6 rounded-[2rem] border border-slate-100 group hover:shadow-md transition-all">
                       <div className="flex items-center justify-between">
@@ -849,7 +1084,18 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                             className="font-black text-slate-800 text-sm bg-slate-50 border-b border-blue-500 outline-none w-2/3"
                           />
                         ) : (
-                          <span className="font-black text-slate-800 text-sm">{center}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-black text-slate-800 text-sm">{center}</span>
+                            {isBackOffice ? (
+                              <span className="px-2 py-0.5 text-[8px] font-black rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200/60 shrink-0">
+                                后台
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 text-[8px] font-black rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 shrink-0">
+                                前台
+                              </span>
+                            )}
+                          </div>
                         )}
                         <div className="flex items-center space-x-2">
                            <button 
@@ -902,7 +1148,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
               </button>
             }
           >
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+             <div className="space-y-6">
                {showAddAccountForm && (
                  <div className="p-8 bg-slate-50 rounded-[2.5rem] border border-slate-100 space-y-6 animate-in slide-in-from-top-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -922,13 +1168,25 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                       </div>
                       <div className="space-y-1">
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">初始密码</p>
-                        <input type="password" placeholder="设置初始密码 (至少8位)" value={newUserFormData.password} onChange={e => setNewUserFormData({...newUserFormData, password: e.target.value})} className="bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none text-sm w-full focus:ring-2 focus:ring-blue-500" />
+                        <input type="password" placeholder="设置初始密码 (指定职级默认66668888)" value={newUserFormData.password} onChange={e => setNewUserFormData({...newUserFormData, password: e.target.value})} className="bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none text-sm w-full focus:ring-2 focus:ring-blue-500" />
                       </div>
                     </div>
                     <div className="space-y-1">
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">权限职级分配</p>
-                      <select value={newUserFormData.category} onChange={e => setNewUserFormData({...newUserFormData, category: e.target.value as any})} className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none text-sm focus:ring-2 focus:ring-blue-500">
-                        {['系统管理员', 'NPC', '水库管理员'].map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                      <select 
+                        value={newUserFormData.category} 
+                        onChange={e => {
+                          const cat = e.target.value as any;
+                          const isAuto = AUTO_ACCOUNT_CATEGORIES.includes(cat);
+                          setNewUserFormData({
+                            ...newUserFormData, 
+                            category: cat,
+                            password: isAuto ? '66668888' : newUserFormData.password
+                          });
+                        }} 
+                        className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none text-sm focus:ring-2 focus:ring-blue-500"
+                      >
+                        {RANK_DICTIONARY.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                       </select>
                     </div>
                     <button 
@@ -942,43 +1200,66 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                     </button>
                  </div>
                )}
-               <div className="">
-                 <table className="w-full text-left">
-                   <thead>
-                     <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 tracking-widest leading-none">
-                       <th className="py-6 px-3 whitespace-nowrap">登录账号</th>
-                       <th className="py-6 px-3 whitespace-nowrap">工号</th>
-                       <th className="py-6 px-3 whitespace-nowrap">姓名</th>
-                       <th className="py-6 px-3 whitespace-nowrap">职级</th>
-                       <th className="py-6 px-3 text-right whitespace-nowrap">管理操作</th>
-                     </tr>
-                   </thead>
-                   <tbody>
-                     {users.filter(u => u.role === Role.Admin || u.category === 'NPC' || u.category === '系统管理员' || u.category === '水库管理员' || u.role === Role.Rank).map((u, idx) => (
-                       <tr key={u.id} className={`border-b border-slate-50 hover:bg-slate-50 transition-colors ${u.userStatus === 'inactive' ? 'opacity-40' : ''}`}>
-                         <td className="py-5 px-3 font-mono text-slate-400 text-[11px] whitespace-nowrap">{u.userId || u.id}</td>
-                         <td className="py-5 px-3 font-mono font-bold text-xs whitespace-nowrap">{u.id}</td>
-                         <td className="py-5 px-3 whitespace-nowrap">
-                           <div className="flex items-center space-x-3">
-                             {u.avatar ? (
-                               <img src={u.avatar} className="w-6 h-6 rounded-md object-cover flex-shrink-0" />
-                             ) : (
-                               <span className="text-lg flex-shrink-0">{getRoleIcon(u.role)}</span>
-                             )}
-                             <span className="font-black text-slate-800 text-sm whitespace-nowrap">{u.name}</span>
-                           </div>
-                         </td>
-                         <td className="py-5 px-3 whitespace-nowrap">
-                           <Badge className="bg-slate-100 text-slate-600 font-black border-none text-[9px] uppercase tracking-widest">{u.category}</Badge>
-                         </td>
-                         <td className="py-5 px-3 text-right whitespace-nowrap">
-                            <button onClick={() => handleEdit(u)} className="text-blue-600 font-black text-xs hover:underline">编辑权限</button>
-                             <button onClick={() => deleteUser(u.id)} className="text-rose-600 font-black text-xs hover:underline ml-3">注销</button>
-                         </td>
+               <div className="space-y-4">
+                 <div className="p-4 bg-indigo-50/80 border border-indigo-100 rounded-2xl text-xs font-bold text-indigo-900 flex items-center justify-between">
+                   <div className="flex items-center gap-2">
+                     <span className="text-base">🔐</span>
+                     <span>自动建号说明：当采集主体职级为 <strong>【经管员高款专, 经管员高产专, 经管员NPC, VP】</strong> 时，系统自动配发登录账号，默认初始密码为 <strong>66668888</strong>，首次登录后提醒修改密码。</span>
+                   </div>
+                 </div>
+                 <div className="overflow-x-auto">
+                   <table className="w-full text-left">
+                     <thead>
+                       <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 tracking-widest leading-none">
+                         <th className="py-6 px-3 whitespace-nowrap">登录账号</th>
+                         <th className="py-6 px-3 whitespace-nowrap">工号</th>
+                         <th className="py-6 px-3 whitespace-nowrap">姓名</th>
+                         <th className="py-6 px-3 whitespace-nowrap">职级</th>
+                         <th className="py-6 px-3 whitespace-nowrap">账号机制/初始密码</th>
+                         <th className="py-6 px-3 text-right whitespace-nowrap">管理操作</th>
                        </tr>
-                     ))}
-                   </tbody>
-                 </table>
+                     </thead>
+                     <tbody>
+                       {users.filter(u => u.role === Role.Admin || u.category === 'NPC' || u.category === '经管员NPC' || u.category === 'VP' || u.category === '系统管理员' || AUTO_ACCOUNT_CATEGORIES.includes(u.category || '') || u.role === Role.Rank).map((u, idx) => {
+                         const isAutoAccount = AUTO_ACCOUNT_CATEGORIES.includes(u.category || '');
+                         return (
+                         <tr key={u.id} className={`border-b border-slate-50 hover:bg-slate-50 transition-colors ${u.userStatus === 'inactive' ? 'opacity-40' : ''}`}>
+                           <td className="py-5 px-3 font-mono text-slate-400 text-[11px] whitespace-nowrap">{u.userId || u.id}</td>
+                           <td className="py-5 px-3 font-mono font-bold text-xs whitespace-nowrap">{u.id}</td>
+                           <td className="py-5 px-3 whitespace-nowrap">
+                             <div className="flex items-center space-x-3">
+                               {u.avatar ? (
+                                 <img src={u.avatar} className="w-6 h-6 rounded-md object-cover flex-shrink-0" />
+                               ) : (
+                                 <span className="text-lg flex-shrink-0">{getRoleIcon(u.role)}</span>
+                               )}
+                               <span className="font-black text-slate-800 text-sm whitespace-nowrap">{u.name}</span>
+                             </div>
+                           </td>
+                           <td className="py-5 px-3 whitespace-nowrap">
+                             <Badge className="bg-slate-100 text-slate-600 font-black border-none text-[9px] uppercase tracking-widest">{u.category}</Badge>
+                           </td>
+                           <td className="py-5 px-3 whitespace-nowrap">
+                             {isAutoAccount ? (
+                               <Badge className="bg-amber-100 text-amber-800 border-none text-[9px] font-bold">
+                                 自动建号 | 默认密码: 66668888
+                               </Badge>
+                             ) : (
+                               <Badge className="bg-slate-100 text-slate-500 border-none text-[9px]">
+                                 常规账号
+                               </Badge>
+                             )}
+                           </td>
+                           <td className="py-5 px-3 text-right whitespace-nowrap">
+                              <button onClick={() => handleEdit(u)} className="text-blue-600 font-black text-xs hover:underline">编辑权限</button>
+                               <button onClick={() => deleteUser(u.id)} className="text-rose-600 font-black text-xs hover:underline ml-3">注销</button>
+                           </td>
+                         </tr>
+                       );
+                       })}
+                     </tbody>
+                   </table>
+                 </div>
                </div>
              </div>
           </Card>
@@ -988,7 +1269,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
         <div className="lg:col-span-12 mt-8">
            <Card title="组件访问权限矩阵 (RBAC 控制中心)" className="p-8 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
              <div className="space-y-6">
-               {users.filter(u => u.role === Role.Admin || u.category === 'NPC' || u.category === '系统管理员' || u.role === Role.ReservoirManager || u.role === Role.Rank).map((u, idx) => (
+               {users.filter(u => u.role === Role.Admin || u.category === 'NPC' || u.category === '经管员NPC' || u.category === 'VP' || u.category === '系统管理员' || u.role === Role.ReservoirManager || u.role === Role.Rank).map((u, idx) => (
                  <div key={u.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                    <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-200">
                       <div className="flex items-center space-x-3">
@@ -1022,6 +1303,87 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
            </Card>
         </div>
         <CityGuardianModal state={modalState} onClose={closeModal} />
+        
+        {/* 离职办理专供弹窗 */}
+        {resigningUser && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden transform transition-all scale-100">
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 bg-slate-900 text-white">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-xl">🛡️</span>
+                  <h3 className="font-bold text-base tracking-wide">城市守护者 · 离职办理</h3>
+                </div>
+                <button 
+                  onClick={() => setResigningUser(null)}
+                  className="text-slate-400 hover:text-white transition-colors p-1 rounded-md"
+                >
+                  <span className="text-lg">×</span>
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="p-6 space-y-4">
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                  <p className="text-xs text-slate-500 font-bold mb-1">离职人员</p>
+                  <p className="text-sm font-black text-slate-900">{resigningUser.name} ({resigningUser.id})</p>
+                </div>
+                
+                <div className="space-y-1">
+                  <p className="text-[10px] font-bold text-slate-400 ml-1 uppercase">离职日期</p>
+                  <input 
+                    type="date" 
+                    value={resignDate} 
+                    onChange={(e) => {
+                      const newDate = e.target.value;
+                      setResignDate(newDate);
+                      setHedgeAmount(suggestResignHedgeAmount(resigningUser, newDate));
+                    }}
+                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <p className="text-[10px] font-bold text-slate-400 ml-1 uppercase">非有效工时对冲金额 (实际对冲额)</p>
+                  <input 
+                    type="number" 
+                    value={hedgeAmount} 
+                    onChange={(e) => setHedgeAmount(Math.round(Number(e.target.value)))}
+                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-[9px] text-blue-600 font-bold mt-1 ml-1 italic">
+                    {getResignHedgeFormulaDesc(resigningUser, resignDate)}
+                  </p>
+                </div>
+
+                <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
+                  <p className="text-[10px] leading-relaxed text-blue-700 font-medium">
+                    业务说明：<br/>
+                    1. 离职当月整月仍计入单元刚性工资包。<br/>
+                    2. 若离职非月末，建议设置对冲金额以冲减当月刚性。<br/>
+                    3. 对冲金额将生成「非有效工时」单据，经确权后在看板生效。
+                  </p>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-end gap-3 px-6 py-4 bg-slate-50 border-t border-slate-100">
+                <button
+                  onClick={() => setResigningUser(null)}
+                  className="px-6 py-2.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-xl hover:bg-slate-100 transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleResignSubmit}
+                  className="px-8 py-2.5 text-xs font-black text-white bg-slate-900 rounded-xl hover:bg-slate-800 transition-colors shadow-sm"
+                >
+                  确认办理
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
   );
 };

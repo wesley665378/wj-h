@@ -441,7 +441,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   const receivedLimit = useMemo(() => {
     if (!selectedMiningId || !user.id) return Infinity;
     
-    // 过滤出接收方属于当前接收经营单元的已确权资源交易
+    // 过滤出接收方属于当前接收经营单元的已确权资源交易（认 receiverId 本人或同 center 用户）
     const receivedTxs = transactions.filter(tx => 
       (tx.receiverId === user.id || userCenterUsers.has(tx.receiverId)) && 
       tx.miningId === selectedMiningId && 
@@ -451,11 +451,11 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
     if (receivedTxs.length > 0) {
       if (selectedCategory === RefineCategory.Revenue) {
-        const totalRawRevenue = receivedTxs.reduce((sum, tx) => sum + (tx.revenueAmount || 0), 0);
-        return Math.round(totalRawRevenue * 0.933);
+        const totalRevenue = receivedTxs.reduce((sum, tx) => sum + (tx.revenueAmount || 0), 0);
+        return Math.round(totalRevenue); // 面值 1:1，禁止对交易额再 ×0.933
       } else {
         const totalValue = receivedTxs.reduce((sum, tx) => sum + (tx.valueAmount || 0), 0);
-        return Math.round(totalValue);
+        return Math.round(totalValue); // 面值 1:1
       }
     }
     
@@ -465,18 +465,18 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     return 0; // 既不是原始所有者也没收到交易，不能提报
   }, [transactions, selectedMiningId, user.id, user.role, userCenterUsers, selectedCategory, isOriginalOwner]);
 
-  // 计算已注入累计积分
+  // 计算已注入累计积分（属于本单元该矿该轨流水，含待审/已确权等现有门禁范围）
   const alreadyInjected = useMemo(() => {
     if (!selectedMiningId || !user.id) return 0;
     return logs
       .filter(l => 
         l.miningId === selectedMiningId && 
-        l.recordedCollectorId === user.id && 
+        (l.recordedCollectorId === user.id || userCenterUsers.has(l.recordedCollectorId || '')) && 
         l.category === selectedCategory &&
         (l.status === AuditStatus.Pending || l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved)
       )
-      .reduce((sum, l) => sum + Number(l.amount), 0);
-  }, [logs, selectedMiningId, user.id, selectedCategory]);
+      .reduce((sum, l) => sum + Number(l.amount || 0), 0);
+  }, [logs, selectedMiningId, user.id, userCenterUsers, selectedCategory]);
 
   const remainingQuota = useMemo(() => {
     if (receivedLimit === Infinity) return maxAllowed;
@@ -776,7 +776,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         
         if (onAddCircuitBreaker) {
           const txIds = transactions
-            .filter(tx => tx.receiverId === user.id && tx.miningId === selectedMiningId && tx.status === TransactionStatus.Verified)
+            .filter(tx => (tx.receiverId === user.id || userCenterUsers.has(tx.receiverId)) && tx.miningId === selectedMiningId && tx.status === TransactionStatus.Verified)
             .map(tx => tx.id)
             .join(', ');
 

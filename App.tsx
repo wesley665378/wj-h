@@ -21,6 +21,7 @@ import Sidebar from './components/Sidebar';
 import Login from './components/Login';
 import ErrorBoundary from './components/ErrorBoundary';
 import ChangePasswordModal from './src/components/ChangePasswordModal';
+import SystemAnnouncement from './src/components/SystemAnnouncement';
 import SiteFooter from './components/SiteFooter';
 import LegalOverlay from './components/LegalOverlay';
 import { Toaster, toast } from 'sonner';
@@ -574,35 +575,54 @@ const App: React.FC = () => {
     });
   }, [processLogsSubmission]);
 
-  const onSubmitTransaction = React.useCallback((tx: InternalTransaction, updatedResources?: MiningResource[]) => {
+  const onSubmitTransaction = React.useCallback((txOrTxs: InternalTransaction | InternalTransaction[], updatedResources?: MiningResource[]) => {
+    const txList = Array.isArray(txOrTxs) ? txOrTxs : [txOrTxs];
+    if (txList.length === 0) return;
+
     let nextTxs: InternalTransaction[] = [];
     setTransactions(prev => {
-      const exists = prev.some(t => t.id === tx.id);
-      nextTxs = exists ? prev.map(t => t.id === tx.id ? tx : t) : [...prev, tx];
+      let current = [...prev];
+      for (const tx of txList) {
+        const index = current.findIndex(t => t.id === tx.id);
+        if (index >= 0) {
+          current[index] = tx;
+        } else {
+          current.push(tx);
+        }
+      }
+      nextTxs = current;
       return nextTxs;
     });
+
     const nextRes = updatedResources || miningResources;
     if (updatedResources) {
       setMiningResources(updatedResources);
     }
     persistWorkspaceWithOverrides({ transactions: nextTxs, miningResources: nextRes });
-    addSystemLog('内部交易', `发起了/修改了 ${tx.amount} 额度的 ${tx.type} 交易`);
-  }, [miningResources, addSystemLog]);
+    for (const tx of txList) {
+      addSystemLog('内部交易', `发起了/修改了 ${tx.amount} 额度的 ${tx.type} 交易 (${tx.id})`);
+    }
+  }, [miningResources, addSystemLog, persistWorkspaceWithOverrides]);
 
-  const onAuditTransaction = React.useCallback((txId: string, status: TransactionStatus, updatedResource?: MiningResource) => {
+  const onAuditTransaction = React.useCallback((txIdOrList: string | string[], status: TransactionStatus, updatedResource?: MiningResource | MiningResource[]) => {
+    const idList = Array.isArray(txIdOrList) ? txIdOrList : [txIdOrList];
     let nextTxs: InternalTransaction[] = [];
     setTransactions(prev => {
-      nextTxs = prev.map(t => t.id === txId ? { ...t, status } : t);
+      nextTxs = prev.map(t => idList.includes(t.id) ? { ...t, status } : t);
       return nextTxs;
     });
     let nextRes = miningResources;
     if (updatedResource) {
-      nextRes = miningResources.map(r => r.id === updatedResource.id ? updatedResource : r);
+      const resList = Array.isArray(updatedResource) ? updatedResource : [updatedResource];
+      nextRes = miningResources.map(r => {
+        const found = resList.find(item => item.id === r.id);
+        return found || r;
+      });
       setMiningResources(nextRes);
     }
     persistWorkspaceWithOverrides({ transactions: nextTxs, miningResources: nextRes });
-    addSystemLog('交易审核', `将交易 ${txId} 的状态更新为 ${status}`);
-  }, [miningResources, addSystemLog]);
+    idList.forEach(id => addSystemLog('交易审核', `将交易 ${id} 的状态更新为 ${status}`));
+  }, [miningResources, addSystemLog, persistWorkspaceWithOverrides]);
 
   const onAddCircuitBreaker = React.useCallback((cb: CircuitBreaker) => {
     setCircuitBreakers(prev => {
@@ -1061,9 +1081,11 @@ const App: React.FC = () => {
       transactions: { 
         currentUser, 
         users: filteredUsers, 
-        allUsers: isAdminOrNPC ? managedUsers : filteredUsers,
+        allUsers: managedUsers,
         resources: isAdminOrNPC ? miningResources : filteredResources, 
+        allResources: miningResources,
         transactions: filteredTransactions, 
+        allTransactions: transactions,
         logs: filteredLogs,
         onSubmitTransaction,
         onAuditTransaction,
@@ -1126,7 +1148,7 @@ const App: React.FC = () => {
         onUpdateBusinessUnits: setBusinessUnits
       }
     };
-  }, [filteredLogs, auditLogs, filteredResources, filteredUsers, transactions, currentUser, systemLogs, currentTime, 
+  }, [filteredLogs, auditLogs, filteredResources, filteredUsers, managedUsers, businessUnits, transactions, currentUser, systemLogs, currentTime, 
        onSystemAdjustment, onLogSubmit, onConsumptionSubmit, processAudit, onSubmitTransaction, 
        onAuditTransaction, onAddResource, onUpdateResource, onDeleteResource, onUpdateUsers, onClearTestData,
        circuitBreakers, onAddCircuitBreaker, onRecoverCircuitBreaker]);
@@ -1154,8 +1176,22 @@ const App: React.FC = () => {
     return components[activeTab] || components.kanban;
   };
 
+  const handleLoginSuccess = React.useCallback((loggedInUser: User) => {
+    setCurrentUser(loggedInUser);
+    const AUTO_ACCOUNT_CATEGORIES = ['经管员高款专', '经管员高产专', '经管员NPC', 'VP'];
+    if (
+      loggedInUser.mustChangePassword || 
+      (loggedInUser.category && AUTO_ACCOUNT_CATEGORIES.includes(loggedInUser.category) && (loggedInUser.password === '66668888' || loggedInUser.isFirstLogin !== false))
+    ) {
+      setTimeout(() => {
+        toast.info(`🔐 首次登录提示：您的职级 (${loggedInUser.category}) 账号使用初始默认密码 66668888，请及时修改密码！`, { duration: 8000 });
+        setIsChangePasswordModalOpen(true);
+      }, 500);
+    }
+  }, []);
+
   if (!currentUser) {
-    return <Login onLogin={setCurrentUser} onAuthenticate={onAuthenticate} />;
+    return <Login onLogin={handleLoginSuccess} onAuthenticate={onAuthenticate} />;
   }
 
   return (
@@ -1193,7 +1229,7 @@ const App: React.FC = () => {
             {Array.from({ length: 16 }).map((_, i) => (
               <div 
                 key={i} 
-                className="text-slate-900 font-black whitespace-nowrap transform -rotate-12 text-3xl md:text-5xl"
+                className="text-slate-900 font-black whitespace-nowrap transform -rotate-12 text-[68px] md:text-[108px]"
               >
                 {currentUser.name} {currentTime.getFullYear()}/{currentTime.getMonth() + 1}/{currentTime.getDate()}
               </div>
@@ -1222,12 +1258,14 @@ const App: React.FC = () => {
              </div>
           </div>
           
-          <div className="flex items-center space-x-2 md:space-x-6">
+          <div className="flex items-center space-x-2 md:space-x-5">
+            <SystemAnnouncement currentUser={currentUser} onSystemLog={(action, details) => addSystemLog(action, details)} />
+            <span className="h-4 w-px bg-slate-200 hidden sm:inline"></span>
             <button 
               onClick={() => setIsChangePasswordModalOpen(true)}
               className="text-slate-500 hover:text-slate-900 font-black text-[10px] uppercase tracking-widest flex items-center"
             >
-              <span className="mr-2">🔑</span>
+              <span className="mr-1.5">🔑</span>
               修改密码
             </button>
             <button 

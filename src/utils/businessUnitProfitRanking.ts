@@ -123,11 +123,11 @@ export function computeUnitSingleMonth(
   );
   const pendingLinkageValuePackage = pendingLinkageValueLogs.reduce((sum, l) => sum + resolveLogPackageNet(l, resources, users), 0);
 
-  // 2.4 工资：本单元在职人员工资包按月汇总，排除水库管理员。
+  // 2.4 工资：本单元在职人员工资包按月汇总，排除VP/水库管理。
   const unitActiveUsers = users.filter(u => 
     u.center === unitName && 
     u.userStatus !== 'inactive' && 
-    u.category !== '水库管理员' && 
+    u.category !== 'VP' && 
     u.role !== Role.ReservoirManager
   );
   const salaryPackage = unitActiveUsers.reduce((sum, u) => sum + getUserSalaryByMonth(u, monthStr), 0);
