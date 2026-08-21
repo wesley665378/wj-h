@@ -21,11 +21,11 @@ export function formatAmount(value: number | string | undefined | null): string 
 }
 
 /**
- * 格式化货币金额 (带 ¥ 前缀)
- * @example formatCurrency(12345) -> "¥12,345"
+ * 格式化货币金额（无货币符号，纯整数千分位）
+ * @example formatCurrency(12345) -> "12,345"
  */
 export function formatCurrency(value: number | string | undefined | null): string {
-  return `¥${formatAmount(value)}`;
+  return formatAmount(value);
 }
 
 /**

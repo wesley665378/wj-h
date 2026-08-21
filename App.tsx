@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { User, Role, MiningResource, ValueCreationLog, AuditStatus, RefineCategory, RefineType, InternalTransaction, TransactionStatus, SystemOperationLog, CircuitBreaker, ResourceStatus, QuotaSnapshot, AcceptanceRecord, MeetingSample } from './types';
 import Dashboard from './views/Dashboard';
 import ValueCreation from './views/ValueCreation';
-import { calculateHistoricalNetValue } from './src/utils/business';
+import { calculateHistoricalNetValue, checkUserPermission } from './src/utils/business';
 import { applyConsumptionHedgeToLogs } from './src/utils/consumptionHedge';
 import Auditing from './views/Auditing';
 import ResourceManagement from './views/ResourceManagement';
@@ -863,26 +863,7 @@ const App: React.FC = () => {
     const isReservoirManager = user.role === Role.Admin || user.role === Role.ReservoirManager;
     const isCenter = user.role === Role.Rank;
 
-    let isAllowed = true;
-    if (isAdmin) {
-      isAllowed = true;
-    } else if (user.permissions && user.permissions.length > 0) {
-      isAllowed = user.permissions.includes(activeTab);
-    } else {
-      switch (activeTab) {
-        case 'resources': isAllowed = isNpcxie || isAdmin; break;
-        case 'creation': isAllowed = isOperator || isRevenueCollector || isValueCollector || isAdmin || isCenter; break;
-        case 'consumption': isAllowed = isOperator || isRevenueCollector || isValueCollector || isAdmin || isCenter; break;
-        case 'audit': isAllowed = isNpcxie || isAdmin; break;
-        case 'distribution': isAllowed = isAdmin || isNpcxie || isReservoirManager || isCenter; break;
-        case 'personnel': isAllowed = isAdmin || isNpcxie; break;
-        case 'transactions': isAllowed = isAdmin || (!isNpcxie && (isOperator || isRevenueCollector || isValueCollector || isCenter)); break;
-        case 'reservoir': isAllowed = isAdmin || isNpcxie; break;
-        case 'evaluation': isAllowed = true; break;
-        default: isAllowed = true;
-      }
-    }
-
+    const isAllowed = checkUserPermission(user, activeTab);
     if (!isAllowed) {
       setActiveTab('kanban');
     }
@@ -1113,9 +1094,9 @@ const App: React.FC = () => {
       reservoir: { 
         logs: filteredLogs,
         auditLogs: auditLogs,
-        resources: miningResources,
-        users: managedUsers,
-        transactions,
+        resources: isAdminOrNPC ? miningResources : filteredResources,
+        users: isAdminOrNPC ? managedUsers : filteredUsers,
+        transactions: isAdminOrNPC ? transactions : filteredTransactions,
         businessUnits,
         currentUser
       },

@@ -49,6 +49,10 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
   
   const [searchQuery, setSearchQuery] = useState('');
   const [matrixViewMode, setMatrixViewMode] = useState<'matrix' | 'list'>('matrix');
+
+  // RBAC 权限控制中心状态
+  const [rbacSearch, setRbacSearch] = useState('');
+  const [rbacCategoryFilter, setRbacCategoryFilter] = useState<'全部' | '管理与VP' | 'NPC与经管员' | '采集主体'>('全部');
   
   // 离职流程相关状态
   const [resigningUser, setResigningUser] = useState<User | null>(null);
@@ -410,24 +414,53 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
     }
   };
 
+  const normalizeUnitName = (str: string) => {
+    if (!str) return '';
+    return str
+      .replace(/\s*[\(（](前台|后台)[\)）]/gi, '')
+      .replace(/\s+/g, '')
+      .toLowerCase();
+  };
+
   const deleteCenter = (name: string) => {
     if (!isSystemAdmin(user)) {
-      return showAlert('权限不足。');
+      return showAlert('权限不足：仅系统管理员有权注销经营单元。');
     }
-    showConfirm(`确定要注销单元 [${name}] 吗？`, async () => {
+    showConfirm(`确定要注销单元 [${name}] 及其关联别名吗？`, async () => {
       if (isSyncing.current) return;
+
+      const targetNorm = normalizeUnitName(name);
+      const targetLower = name.trim().toLowerCase();
+
+      const updatedUnits = businessUnits.filter(c => {
+        const cNorm = normalizeUnitName(c);
+        const cLower = c.trim().toLowerCase();
+        return cNorm !== targetNorm && cLower !== targetLower;
+      });
+
+      if (updatedUnits.length === 0) {
+        return showAlert('注销失败：系统至少须保留一个经营单元，经营单元列表不可为空。');
+      }
+
       isSyncing.current = true;
 
-      const updatedUnits = businessUnits.filter(c => c !== name);
-      const updatedUsers = users.map(u => u.center === name ? { ...u, center: '' } : u);
+      const updatedUsers = users.map(u => {
+        if (!u.center) return u;
+        const uCenterNorm = normalizeUnitName(u.center);
+        const uCenterLower = u.center.trim().toLowerCase();
+        if (uCenterNorm === targetNorm || uCenterLower === targetLower) {
+          return { ...u, center: '' };
+        }
+        return u;
+      });
       
       try {
         onUpdateBusinessUnits(updatedUnits);
         onUpdateUsers(updatedUsers);
         await syncWorkspace({ businessUnits: updatedUnits, users: updatedUsers });
-        showAlert(`已注销单元: ${name}`);
+        showAlert(`已成功注销单元 [${name}] 及其关联别名，并已清空关联人员归属。`);
       } catch (err) {
-        showAlert('注销单元同步失败');
+        showAlert('注销单元写库同步失败，请重试');
       } finally {
         isSyncing.current = false;
       }
@@ -435,24 +468,8 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
   };
 
   const clearAllCenters = () => {
-    if (!isSystemAdmin(user)) return showAlert('权限不足。');
-    // 逻辑保留但 UI 已按要求删除
-    showConfirm('确定要清空所有经营单元吗？', async () => {
-      if (isSyncing.current) return;
-      isSyncing.current = true;
-
-      const updatedUsers = users.map(u => ({ ...u, center: '' }));
-      try {
-        onUpdateBusinessUnits([]);
-        onUpdateUsers(updatedUsers);
-        await syncWorkspace({ businessUnits: [], users: updatedUsers });
-        showAlert('经营单元列表已全部清空');
-      } catch (err) {
-        showAlert('清空失败');
-      } finally {
-        isSyncing.current = false;
-      }
-    });
+    if (!isSystemAdmin(user)) return showAlert('权限不足：仅系统管理员有权操作。');
+    return showAlert('注销失败：系统至少须保留一个经营单元，经营单元列表不可为空。');
   };
 
   const getRoleIcon = (role: Role) => {
@@ -698,15 +715,109 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
     });
   };
 
-  const togglePermission = (userId: string, permissionId: string) => {
-    const user = users.find(u => u.id === userId);
-    if (!user) return;
-    const currentPermissions = user.permissions || [];
+  const togglePermission = async (userId: string, permissionId: string) => {
+    if (!isSystemAdmin(user)) {
+      showAlert('权限不足：仅系统管理员有权手动修改组件访问权限。');
+      return;
+    }
+    const targetUser = users.find(u => u.id === userId);
+    if (!targetUser) return;
+
+    let currentPermissions = targetUser.permissions;
+    if (!currentPermissions) {
+      currentPermissions = MENU_ITEMS.map(item => item.id).filter(id => checkUserPermission(targetUser, id));
+    }
+
     const newPermissions = currentPermissions.includes(permissionId)
       ? currentPermissions.filter(p => p !== permissionId)
       : [...currentPermissions, permissionId];
-    onUpdateUsers(users.map(u => u.id === userId ? { ...u, permissions: newPermissions } : u));
+
+    const updatedUsers = users.map(u => u.id === userId ? { ...u, permissions: newPermissions } : u);
+    onUpdateUsers(updatedUsers);
+
+    try {
+      await syncWorkspace({ users: updatedUsers });
+    } catch (err) {
+      showAlert(`权限修改同步失败：${(err as Error).message || '网络错误'}`);
+    }
   };
+
+  const grantAllPermissions = async (userId: string) => {
+    if (!isSystemAdmin(user)) {
+      showAlert('权限不足：仅系统管理员有权手动修改组件访问权限。');
+      return;
+    }
+    const allIds = MENU_ITEMS.map(item => item.id);
+    const updatedUsers = users.map(u => u.id === userId ? { ...u, permissions: allIds } : u);
+    onUpdateUsers(updatedUsers);
+    try {
+      await syncWorkspace({ users: updatedUsers });
+      showAlert('已成功为该成员开启全部组件访问权限');
+    } catch (err) {
+      showAlert(`权限修改同步失败：${(err as Error).message || '网络错误'}`);
+    }
+  };
+
+  const revokeAllPermissions = async (userId: string) => {
+    if (!isSystemAdmin(user)) {
+      showAlert('权限不足：仅系统管理员有权手动修改组件访问权限。');
+      return;
+    }
+    const updatedUsers = users.map(u => u.id === userId ? { ...u, permissions: [] } : u);
+    onUpdateUsers(updatedUsers);
+    try {
+      await syncWorkspace({ users: updatedUsers });
+      showAlert('已关停该成员的所有组件访问权限');
+    } catch (err) {
+      showAlert(`权限修改同步失败：${(err as Error).message || '网络错误'}`);
+    }
+  };
+
+  const resetUserPermissionToDefault = async (userId: string) => {
+    if (!isSystemAdmin(user)) {
+      showAlert('权限不足：仅系统管理员有权手动修改组件访问权限。');
+      return;
+    }
+    const updatedUsers = users.map(u => {
+      if (u.id === userId) {
+        const copy = { ...u };
+        delete copy.permissions;
+        return copy;
+      }
+      return u;
+    });
+    onUpdateUsers(updatedUsers);
+    try {
+      await syncWorkspace({ users: updatedUsers });
+      showAlert('已成功重置为职级默认权限配置');
+    } catch (err) {
+      showAlert(`重置权限同步失败：${(err as Error).message || '网络错误'}`);
+    }
+  };
+
+  const filteredRbacUsers = useMemo(() => {
+    return users.filter(u => {
+      if (rbacCategoryFilter === '管理与VP') {
+        if (u.role !== Role.Admin && u.category !== '系统管理员' && u.category !== 'VP') return false;
+      } else if (rbacCategoryFilter === 'NPC与经管员') {
+        if (!['NPC', '经管员NPC', '经管员高款专', '经管员高产专'].includes(u.category || '') && u.role !== Role.npcxie && u.role !== Role.ReservoirManager) return false;
+      } else if (rbacCategoryFilter === '采集主体') {
+        if (['系统管理员', 'VP', 'NPC', '经管员NPC'].includes(u.category || '')) return false;
+      }
+
+      if (rbacSearch.trim()) {
+        const query = rbacSearch.trim().toLowerCase();
+        const matchName = u.name?.toLowerCase().includes(query);
+        const matchId = u.id?.toLowerCase().includes(query);
+        const matchUserId = u.userId?.toLowerCase().includes(query);
+        const matchCategory = u.category?.toLowerCase().includes(query);
+        const matchCenter = u.center?.toLowerCase().includes(query);
+        return matchName || matchId || matchUserId || matchCategory || matchCenter;
+      }
+
+      return true;
+    });
+  }, [users, rbacCategoryFilter, rbacSearch]);
 
   return (
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-in slide-in-from-bottom-4">
@@ -1269,36 +1380,141 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
         <div className="lg:col-span-12 mt-8">
            <Card title="组件访问权限矩阵 (RBAC 控制中心)" className="p-8 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
              <div className="space-y-6">
-               {users.filter(u => u.role === Role.Admin || u.category === 'NPC' || u.category === '经管员NPC' || u.category === 'VP' || u.category === '系统管理员' || u.role === Role.ReservoirManager || u.role === Role.Rank).map((u, idx) => (
-                 <div key={u.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                   <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-200">
-                      <div className="flex items-center space-x-3">
-                         <span className="text-xl">{getRoleIcon(u.role)}</span>
-                         <div>
-                            <p className="font-black text-slate-900 text-xs">{u.name}</p>
-                            <p className="text-[9px] text-slate-400 font-mono">{u.userId || u.id}</p>
-                         </div>
-                      </div>
-                      <Badge className="bg-slate-100 text-slate-600 font-black border-none text-[8px] uppercase tracking-widest">{u.category}</Badge>
+               {/* 说明与搜索过滤工具栏 */}
+               <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                 <div className="space-y-1">
+                   <div className="flex items-center gap-2">
+                     <span className="text-base">🔐</span>
+                     <h5 className="font-black text-slate-900 text-xs">RBAC 自定义访问权限控制</h5>
                    </div>
-                   <div className="flex flex-wrap gap-3">
-                     {MENU_ITEMS.map(item => {
-                       const hasPermission = checkUserPermission(u, item.id);
-                       return (
-                         <button 
-                           key={item.id}
-                           onClick={() => togglePermission(u.id, item.id)}
-                           className={`flex items-center space-x-2 p-2 rounded-xl text-[10px] font-bold transition-all border whitespace-nowrap ${hasPermission ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200 text-slate-600'}`}
-                         >
-                            <span className="text-sm">{item.icon}</span>
-                            <span>{item.label}</span>
-                            {hasPermission && <span className="ml-auto text-[8px] font-black">✓</span>}
-                         </button>
-                       );
-                     })}
+                   <p className="text-[11px] text-slate-500 font-medium">
+                     系统管理员可直接在此点选开启或关闭任意成员的组件访问权限。开启后将覆盖其职级默认权限规则，全局实时生效。
+                   </p>
+                 </div>
+                 
+                 <div className="flex items-center gap-2 flex-wrap">
+                   <input 
+                     type="text" 
+                     value={rbacSearch}
+                     onChange={e => setRbacSearch(e.target.value)}
+                     placeholder="搜索成员姓名 / 工号 / 职级..." 
+                     className="bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-slate-900 w-52"
+                   />
+                   <div className="flex items-center space-x-1 bg-slate-200/70 p-1 rounded-xl">
+                     {(['全部', '管理与VP', 'NPC与经管员', '采集主体'] as const).map(cat => (
+                       <button
+                         key={cat}
+                         type="button"
+                         onClick={() => setRbacCategoryFilter(cat)}
+                         className={`px-3 py-1 rounded-lg text-[10px] font-black transition-all ${rbacCategoryFilter === cat ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+                       >
+                         {cat}
+                       </button>
+                     ))}
                    </div>
                  </div>
-               ))}
+               </div>
+
+               {/* 人员权限列表 */}
+               {filteredRbacUsers.length === 0 ? (
+                 <div className="py-12 text-center text-slate-400 font-bold text-xs bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                   未找到符合条件的成员
+                 </div>
+               ) : (
+                 filteredRbacUsers.map((u) => {
+                   const isCustom = Array.isArray(u.permissions);
+                   const enabledCount = MENU_ITEMS.filter(item => checkUserPermission(u, item.id)).length;
+                   
+                   return (
+                     <div key={u.id} className="p-5 bg-white rounded-2xl border border-slate-200/80 shadow-2xs hover:shadow-md transition-all space-y-4">
+                       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                         <div className="flex items-center space-x-3">
+                           <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center text-base overflow-hidden shrink-0">
+                             {u.avatar ? <img src={u.avatar} className="w-full h-full object-cover" /> : getRoleIcon(u.role)}
+                           </div>
+                           <div>
+                             <div className="flex items-center gap-2">
+                               <h5 className="font-black text-slate-900 text-xs">{u.name}</h5>
+                               <Badge className="bg-slate-100 text-slate-600 font-bold border-none text-[9px]">{u.category}</Badge>
+                               {u.center && <span className="text-[9px] font-bold text-slate-400 bg-slate-50 px-2 py-0.5 rounded-full border border-slate-100">{u.center}</span>}
+                             </div>
+                             <p className="text-[10px] text-slate-400 font-mono">工号: {u.id} {u.userId ? `| 账号: ${u.userId}` : ''}</p>
+                           </div>
+                         </div>
+
+                         <div className="flex items-center space-x-2">
+                           {isCustom ? (
+                             <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[9px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200/80">
+                               <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mr-1.5 animate-pulse"></span>
+                               自定义模式 ({enabledCount}/12)
+                             </span>
+                           ) : (
+                             <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[9px] font-black bg-slate-100 text-slate-600 border border-slate-200">
+                               默认职级模式 ({enabledCount}/12)
+                             </span>
+                           )}
+
+                           <div className="flex items-center space-x-1 pl-2 border-l border-slate-100">
+                             <button
+                               type="button"
+                               onClick={() => grantAllPermissions(u.id)}
+                               className="px-2.5 py-1 rounded-lg text-[9px] font-black bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
+                               title="开启该成员所有组件权限"
+                             >
+                               全选
+                             </button>
+                             <button
+                               type="button"
+                               onClick={() => revokeAllPermissions(u.id)}
+                               className="px-2.5 py-1 rounded-lg text-[9px] font-black bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors"
+                               title="禁用该成员所有组件权限"
+                             >
+                               清空
+                             </button>
+                             {isCustom && (
+                               <button
+                                 type="button"
+                                 onClick={() => resetUserPermissionToDefault(u.id)}
+                                 className="px-2.5 py-1 rounded-lg text-[9px] font-black bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+                                 title="恢复为职级默认权限"
+                               >
+                                 重置默认
+                               </button>
+                             )}
+                           </div>
+                         </div>
+                       </div>
+
+                       {/* 12 个组件矩阵勾选按钮 */}
+                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                         {MENU_ITEMS.map(item => {
+                           const hasPermission = checkUserPermission(u, item.id);
+                           return (
+                             <button 
+                               key={item.id}
+                               type="button"
+                               onClick={() => togglePermission(u.id, item.id)}
+                               className={`flex items-center justify-between p-2.5 rounded-xl text-[10px] font-bold transition-all border ${
+                                 hasPermission 
+                                   ? 'bg-blue-600 text-white border-blue-600 shadow-xs' 
+                                   : 'bg-slate-50 text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-700'
+                               }`}
+                             >
+                               <div className="flex items-center space-x-1.5 truncate">
+                                 <span className="text-xs">{item.icon}</span>
+                                 <span className="truncate">{item.label}</span>
+                               </div>
+                               <span className={`text-[10px] font-black ml-1 shrink-0 ${hasPermission ? 'text-white' : 'text-slate-300'}`}>
+                                 {hasPermission ? '✓' : '✕'}
+                               </span>
+                             </button>
+                           );
+                         })}
+                       </div>
+                     </div>
+                   );
+                 })
+               )}
              </div>
            </Card>
         </div>
