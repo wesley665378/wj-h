@@ -25,7 +25,7 @@ import * as XLSX from 'xlsx';
 import { calculateHistoricalNetValue, calculateDualTrackCoreMatrices, calculateT1PlusValue, calculateT1PlusRevenue } from '../src/utils/business';
 import { calculateHedgeCapacitiesAndWeights } from '../src/utils/consumptionHedge';
 import { deriveProjectStatus, isProjectWritable } from '../src/utils/projectStatus';
-import { syncWorkspace } from '../src/services/api';
+import { syncWorkspace } from '../src/api/workspace';
 import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { Info, AlertCircle, CheckCircle2, X } from 'lucide-react';

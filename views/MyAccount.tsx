@@ -4,7 +4,7 @@ import { Card, Badge } from '../src/components/UI';
 import { getLocalMonthString, getLocalDateString, resolveLogBusinessMonth, resolveLogBusinessDate, formatSubmissionDate, formatSubmissionTime, isDateInRange, isLogInFilter } from '../src/utils/dateUtils';
 import { calculateHistoricalNetValue, getUserSalaryByMonth } from '../src/utils/business';
 import { aggregateUserMonthMetrics, calculateBonusAllocation } from '../src/utils/bonusAllocation';
-import { fetchDistributionData } from '../src/services/api';
+import { fetchDistributionData } from '../src/api/distribution';
 import { useCostPrivacy } from '../src/hooks/useCostPrivacy';
 import { formatAmount } from '../src/utils/formatters';
 import { BusinessDateFilter } from '../src/components/BusinessDateFilter';

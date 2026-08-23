@@ -25,7 +25,17 @@ import SystemAnnouncement from './src/components/SystemAnnouncement';
 import SiteFooter from './components/SiteFooter';
 import LegalOverlay from './components/LegalOverlay';
 import { Toaster, toast } from 'sonner';
-import { auditLog } from './src/services/api';
+import { 
+  fetchWorkspaceData, 
+  syncWorkspace, 
+  putAuditLog, 
+  loginWithApi, 
+  createMeetingSampleApi,
+  toastApiError,
+  setAuthToken,
+  clearAuthToken
+} from './src/api';
+import { useAppSessionSync } from './src/hooks/useAppSessionSync';
 import { getLocalDateString, getLocalMonthString } from './src/utils/dateUtils';
 import { roundMoney } from './src/utils/formatMoney';
 
@@ -88,6 +98,9 @@ const App: React.FC = () => {
   const [isLegalOpen, setIsLegalOpen] = useState(false);
   const [legalTab, setLegalTab] = useState<'agreement' | 'privacy'>('agreement');
 
+  // Unified session sync hook (IP, time, operation logs, clear state)
+  const { clientIp, currentTime, systemLogs, addSystemLog, clearSessionState } = useAppSessionSync(currentUser);
+
   const handleOpenLegal = (tab: 'agreement' | 'privacy') => {
     setLegalTab(tab);
     setIsLegalOpen(true);
@@ -110,11 +123,7 @@ const App: React.FC = () => {
       setMeetingSamples([]);
 
       try {
-        let data = null;
-        const res = await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/workspace`);
-        if (res.ok) {
-          data = await res.json();
-        }
+        const data = await fetchWorkspaceData();
 
         if (data) {
           // 原子化更新数据
@@ -125,8 +134,13 @@ const App: React.FC = () => {
             }));
             setManagedUsers(backfilledUsers);
           }
-          if (data.logs && Array.isArray(data.logs)) {
-            const backfilledLogs = data.logs
+          if (data.businessUnits && Array.isArray(data.businessUnits)) {
+            setBusinessUnits(data.businessUnits);
+          }
+          
+          const rawLogs = [...(data.logs || []), ...(data.dtcb || [])];
+          if (rawLogs.length > 0) {
+            const backfilledLogs = rawLogs
               .filter((l: any) => l !== null)
               .map((l: any) => {
                 const recalculatedNetValue = calculateHistoricalNetValue(l, data.miningResources || [], data.managedUsers || []);
@@ -219,51 +233,6 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('shihe_circuit_breakers');
     return saved ? JSON.parse(saved) : [];
   });
-  const [clientIp, setClientIp] = useState<string>('127.0.0.1');
-  const [systemLogs, setSystemLogs] = useState<SystemOperationLog[]>(() => {
-    const saved = localStorage.getItem('shihe_system_logs');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed.map((l: any) => ({
-            ...l,
-            ip: l.ip || '127.0.0.1'
-          }));
-        }
-      } catch (e) {
-        console.error('Failed to parse cached system logs:', e);
-      }
-    }
-    return [];
-  });
-  const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
-
-  // Real-time clock ticker according to client computer system time
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Fetch client IP on mount
-  useEffect(() => {
-    const fetchIp = async () => {
-      try {
-        const res = await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/client-ip`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.ip) {
-            setClientIp(data.ip);
-          }
-        }
-      } catch (err) {
-        console.warn('Could not fetch client IP:', err);
-      }
-    };
-    fetchIp();
-  }, []);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('kanban');
@@ -279,19 +248,6 @@ const App: React.FC = () => {
     'npcxie': '123'
   });
 
-  const addSystemLog = (action: string, details: string, user: User | null = currentUser, customIp?: string) => {
-    const newLog: SystemOperationLog = {
-      id: `SYS${Date.now().toString().slice(-6)}`,
-      userId: user?.id || 'system',
-      userName: user?.name || '系统',
-      action,
-      details,
-      timestamp: Date.now(),
-      ip: customIp || clientIp || '127.0.0.1'
-    };
-    setSystemLogs(prev => [newLog, ...prev].slice(0, 500)); // Keep last 500 logs
-  };
-
   const persistWorkspaceWithOverrides = React.useCallback(async (overrides?: {
     transactions?: InternalTransaction[];
     miningResources?: MiningResource[];
@@ -300,6 +256,7 @@ const App: React.FC = () => {
     circuitBreakers?: CircuitBreaker[];
     meetingSamples?: MeetingSample[];
     acceptanceRecords?: AcceptanceRecord[];
+    businessUnits?: string[];
   }) => {
     if (!currentUser) return;
     if (!workspaceLoaded) {
@@ -313,6 +270,7 @@ const App: React.FC = () => {
     const nextCBs = overrides?.circuitBreakers ?? circuitBreakers;
     const nextSamples = overrides?.meetingSamples ?? meetingSamples;
     const nextAcc = overrides?.acceptanceRecords ?? acceptanceRecords;
+    const nextUnits = overrides?.businessUnits ?? businessUnits;
 
     const dtcbLogs = nextLogs.filter(l => l.confirmationType === '手动确权');
     const jzczLogs = nextLogs.filter(l => l.confirmationType !== '手动确权');
@@ -320,27 +278,25 @@ const App: React.FC = () => {
     const jzfpSnapshots = buildJzfpSnapshot(nextUsers, nextLogs, filterMonth);
 
     try {
-      await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/workspace/sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          users: nextUsers,
-          dtcb: dtcbLogs,
-          logs: jzczLogs,
-          transactions: nextTxs,
-          miningResources: nextRes,
-          valueEfficiencySnapshots: snapshots,
-          acceptanceRecords: nextAcc,
-          jzfp: jzfpSnapshots,
-          circuitBreakers: nextCBs,
-          rdq: nextCBs,
-          meetingSamples: nextSamples
-        })
+      await syncWorkspace({ 
+        users: nextUsers,
+        dtcb: dtcbLogs,
+        logs: jzczLogs,
+        transactions: nextTxs,
+        miningResources: nextRes,
+        valueEfficiencySnapshots: snapshots,
+        acceptanceRecords: nextAcc,
+        jzfp: jzfpSnapshots,
+        circuitBreakers: nextCBs,
+        rdq: nextCBs,
+        meetingSamples: nextSamples,
+        businessUnits: nextUnits
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error('Data sync error:', err);
+      toastApiError(err, '工作区数据同步失败');
     }
-  }, [currentUser, workspaceLoaded, managedUsers, logs, transactions, miningResources, circuitBreakers, meetingSamples, filterMonth, acceptanceRecords]);
+  }, [currentUser, workspaceLoaded, managedUsers, logs, transactions, miningResources, circuitBreakers, meetingSamples, filterMonth, acceptanceRecords, businessUnits]);
 
   const persistWorkspaceNow = React.useCallback(async () => {
     await persistWorkspaceWithOverrides();
@@ -455,21 +411,6 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // 辅助函数：根据类型和类别获取因子 (与 ValueCreation 逻辑对齐)
-  const getLogFactor = (type: RefineType, category: RefineCategory) => {
-    // 简化版：由于 App.tsx 难以获取所有用户的具体职级，我们使用标准因子
-    // 在实际业务中，这应该由 ValueCreation 计算并存入日志，或者这里动态匹配
-    if (category === RefineCategory.Revenue) {
-      if (type === RefineType.Bidding) return 0.20;
-      if (type === RefineType.SafetyEval) return 0.30;
-      return 0.27;
-    } else {
-      if (type === RefineType.Bidding) return 0.55;
-      if (type === RefineType.SafetyEval) return 0.40;
-      return 0.48; // Default Enterprise
-    }
-  };
-
   const processLogsSubmission = React.useCallback((newLogs: ValueCreationLog[]) => {
     setLogs(prevLogs => {
       let nextLogs = [...prevLogs, ...newLogs];
@@ -495,8 +436,8 @@ const App: React.FC = () => {
     setProcessingLogIds(prev => new Set(prev).add(logId));
 
     try {
-      // 2. 调用后端接口确权（包含服务端 applyTimberLinkage 返回的 linkedLogs 及 recalibratedLogs）
-      const { log, resource, snapshot, linkedLogs = [], recalibratedLogs = [] } = await auditLog(logId, status);
+      // 2. 调用统一接口层确权
+      const { log, resource, snapshot, linkedLogs = [], recalibratedLogs = [] } = await putAuditLog(logId, status);
 
       // 3. 更新界面数据 (确权响应驱动，服务端权威合并)
       setLogs(prevLogs => {
@@ -543,13 +484,7 @@ const App: React.FC = () => {
       toast.success('确权成功');
     } catch (err: any) {
       console.error('Audit failed:', err);
-      if (err.status === 403) {
-        toast.error('操作禁止：矿山已归档');
-      } else if (err.status === 409) {
-        toast.error('状态冲突或容量余额不足');
-      } else {
-        toast.error(err.message || '确权操作失败');
-      }
+      toastApiError(err, '确权操作失败');
     } finally {
       // 4. 清除正在处理的标记
       setProcessingLogIds(prev => {
@@ -563,7 +498,7 @@ const App: React.FC = () => {
   const onSystemAdjustment = React.useCallback((log: ValueCreationLog, details: string) => {
     processLogsSubmission([log]);
     addSystemLog('系统调节', details);
-  }, [processLogsSubmission]);
+  }, [processLogsSubmission, addSystemLog]);
 
   const onLogSubmit = React.useCallback((newLogs: ValueCreationLog | ValueCreationLog[]) => {
     const logsToAdd = Array.isArray(newLogs) ? newLogs : [newLogs];
@@ -571,7 +506,7 @@ const App: React.FC = () => {
     logsToAdd.forEach(log => {
       addSystemLog('产出申报', `提交了 ${log.amount} 积分的 ${log.category} 产出申报`);
     });
-  }, [processLogsSubmission]);
+  }, [processLogsSubmission, addSystemLog]);
 
   const onConsumptionSubmit = React.useCallback((newLog: ValueCreationLog | ValueCreationLog[]) => {
     const logsArray = Array.isArray(newLog) ? newLog : [newLog];
@@ -580,7 +515,7 @@ const App: React.FC = () => {
       const isHedge = log.status === AuditStatus.Confirmed && log.costCategory === 'C';
       addSystemLog('成本消耗', `提交了 ${log.dynamicCost} 积分 of ${log.costCategory} 成本消耗${isHedge ? ' (并触发动态对冲)' : ''}`);
     });
-  }, [processLogsSubmission]);
+  }, [processLogsSubmission, addSystemLog]);
 
   const onSubmitTransaction = React.useCallback((txOrTxs: InternalTransaction | InternalTransaction[], updatedResources?: MiningResource[]) => {
     const txList = Array.isArray(txOrTxs) ? txOrTxs : [txOrTxs];
@@ -662,7 +597,7 @@ const App: React.FC = () => {
       return next;
     });
     addSystemLog('资源管理', `新增了矿山资源 ${res.id}`);
-  }, []);
+  }, [addSystemLog, persistWorkspaceWithOverrides]);
 
   const onUpdateResource = React.useCallback((res: MiningResource) => {
     setMiningResources(prev => {
@@ -671,12 +606,12 @@ const App: React.FC = () => {
       return next;
     });
     addSystemLog('资源管理', `更新了矿山资源 ${res.id}`);
-  }, []);
+  }, [addSystemLog, persistWorkspaceWithOverrides]);
 
   const onDeleteResource = React.useCallback((id: string) => {
     setMiningResources(prev => prev.filter(r => r.id !== id));
     addSystemLog('资源管理', `删除了矿山资源 ${id}`);
-  }, []);
+  }, [addSystemLog]);
 
   const onDeleteLog = React.useCallback((logId: string) => {
     const nowStr = new Date().toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -727,28 +662,17 @@ const App: React.FC = () => {
 
   const onAuthenticate = React.useCallback(async (userId: string, password: string): Promise<User | null> => {
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, password })
-      });
-      
-      const data = await res.json();
-      if (res.ok) {
-        if (data.clientIp) {
-          setClientIp(data.clientIp);
-        }
+      const data = await loginWithApi(userId, password);
+      if (data && data.user) {
         addSystemLog('用户登录', `用户 ${data.user.name} (${data.user.userId || data.user.id}) 成功登录系统`, data.user, data.clientIp);
         return data.user;
-      } else {
-        if (res.status === 403) {
-          // 账号已离职锁定
-          return Promise.reject(new Error(data.error));
-        }
-        return null;
       }
-    } catch (err) {
+      return null;
+    } catch (err: any) {
       console.error('登录异常:', err);
+      if (err.status === 403) {
+        return Promise.reject(new Error(err.message || '账号已被锁定或已离职'));
+      }
       return null;
     }
   }, [addSystemLog]);
@@ -758,10 +682,9 @@ const App: React.FC = () => {
     setMiningResources(INITIAL_MINING_RESOURCES);
     setManagedUsers(INITIAL_USERS);
     setTransactions([]);
-    setSystemLogs([]);
     localStorage.setItem('cleared_test_data_v2', 'true');
     addSystemLog('系统维护', '清空了所有测试数据并重置资源状态');
-  }, []);
+  }, [addSystemLog]);
 
   useEffect(() => {
     // 远程模式（VITE_USE_LOCAL_AUTH !== 'true'）：禁止自动改 logs / miningResources
@@ -778,8 +701,6 @@ const App: React.FC = () => {
       }
     }
   }, [logs, miningResources, performTimberLinkage]);
-
-  // 1. 每日自动入库校验：不自动把满 90 天记录批量入库 (依据最新要求已停用前端自动入库)
 
   // 2. 数据处理与初始加载
   useEffect(() => {
@@ -801,13 +722,6 @@ const App: React.FC = () => {
     } catch (e) {
       console.warn('Failed to parse shihe_transactions from localStorage', e);
     }
-
-    try {
-      const savedSystemLogs = localStorage.getItem('shihe_system_logs');
-      if (savedSystemLogs) setSystemLogs(JSON.parse(savedSystemLogs));
-    } catch (e) {
-      console.warn('Failed to parse shihe_system_logs from localStorage', e);
-    }
   }, [onClearTestData]);
 
   // 3. 数据持久化与后端同步 (去抖动)
@@ -822,24 +736,18 @@ const App: React.FC = () => {
         const snapshots = buildValueEfficiencySnapshots(managedUsers, logs, miningResources, filterMonth);
         const jzfpSnapshots = buildJzfpSnapshot(managedUsers, logs, filterMonth);
         
-        const response = await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/workspace/sync`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            users: managedUsers,
-            dtcb: dtcbLogs,
-            logs: jzczLogs,
-            transactions,
-            miningResources,
-            valueEfficiencySnapshots: snapshots,
-            acceptanceRecords,
-            jzfp: jzfpSnapshots,
-            meetingSamples
-          })
+        await syncWorkspace({ 
+          users: managedUsers,
+          dtcb: dtcbLogs,
+          logs: jzczLogs,
+          transactions,
+          miningResources,
+          valueEfficiencySnapshots: snapshots,
+          acceptanceRecords,
+          jzfp: jzfpSnapshots,
+          businessUnits,
+          meetingSamples
         });
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
       } catch (err) {
         console.error('数据同步失败:', err);
       }
@@ -847,7 +755,7 @@ const App: React.FC = () => {
 
     // 只有在加载完成后才执行同步
     if (currentUser && workspaceLoaded) {
-      const timer = setTimeout(syncData, 2000); // 修改为 2 秒，优化同步响应速度
+      const timer = setTimeout(syncData, 2000); // 2 秒防抖
       
       localStorage.setItem('shihe_managed_users', JSON.stringify(managedUsers));
       localStorage.setItem('shihe_logs', JSON.stringify(logs));
@@ -856,14 +764,13 @@ const App: React.FC = () => {
 
       return () => clearTimeout(timer);
     }
-  }, [managedUsers, logs, transactions, businessUnits, miningResources, filterMonth, currentUser, workspaceLoaded]);
+  }, [managedUsers, logs, transactions, businessUnits, miningResources, filterMonth, currentUser, workspaceLoaded, acceptanceRecords, meetingSamples]);
 
   useEffect(() => {
     localStorage.setItem('shihe_resources', JSON.stringify(miningResources));
     localStorage.setItem('shihe_circuit_breakers', JSON.stringify(circuitBreakers));
     localStorage.setItem('shihe_user', JSON.stringify(currentUser));
-    localStorage.setItem('shihe_system_logs', JSON.stringify(systemLogs));
-  }, [miningResources, circuitBreakers, currentUser, systemLogs]);
+  }, [miningResources, circuitBreakers, currentUser]);
 
   // 自动恢复过期的熔断
   useEffect(() => {
@@ -885,20 +792,12 @@ const App: React.FC = () => {
       });
     }, 30000); // 每 30 秒检查一次
     return () => clearInterval(interval);
-  }, []);
+  }, [addSystemLog]);
 
   const handleSwitchUser = (user: User) => {
     addSystemLog('切换智能体', `从 ${currentUser.name} 切换到 ${user.name}`, user);
     setCurrentUser(user);
     
-    const isOperator = user.role === Role.Operator;
-    const isRevenueCollector = user.role === Role.RevenueCollector || user.category?.includes('款专');
-    const isValueCollector = user.role === Role.ValueCollector || user.category?.includes('产专');
-    const isNpcxie = user.role === Role.npcxie;
-    const isAdmin = user.role === Role.Admin;
-    const isReservoirManager = user.role === Role.Admin || user.role === Role.ReservoirManager;
-    const isCenter = user.role === Role.Rank;
-
     const isAllowed = checkUserPermission(user, activeTab);
     if (!isAllowed) {
       setActiveTab('kanban');
@@ -909,24 +808,15 @@ const App: React.FC = () => {
     if (currentUser) {
       addSystemLog('退出登录', `用户 ${currentUser.name} 退出系统登录`, currentUser);
     }
+    clearSessionState();
     setCurrentUser(null);
     setWorkspaceLoaded(false);
-    // 立即清理本地敏感状态，避免账号切换时数据残留
     setManagedUsers(INITIAL_USERS);
     setLogs([]);
     setTransactions([]);
     setMiningResources([]);
     setBusinessUnits(['RC', '经营单元-001']);
     setMeetingSamples([]);
-    // 保持公共主数据，不清除 shihe_resources
-    // 确保登出后切换账号干净，但公共静态资产数据仍可利用或由下一次会签自动重新初始化
-    localStorage.removeItem('shihe_user');
-    localStorage.removeItem('shihe_managed_users');
-    localStorage.removeItem('shihe_logs');
-    localStorage.removeItem('shihe_transactions');
-    localStorage.removeItem('shihe_business_units');
-    // 如果有其他持久化状态，也应在此清理
-    localStorage.removeItem('shihe_circuit_breakers');
   };
 
   const isAdminOrNPC = currentUser?.role === Role.Admin || currentUser?.role === Role.npcxie;
@@ -1018,12 +908,8 @@ const App: React.FC = () => {
 
   const onSaveMeetingSample = React.useCallback(async (sample: MeetingSample): Promise<boolean> => {
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/meeting-samples`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sample)
-      });
-      if (res.ok) {
+      const res = await createMeetingSampleApi(sample);
+      if (res && res.success) {
         setMeetingSamples(prev => {
           const idx = prev.findIndex(s => s.id === sample.id);
           const next = idx !== -1 ? prev.map(s => s.id === sample.id ? sample : s) : [...prev, sample];
@@ -1057,6 +943,7 @@ const App: React.FC = () => {
       },
       creation: { 
         user: currentUser, 
+        users: filteredUsers,
         resources: filteredResources, 
         logs: filteredLogs, 
         onLogSubmit, 
@@ -1080,21 +967,28 @@ const App: React.FC = () => {
       },
       audit: { 
         user: currentUser, 
-        logs: filteredLogs, 
+        logs: auditLogs, 
         users: filteredUsers,
         resources: filteredResources,
         onAudit: processAudit,
         processingLogIds,
         onDeleteLog,
         onRefreshWorkspace: async () => {
-          const res = await fetch(`${import.meta.env.VITE_API_BASE || ''}/api/workspace`);
-          if (res.ok) {
-            const data = await res.json();
-            if (data.logs) setLogs(data.logs);
-            if (data.managedUsers) setManagedUsers(data.managedUsers);
-            if (data.transactions) setTransactions(data.transactions);
-            if (data.miningResources) setMiningResources(data.miningResources);
-            if (data.acceptanceRecords) setAcceptanceRecords(data.acceptanceRecords);
+          try {
+            const data = await fetchWorkspaceData();
+            if (data) {
+              if (data.logs || data.dtcb) {
+                const combined = [...(data.logs || []), ...(data.dtcb || [])];
+                setLogs(combined);
+              }
+              if (data.managedUsers) setManagedUsers(data.managedUsers);
+              if (data.transactions) setTransactions(data.transactions);
+              if (data.miningResources) setMiningResources(data.miningResources);
+              if (data.acceptanceRecords) setAcceptanceRecords(data.acceptanceRecords);
+              if (data.businessUnits) setBusinessUnits(data.businessUnits);
+            }
+          } catch (err) {
+            console.error('Failed to refresh workspace in audit tab:', err);
           }
         }
       },
@@ -1148,7 +1042,7 @@ const App: React.FC = () => {
         onFilterMonthChange: setFilterMonth
       },
       distribution: { 
-        logs: filteredLogs, 
+        logs: auditLogs, 
         users: filteredUsers, 
         currentUser, 
         transactions, 
@@ -1163,7 +1057,7 @@ const App: React.FC = () => {
           });
         }
       },
-      account: { currentUser, logs: filteredLogs, transactions, resources: filteredResources, users: filteredUsers },
+      account: { currentUser, logs: auditLogs, transactions, resources: filteredResources, users: filteredUsers },
       personnel: { 
         user: currentUser,
         users: filteredUsers, 
@@ -1171,10 +1065,11 @@ const App: React.FC = () => {
         onUpdatePassword,
         onClearTestData,
         businessUnits: businessUnits,
-        onUpdateBusinessUnits: setBusinessUnits
+        onUpdateBusinessUnits: setBusinessUnits,
+        persist: persistWorkspaceWithOverrides
       }
     };
-  }, [filteredLogs, auditLogs, filteredResources, filteredUsers, managedUsers, businessUnits, transactions, currentUser, systemLogs, currentTime, 
+  }, [filteredLogs, auditLogs, filteredResources, filteredUsers, managedUsers, businessUnits, transactions, currentUser, currentTime, 
        onSystemAdjustment, onLogSubmit, onConsumptionSubmit, processAudit, onSubmitTransaction, 
        onAuditTransaction, onAddResource, onUpdateResource, onDeleteResource, onUpdateUsers, onClearTestData,
        circuitBreakers, onAddCircuitBreaker, onRecoverCircuitBreaker, persistWorkspaceWithOverrides]);

@@ -122,6 +122,7 @@ let MOCK_ACCEPTANCE_DB: any[] = [];
 let MOCK_JZFP_DB: any[] = [];
 let MOCK_RDQ_DB: any[] = [];
 let MOCK_MEETING_SAMPLES_DB: any[] = [];
+let MOCK_BUSINESS_UNITS_DB: string[] = ['RC', '经营单元-001'];
 let MOCK_RESOURCES_DB: any[] = [
   { 
     id: 'KS001', 
@@ -282,7 +283,8 @@ async function startServer() {
             acceptanceRecords: cdtzRows && cdtzRows.length > 0 ? cdtzRows : MOCK_ACCEPTANCE_DB,
             circuitBreakers: rdqRows && rdqRows.length > 0 ? rdqRows : MOCK_RDQ_DB,
             rdq: rdqRows && rdqRows.length > 0 ? rdqRows : MOCK_RDQ_DB,
-            meetingSamples: parsedMeetingSamples
+            meetingSamples: parsedMeetingSamples,
+            businessUnits: MOCK_BUSINESS_UNITS_DB
           });
         } catch (queryErr) {
           const err = queryErr as any;
@@ -298,16 +300,17 @@ async function startServer() {
           // Don't throw, just fall through to mock
         }
       }
-      res.json({ managedUsers: MOCK_USERS_DB, logs: MOCK_LOGS_DB, transactions: MOCK_TRANSACTIONS_DB, miningResources: MOCK_RESOURCES_DB, valueEfficiencySnapshots: MOCK_SNAPSHOTS_DB, acceptanceRecords: MOCK_ACCEPTANCE_DB, circuitBreakers: MOCK_RDQ_DB, rdq: MOCK_RDQ_DB, meetingSamples: MOCK_MEETING_SAMPLES_DB });
+      res.json({ managedUsers: MOCK_USERS_DB, logs: MOCK_LOGS_DB, transactions: MOCK_TRANSACTIONS_DB, miningResources: MOCK_RESOURCES_DB, valueEfficiencySnapshots: MOCK_SNAPSHOTS_DB, acceptanceRecords: MOCK_ACCEPTANCE_DB, circuitBreakers: MOCK_RDQ_DB, rdq: MOCK_RDQ_DB, meetingSamples: MOCK_MEETING_SAMPLES_DB, businessUnits: MOCK_BUSINESS_UNITS_DB });
     } catch (error) {
       console.error('Workspace recovery failure:', error);
-      res.json({ managedUsers: MOCK_USERS_DB, logs: MOCK_LOGS_DB, transactions: MOCK_TRANSACTIONS_DB, miningResources: MOCK_RESOURCES_DB, valueEfficiencySnapshots: MOCK_SNAPSHOTS_DB, acceptanceRecords: MOCK_ACCEPTANCE_DB, circuitBreakers: MOCK_RDQ_DB, rdq: MOCK_RDQ_DB, meetingSamples: MOCK_MEETING_SAMPLES_DB });
+      res.json({ managedUsers: MOCK_USERS_DB, logs: MOCK_LOGS_DB, transactions: MOCK_TRANSACTIONS_DB, miningResources: MOCK_RESOURCES_DB, valueEfficiencySnapshots: MOCK_SNAPSHOTS_DB, acceptanceRecords: MOCK_ACCEPTANCE_DB, circuitBreakers: MOCK_RDQ_DB, rdq: MOCK_RDQ_DB, meetingSamples: MOCK_MEETING_SAMPLES_DB, businessUnits: MOCK_BUSINESS_UNITS_DB });
     }
   });
 
   app.post("/api/workspace/sync", async (req, res) => {
     try {
-      const { users, logs, transactions, miningResources, valueEfficiencySnapshots, acceptanceRecords } = req.body;
+      const { users, logs, dtcb, transactions, miningResources, valueEfficiencySnapshots, acceptanceRecords, businessUnits } = req.body;
+      const combinedLogs = [...(logs || []), ...(dtcb || [])];
       const db = await getPool();
       
       if (db) {
@@ -340,8 +343,8 @@ async function startServer() {
           }
           
           // Sync Logs
-          if (logs) {
-            for (const log of logs) {
+          if (combinedLogs && combinedLogs.length > 0) {
+            for (const log of combinedLogs) {
               await connection.execute(
                 'INSERT INTO logs (id, miningId, rankId, recordedCollectorId, category, type, costCategory, amount, dynamicCost, cClassCost, cClassRatio, netValue, timestamp, status, confirmationType, month, businessDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE status=?, amount=?, netValue=?, month=?, businessDate=?',
                 [log.id, log.miningId, log.rankId, log.recordedCollectorId || '', log.category, log.type, log.costCategory || '', log.amount, log.dynamicCost, log.cClassCost || 0, log.cClassRatio || 0, log.netValue, log.timestamp, log.status, log.confirmationType || '', log.month || '', log.businessDate || '', log.status, log.amount, log.netValue, log.month || '', log.businessDate || '']
@@ -460,11 +463,13 @@ async function startServer() {
       
       // Always update mock storage as a fallback/mirror
       if (users) MOCK_USERS_DB = users;
-      if (logs) MOCK_LOGS_DB = logs;
+      if (combinedLogs && combinedLogs.length > 0) MOCK_LOGS_DB = combinedLogs;
+      else if (logs) MOCK_LOGS_DB = logs;
       if (transactions) MOCK_TRANSACTIONS_DB = transactions;
       if (miningResources) MOCK_RESOURCES_DB = miningResources;
       if (valueEfficiencySnapshots) MOCK_SNAPSHOTS_DB = valueEfficiencySnapshots;
       if (acceptanceRecords) MOCK_ACCEPTANCE_DB = acceptanceRecords;
+      if (businessUnits && Array.isArray(businessUnits)) MOCK_BUSINESS_UNITS_DB = businessUnits;
       if (req.body.jzfp) MOCK_JZFP_DB = req.body.jzfp;
       if (req.body.circuitBreakers || req.body.rdq) MOCK_RDQ_DB = req.body.circuitBreakers || req.body.rdq;
       if (req.body.meetingSamples && Array.isArray(req.body.meetingSamples)) {
@@ -966,7 +971,7 @@ async function startServer() {
   // 2. Audit/Confirm Log PUT Endpoint
   app.put("/api/audit", async (req, res) => {
     try {
-      const { logId, status } = req.body;
+      const { logId, status, verifiedAmount } = req.body;
       const db = await getPool();
       
       let log: any = null;
@@ -987,11 +992,21 @@ async function startServer() {
       log.status = status;
       log.confirmedAt = Date.now();
 
+      if (verifiedAmount !== undefined && verifiedAmount !== null && !isNaN(Number(verifiedAmount))) {
+        const numAmt = Number(verifiedAmount);
+        log.amount = numAmt;
+        log.rawAmount = numAmt;
+        log.verifiedAmount = numAmt;
+        const isRev = (log.category === 'Revenue' || log.category === '收款');
+        const factor = isRev ? 0.27 : 0.48;
+        log.netValue = Math.round(numAmt * factor);
+      }
+
       if (db) {
         try {
-          await db.execute('UPDATE logs SET status = ?, confirmedAt = ? WHERE id = ?', [status, log.confirmedAt, logId]);
+          await db.execute('UPDATE logs SET status = ?, amount = ?, rawAmount = ?, netValue = ?, confirmedAt = ? WHERE id = ?', [status, log.amount, log.rawAmount || log.amount, log.netValue || 0, log.confirmedAt, logId]);
         } catch (err) {
-          await db.execute('UPDATE logs SET status = ? WHERE id = ?', [status, logId]);
+          await db.execute('UPDATE logs SET status = ?, amount = ?, netValue = ? WHERE id = ?', [status, log.amount, log.netValue || 0, logId]);
         }
       } else {
         const idx = MOCK_LOGS_DB.findIndex(l => l.id === logId);

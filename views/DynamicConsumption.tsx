@@ -8,7 +8,7 @@ import * as XLSX from 'xlsx';
 import { UI_LABELS } from '../src/constants/uiLabels';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
 import { isProjectWritable, deriveProjectStatus } from '../src/utils/projectStatus';
-import { syncWorkspace } from '../src/services/api';
+import { syncWorkspace } from '../src/api/workspace';
 import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { calculateConsumptionMirrorFields } from '../src/utils/business';

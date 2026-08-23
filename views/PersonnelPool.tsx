@@ -6,7 +6,8 @@ import { UserTableRow } from '../src/components/UserTableRow';
 import { MENU_ITEMS, RANK_DICTIONARY } from '../constants';
 import { checkUserPermission, RANK_CONFIG } from '../src/utils/business';
 import { getLocalMonthString } from '../src/utils/dateUtils';
-import { syncWorkspace } from '../src/services/api';
+import { syncWorkspace } from '../src/api';
+import { normalizeCenter } from '../src/utils/centerUtils';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { assertAcceptablePassword } from '../src/utils/security';
 import { 
@@ -26,6 +27,7 @@ interface PersonnelPoolProps {
   onClearTestData?: () => void;
   businessUnits: string[];
   onUpdateBusinessUnits: (units: string[]) => void;
+  persist?: (overrides?: any) => Promise<void>;
 }
 
 const AUTO_ACCOUNT_CATEGORIES = ['经管员高款专', '经管员高产专', '经管员NPC', 'VP'];
@@ -477,7 +479,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
     switch (role) {
       case Role.Admin: return '⚡';
       case Role.npcxie: return '🛡️';
-      case Role.RevenueCollector: return '';
+      case Role.RevenueCollector: return '💰';
       case Role.ValueCollector: return '🌲';
       case Role.ReservoirManager: return '🌊';
       case Role.Collector: return '🔧';
@@ -515,7 +517,8 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
         const id = String(findValue(['工号', '矿山编号', '实体ID', 'ID', 'id', '实体 ID', '用户名']) || '').trim();
         const name = String(findValue(['名称', '姓名', 'Name', 'name', '采集主体']) || '').trim();
         const roleStr = String(findValue(['角色', 'Role', 'role']) || '').toLowerCase().trim();
-        const center = String(findValue(['责任人（单元负责）', '责任人', '经营单元', 'Center', 'center', '所属单元']) || '').trim();
+        const rawCenter = String(findValue(['责任人（单元负责）', '责任人', '经营单元', 'Center', 'center', '所属单元']) || '').trim();
+        const center = normalizeCenter(rawCenter);
         const rawCategory = String(findValue(['职级', '分类', 'Category', 'category', '人格分类', '人格等级分类']) || '').trim();
         
         let category: User['category'] = '初款专';

@@ -43,15 +43,16 @@ import { formatAmount } from "../src/utils/formatters";
 import { InfoTip } from "../src/components/InfoTip";
 import { BusinessDateFilter } from "../src/components/BusinessDateFilter";
 
-import { fetchWorkspaceData } from "../src/services/api";
+import { fetchWorkspaceData } from "../src/api/workspace";
 import { toast } from "sonner";
+import { CityGuardianModal, useCityGuardianModal } from "../src/components/CityGuardianModal";
 
 interface AuditingProps {
   user: User;
   logs: ValueCreationLog[];
   users: User[];
   resources: MiningResource[];
-  onAudit: (logId: string, status: AuditStatus) => void;
+  onAudit: (logId: string, status: AuditStatus, verifiedAmount?: number) => void;
   processingLogIds?: Set<string>;
   onRefreshWorkspace?: () => Promise<void>;
   onDeleteLog?: (logId: string) => void;
@@ -67,6 +68,7 @@ const Auditing: React.FC<AuditingProps> = ({
   onRefreshWorkspace,
   onDeleteLog,
 }) => {
+  const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const { isCostVisible, toggleCostVisible, maskMoney, maskText } = useCostPrivacy();
   const [activeTab, setActiveTab] = useState<
     "pending" | "confirmed" | "history" | "summary" | "linked" | "consumption"
@@ -1027,9 +1029,9 @@ const Auditing: React.FC<AuditingProps> = ({
                             onDeleteLog ? (
                               <button
                                 onClick={() => {
-                                  if (window.confirm("确定要删除审计记录 #" + log.id + " 吗？")) {
+                                  showConfirm(`确定要删除审计记录 #${log.id} 吗？`, () => {
                                     onDeleteLog(log.id);
-                                  }
+                                  });
                                 }}
                                 className="px-3 py-1 bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white rounded text-[9px] font-black uppercase transition-all"
                               >

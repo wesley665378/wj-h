@@ -12,7 +12,8 @@ import { resolveLogBusinessMonth, getLocalMonthString, getLocalDateString, resol
 import { formatAmount, formatRatio, formatPercent } from "../src/utils/formatters";
 import { InfoTip } from "../src/components/InfoTip";
 import { BusinessDateFilter } from "../src/components/BusinessDateFilter";
-import { fetchDistributionData, createCdtzRecord } from "../src/services/api";
+import { fetchDistributionData } from "../src/api/distribution";
+import { createCdtzRecord } from "../src/api/cdtz";
 import {
   ValueCreationLog,
   AuditStatus,
