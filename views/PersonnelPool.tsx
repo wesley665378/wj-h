@@ -46,9 +46,9 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
   const [showAddAccountForm, setShowAddAccountForm] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<'全部' | '采集主体' | '管理与VP' | '组件权限设置' | '批量导入 EXCEL'>('全部');
-  
   const [searchQuery, setSearchQuery] = useState('');
-  const [matrixViewMode, setMatrixViewMode] = useState<'matrix' | 'list'>('matrix');
+  
+
 
   // RBAC 权限控制中心状态
   const [rbacSearch, setRbacSearch] = useState('');
@@ -555,7 +555,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
           salaryPackageType = (category as string) === 'VP' ? 'VP工资包' : '收款工资包';
         }
         
-        const salaryPackageRaw = findValue(['单月刚性工资包金额', '工资包金额', '工资包', 'Salary', 'salaryPackage', '金额', 'Amount', '刚性工资包金额']);
+        const salaryPackageRaw = findValue(['单月刚性工资包金额', '工资包金额', '工资包额度', '工资包', 'Salary', 'salaryPackage', '金额', 'Amount', '刚性工资包金额']);
         // 金额空则按 0 落库
         const salaryPackage = (salaryPackageRaw === undefined || salaryPackageRaw === null || String(salaryPackageRaw).trim() === '')
           ? 0
@@ -906,8 +906,8 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">工资包额度</p>
-                  <input type="number" placeholder="金额" value={newUserFormData.salaryPackage === 0 ? '' : newUserFormData.salaryPackage} onChange={e => setNewUserFormData({...newUserFormData, salaryPackage: Number(e.target.value)})} className="bg-white border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none text-[10px] w-full" />
+                  <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">工资包金额</p>
+                  <input type="number" placeholder="工资包金额" value={newUserFormData.salaryPackage === 0 ? '' : newUserFormData.salaryPackage} onChange={e => setNewUserFormData({...newUserFormData, salaryPackage: e.target.value === '' ? 0 : Number(e.target.value)})} className="bg-white border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none text-[10px] w-full" />
                 </div>
               </div>
 
@@ -962,8 +962,8 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                       </select>
                     </div>
                     <div className="space-y-1">
-                      <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">工资包额度</p>
-                      <input type="number" placeholder="额度" value={formData.salaryPackage} onChange={e => setFormData({...formData, salaryPackage: Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" />
+                      <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">工资包金额</p>
+                      <input type="number" placeholder="工资包金额" value={formData.salaryPackage === 0 ? '' : formData.salaryPackage} onChange={e => setFormData({...formData, salaryPackage: e.target.value === '' ? 0 : Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" />
                     </div>
                     <div className="space-y-1">
                       <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">重置密码 (留空则不修改)</p>
@@ -1009,20 +1009,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                       </button>
                     )}
                   </div>
-                  <div className="flex items-center space-x-1 bg-slate-100 p-0.5 rounded-full border border-slate-200/80 ml-2">
-                    <button 
-                      onClick={() => setMatrixViewMode('matrix')}
-                      className={`px-3 py-1 rounded-full text-[9px] font-black transition-all ${matrixViewMode === 'matrix' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}
-                    >
-                      矩阵视图
-                    </button>
-                    <button 
-                      onClick={() => setMatrixViewMode('list')}
-                      className={`px-3 py-1 rounded-full text-[9px] font-black transition-all ${matrixViewMode === 'list' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}
-                    >
-                      列表视图
-                    </button>
-                  </div>
+
                 </div>
              </div>
              <div className="space-y-8">
@@ -1045,7 +1032,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                       <span className="w-1.5 h-1.5 rounded-full bg-blue-500 mr-2"></span>
                       {center} <span className="ml-2 text-[9px] bg-slate-100 px-2 py-0.5 rounded-full font-mono">{centerUsers.length}</span>
                     </h5>
-                    {matrixViewMode === 'matrix' ? (
+                    
                       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                         {centerUsers.map((u) => {
                           const isInactive = u.userStatus === 'inactive';
@@ -1156,7 +1143,6 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                           </table>
                         </div>
                       </div>
-                    )}
                   </div>
                 ))})()}
              </div>

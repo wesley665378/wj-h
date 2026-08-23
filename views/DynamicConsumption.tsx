@@ -11,6 +11,7 @@ import { isProjectWritable, deriveProjectStatus } from '../src/utils/projectStat
 import { syncWorkspace } from '../src/services/api';
 import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
+import { calculateConsumptionMirrorFields } from '../src/utils/business';
 import {
   getInitialRevenueCapacity,
   getInitialValueCapacity,
@@ -429,28 +430,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
   const exportToExcel = () => {
     const dataToExport = consumptionLogs.map(log => {
-      const res = resources.find(r => r.id === log.miningId);
-      
-      const resLogs = logs.filter(l => l.miningId === log.miningId && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved));
-      const hedgeInfo = res ? calculateHedgeCapacitiesAndWeights(res, resLogs) : null;
-      
-      const cWeight = log.costCategory === 'C' ? (hedgeInfo ? parseFloat(hedgeInfo.cWeightRev.toFixed(4)) : 1) : '-';
-      const b2Weight = (log.costCategory === 'B' && log.valueConsumptionMode === 'B2') ? (hedgeInfo ? parseFloat(hedgeInfo.b2Weight.toFixed(4)) : 1) : '-';
-
-      let colH = "-";
-      if (hedgeInfo) {
-        colH = `${Math.round(hedgeInfo.revInitial)} / ${Math.round(hedgeInfo.revCurrent)}`;
-      }
-
-      let colI = "-";
-      if (hedgeInfo) {
-        colI = `${Math.round(hedgeInfo.valInitial)} / ${Math.round(hedgeInfo.valCurrent)}`;
-      }
-
-      let colL = "-";
-      if (hedgeInfo) {
-        colL = `${Math.round(hedgeInfo.valInitial)} / ${Math.round(hedgeInfo.valCurrent)}`;
-      }
+      const { cWeightValue, b2WeightValue, revLimitStr, valLimitCStr, valLimitB2Str } = calculateConsumptionMirrorFields(log, resources, logs);
 
       return {
         '申报编号': log.id,
@@ -461,13 +441,13 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
         '采集主体': users.find(u => u.id === log.recordedCollectorId)?.name || log.recordedCollectorId,
         'A': log.costCategory === 'A' ? Math.round(log.dynamicCost) : 0,
         'C': log.costCategory === 'C' ? Math.round(log.dynamicCost) : 0,
-        'C权': cWeight,
-        '款初/款当': colH,
-        '产初/产当': colI,
+        'C权': cWeightValue,
+        '款初/款当': revLimitStr,
+        '产初/产当': valLimitCStr,
         'B1': (log.costCategory === 'B' && log.valueConsumptionMode === 'B1') ? Math.round(log.dynamicCost) : 0,
         'B2': (log.costCategory === 'B' && log.valueConsumptionMode === 'B2') ? Math.round(log.dynamicCost) : 0,
-        'B2权': b2Weight,
-        '产初/产当 ': colL,
+        'B2权': b2WeightValue,
+        '产初/产当 ': valLimitB2Str,
         '确权日期': log.confirmedAt ? new Date(log.confirmedAt).toLocaleString() : '-',
         '确权状态': log.status === AuditStatus.Approved ? '已入库' : log.status
       };
@@ -973,49 +953,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
             </thead>
             <tbody className="divide-y divide-slate-50">
               {consumptionLogs.map(log => {
-                const res = resources.find(r => r.id === log.miningId);
-                
-                // Calculate C Weight
-                const getCWeight = (l: ValueCreationLog) => {
-                  if (!res) return 1;
-                  return l.category === RefineCategory.Revenue 
-                    ? getCWeightRevenue(res, logs) 
-                    : getCWeightValue(res, logs);
-                };
-                
-                const cWeightValue = log.costCategory === 'C' ? getCWeight(log).toFixed(4) : '-';
-
-                // H: Initial vs Updated Revenue Limit (C)
-                let revLimitStr = "-";
-                if (res) {
-                  const initialRev = getInitialRevenueCapacity(res);
-                  const currentRev = getCurrentRevenueCapacity(res);
-                  revLimitStr = `${Math.round(initialRev).toLocaleString()} / ${Math.round(currentRev).toLocaleString()}`;
-                }
-
-                // I: Initial vs Updated Value Limit (C)
-                let valLimitCStr = "-";
-                if (res) {
-                  const initialVal = getInitialValueCapacity(res);
-                  const currentVal = getCurrentValueCapacity(res);
-                  valLimitCStr = `${Math.round(initialVal).toLocaleString()} / ${Math.round(currentVal).toLocaleString()}`;
-                }
-
-                // Calculate B2 Weight based on C-adjusted capacity
-                const getB2Weight = () => {
-                  if (!res) return 1;
-                  return getB2WeightValue(res, logs);
-                };
-
-                const b2WeightValue = (log.costCategory === 'B' && log.valueConsumptionMode === 'B2') ? getB2Weight().toFixed(4) : '-';
-
-                // L: Initial vs Updated Value Limit (B2) with both C and B2 subtracted
-                let valLimitB2Str = "-";
-                if (res) {
-                  const initialVal = getInitialValueCapacity(res);
-                  const currentVal = getCurrentValueCapacity(res);
-                  valLimitB2Str = `${Math.round(initialVal).toLocaleString()} / ${Math.round(currentVal).toLocaleString()}`;
-                }
+                const { cWeightValue, b2WeightValue, revLimitStr, valLimitCStr, valLimitB2Str } = calculateConsumptionMirrorFields(log, resources, logs);
 
                 return (
                   <tr key={log.id} className="hover:bg-rose-50/30 transition-colors group">

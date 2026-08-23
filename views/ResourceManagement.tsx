@@ -58,6 +58,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
   const isAdmin = user.role === Role.Admin || user.category === '系统管理员';
   const canQuery = isAdmin || isNpcxie;
   const [selectedUnitFilter, setSelectedUnitFilter] = useState<string>('');
+  const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
 
   const isDepleted = useMemo(() => {
     if (!editingId) return false;
@@ -896,6 +897,20 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8 mb-12">
            <div className="flex items-center space-x-4">
              <h3 className="text-2xl font-black text-slate-900 tracking-tighter uppercase">矿山资源监控实时面板</h3>
+             <div className="flex items-center space-x-1 bg-slate-100 p-0.5 rounded-full border border-slate-200/80">
+               <button 
+                 onClick={() => setViewMode('card')}
+                 className={`px-3 py-1 rounded-full text-[9px] font-black transition-all ${viewMode === 'card' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}
+               >
+                 网格卡片
+               </button>
+               <button 
+                 onClick={() => setViewMode('list')}
+                 className={`px-3 py-1 rounded-full text-[9px] font-black transition-all ${viewMode === 'list' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}
+               >
+                 列表视图
+               </button>
+             </div>
              <button 
                onClick={exportToExcel}
                className="px-4 py-2 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all flex items-center shadow-sm"
@@ -934,7 +949,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
 
         {resources.length === 0 ? (
           <div className="text-center py-20 text-slate-300 font-black uppercase text-xs tracking-widest">暂无矿山资源</div>
-        ) : (
+        ) : viewMode === 'card' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 lg:gap-8">
             {resources.map(res => {
               const quadrants = aggregateMiningQuadrantsFromLogs(logs, resources, res.id);
@@ -1034,6 +1049,89 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                 </div>
               );
             })}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50">
+                  <th className="p-4 rounded-l-2xl">矿山编号 / 状态</th>
+                  <th className="p-4">提炼类型</th>
+                  <th className="p-4">收款流进度</th>
+                  <th className="p-4">产值流进度</th>
+                  <th className="p-4">指派归属</th>
+                  <th className="p-4 rounded-r-2xl text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-xs font-bold text-slate-700">
+                {resources.map(res => {
+                  const quadrants = aggregateMiningQuadrantsFromLogs(logs, resources, res.id);
+                  const rev = quadrants.revenue;
+                  const val = quadrants.value;
+                  const revTotalCap = (rev.capacity || 0) + (rev.mined || 0) || 1;
+                  const revPctText = (((rev.confirmed + rev.pending + rev.mined) / revTotalCap) * 100).toFixed(1);
+                  const valTotalCap = (val.capacity || 0) + (val.mined || 0) || 1;
+                  const valPctText = (((val.confirmed + val.pending + val.mined) / valTotalCap) * 100).toFixed(1);
+
+                  return (
+                    <tr key={res.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-4">
+                        <div className="font-mono font-black text-slate-900 flex items-center space-x-2">
+                          <span>{res.id}</span>
+                          {res.isPaused && <Badge variant="error" className="scale-75 origin-left">熔断</Badge>}
+                        </div>
+                        <div className="mt-1"><ProjectStatusBadge resource={res} /></div>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex flex-wrap gap-1">
+                          {res.types.map(t => (
+                            <Badge key={t} variant="info">{t}</Badge>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="w-36 space-y-1">
+                          <div className="flex justify-between text-[9px] font-mono font-bold text-amber-600">
+                            <span>收款</span>
+                            <span>{revPctText}%</span>
+                          </div>
+                          <div className="flex h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
+                            <div style={{ width: `${(rev.pending / revTotalCap) * 100}%` }} className="bg-amber-400 h-full" />
+                            <div style={{ width: `${(rev.confirmed / revTotalCap) * 100}%` }} className="bg-emerald-500 h-full" />
+                            <div style={{ width: `${(rev.mined / revTotalCap) * 100}%` }} className="bg-blue-500 h-full" />
+                          </div>
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="w-36 space-y-1">
+                          <div className="flex justify-between text-[9px] font-mono font-bold text-emerald-600">
+                            <span>产值</span>
+                            <span>{valPctText}%</span>
+                          </div>
+                          <div className="flex h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
+                            <div style={{ width: `${(val.pending / valTotalCap) * 100}%` }} className="bg-amber-400 h-full" />
+                            <div style={{ width: `${(val.confirmed / valTotalCap) * 100}%` }} className="bg-emerald-500 h-full" />
+                            <div style={{ width: `${(val.mined / valTotalCap) * 100}%` }} className="bg-blue-500 h-full" />
+                          </div>
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="text-[11px] space-y-0.5">
+                          <div><span className="text-amber-600 font-black">收:</span> {res.assignedToRevenue || res.assignedTo}</div>
+                          <div><span className="text-emerald-600 font-black">产:</span> {res.assignedToValue || res.assignedTo}</div>
+                        </div>
+                      </td>
+                      <td className="p-4 text-right">
+                        <div className="flex items-center justify-end space-x-2">
+                          <button onClick={() => handleEdit(res)} className="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-600 hover:text-white transition-all text-[11px] font-bold">编辑</button>
+                          <button onClick={() => handleDelete(res.id)} className="px-2.5 py-1 bg-red-50 text-red-600 rounded-lg hover:bg-red-600 hover:text-white transition-all text-[11px] font-bold">移除</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </Card>
