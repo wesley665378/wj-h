@@ -125,6 +125,7 @@ interface ValueCreationProps {
   onAddCircuitBreaker?: (cb: CircuitBreaker) => void;
   quotaSnapshots?: Record<string, QuotaSnapshot>;
   processingLogIds?: Set<string>;
+  persistWorkspaceWithOverrides?: (overrides?: { logs?: ValueCreationLog[] }) => Promise<void>;
 }
 
 type TimePeriod = 'monthly' | 'quarterly' | 'yearly';
@@ -138,7 +139,7 @@ export const tierDisplayMap: Record<string, { name: string, desc: string }> = {
 
 const ValueCreation: React.FC<ValueCreationProps> = ({ 
   user, users = [], resources, logs, onLogSubmit, transactions = [], onConfirmTransaction, circuitBreakers = [], onAddCircuitBreaker,
-  quotaSnapshots = {}, processingLogIds = new Set()
+  quotaSnapshots = {}, processingLogIds = new Set(), persistWorkspaceWithOverrides
 }) => {
   const miningReconciliations = useMemo(() => reconcileMiningLogs(logs, resources), [logs, resources]);
 
@@ -878,8 +879,13 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
     if (logsToSubmit.length > 0) {
       onLogSubmit(logsToSubmit);
+      const nextLogs = [...(logs ?? []), ...logsToSubmit];
       try {
-        await syncWorkspace({ logs: [...logs, ...logsToSubmit] });
+        if (persistWorkspaceWithOverrides) {
+          await persistWorkspaceWithOverrides({ logs: nextLogs });
+        } else {
+          await syncWorkspace({ logs: nextLogs });
+        }
         showAlert(`提报指令提交成功并已落库！共提交 ${logsToSubmit.length} 条数据，预审中...`);
       } catch (err) {
         showAlert('提报落库失败，请稍后重试');

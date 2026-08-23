@@ -47,10 +47,11 @@ interface DynamicConsumptionProps {
   jzczLogs?: ValueCreationLog[];
   dtcbLogs?: ValueCreationLog[];
   onLogSubmit: (log: ValueCreationLog | ValueCreationLog[]) => void;
+  persistWorkspaceWithOverrides?: (overrides?: { logs?: ValueCreationLog[] }) => Promise<void>;
 }
 
 const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({ 
-  user, users, resources, logs, jzczLogs, dtcbLogs, onLogSubmit 
+  user, users, resources, logs, jzczLogs, dtcbLogs, onLogSubmit, persistWorkspaceWithOverrides 
 }) => {
   const { isCostVisible, toggleCostVisible, maskMoney, maskText } = useCostPrivacy();
 
@@ -353,8 +354,15 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
         onLogSubmit(newLog);
         setDynamicCost(0);
+        const nextJzcz = [...jzczLogsToUse, newLog];
+        const nextDtcb = dtcbLogsToUse;
+        const mergedLogs = [...(nextJzcz ?? []), ...(nextDtcb ?? [])];
         try {
-          await syncWorkspace({ logs: [...logs, newLog] });
+          if (persistWorkspaceWithOverrides) {
+            await persistWorkspaceWithOverrides({ logs: mergedLogs });
+          } else {
+            await syncWorkspace({ logs: mergedLogs });
+          }
           showAlert(`[${categoryLabel}] 动态消耗申报成功并写入数据库！`);
         } catch (err) {
           showAlert('动态消耗申报写库失败：' + ((err as Error).message || '网络问题'));
@@ -401,8 +409,14 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
         onLogSubmit(deductionLog);
         setDeductionAmount(0);
+        const nextDtcb = [...dtcbLogsToUse.filter((l) => l.id !== deductionLog.id), deductionLog];
+        const mergedLogs = [...(jzczLogsToUse ?? []), ...nextDtcb];
         try {
-          await syncWorkspace({ logs: [...logs, deductionLog] });
+          if (persistWorkspaceWithOverrides) {
+            await persistWorkspaceWithOverrides({ logs: mergedLogs });
+          } else {
+            await syncWorkspace({ logs: mergedLogs });
+          }
           showAlert('非有效工时对冲申请成功并落库，等待审核冲抵刚性工资包。');
         } catch (err) {
           showAlert('对冲申请写库失败，请重试');

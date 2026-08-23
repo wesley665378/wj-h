@@ -298,14 +298,20 @@ const App: React.FC = () => {
     users?: User[];
     circuitBreakers?: CircuitBreaker[];
     meetingSamples?: MeetingSample[];
+    acceptanceRecords?: AcceptanceRecord[];
   }) => {
     if (!currentUser) return;
+    if (!workspaceLoaded) {
+      toast.error('工作区尚未加载完成，请稍后再试');
+      return;
+    }
     const nextUsers = overrides?.users ?? managedUsers;
     const nextLogs = overrides?.logs ?? logs;
     const nextTxs = overrides?.transactions ?? transactions;
     const nextRes = overrides?.miningResources ?? miningResources;
     const nextCBs = overrides?.circuitBreakers ?? circuitBreakers;
     const nextSamples = overrides?.meetingSamples ?? meetingSamples;
+    const nextAcc = overrides?.acceptanceRecords ?? acceptanceRecords;
 
     const dtcbLogs = nextLogs.filter(l => l.confirmationType === '手动确权');
     const jzczLogs = nextLogs.filter(l => l.confirmationType !== '手动确权');
@@ -323,7 +329,7 @@ const App: React.FC = () => {
           transactions: nextTxs,
           miningResources: nextRes,
           valueEfficiencySnapshots: snapshots,
-          acceptanceRecords,
+          acceptanceRecords: nextAcc,
           jzfp: jzfpSnapshots,
           circuitBreakers: nextCBs,
           rdq: nextCBs,
@@ -333,7 +339,7 @@ const App: React.FC = () => {
     } catch (err) {
       console.error('Data sync error:', err);
     }
-  }, [currentUser, managedUsers, logs, transactions, miningResources, circuitBreakers, meetingSamples, filterMonth, acceptanceRecords]);
+  }, [currentUser, workspaceLoaded, managedUsers, logs, transactions, miningResources, circuitBreakers, meetingSamples, filterMonth, acceptanceRecords]);
 
   const persistWorkspaceNow = React.useCallback(async () => {
     await persistWorkspaceWithOverrides();
@@ -781,14 +787,26 @@ const App: React.FC = () => {
       return;
     }
 
-    const savedResources = localStorage.getItem('shihe_resources');
-    if (savedResources) setMiningResources(JSON.parse(savedResources));
+    try {
+      const savedResources = localStorage.getItem('shihe_resources');
+      if (savedResources) setMiningResources(JSON.parse(savedResources));
+    } catch (e) {
+      console.warn('Failed to parse shihe_resources from localStorage', e);
+    }
 
-    const savedTransactions = localStorage.getItem('shihe_transactions');
-    if (savedTransactions) setTransactions(JSON.parse(savedTransactions));
+    try {
+      const savedTransactions = localStorage.getItem('shihe_transactions');
+      if (savedTransactions) setTransactions(JSON.parse(savedTransactions));
+    } catch (e) {
+      console.warn('Failed to parse shihe_transactions from localStorage', e);
+    }
 
-    const savedSystemLogs = localStorage.getItem('shihe_system_logs');
-    if (savedSystemLogs) setSystemLogs(JSON.parse(savedSystemLogs));
+    try {
+      const savedSystemLogs = localStorage.getItem('shihe_system_logs');
+      if (savedSystemLogs) setSystemLogs(JSON.parse(savedSystemLogs));
+    } catch (e) {
+      console.warn('Failed to parse shihe_system_logs from localStorage', e);
+    }
   }, [onClearTestData]);
 
   // 3. 数据持久化与后端同步 (去抖动)
@@ -1046,7 +1064,8 @@ const App: React.FC = () => {
         onAuditTransaction,
         onAddCircuitBreaker,
         quotaSnapshots,
-        processingLogIds
+        processingLogIds,
+        persistWorkspaceWithOverrides
       },
       consumption: { 
         user: currentUser, 
@@ -1055,7 +1074,8 @@ const App: React.FC = () => {
         logs: filteredLogs, 
         jzczLogs: filteredLogs.filter(l => l.confirmationType !== '手动确权'),
         dtcbLogs: filteredLogs.filter(l => l.confirmationType === '手动确权'),
-        onLogSubmit: onConsumptionSubmit 
+        onLogSubmit: onConsumptionSubmit,
+        persistWorkspaceWithOverrides
       },
       audit: { 
         user: currentUser, 
@@ -1134,7 +1154,13 @@ const App: React.FC = () => {
         resources: filteredResources, 
         onSubmitTransaction,
         acceptanceRecords,
-        onAddAcceptanceRecord: (rec: AcceptanceRecord) => setAcceptanceRecords(prev => [...prev, rec])
+        onAddAcceptanceRecord: (rec: AcceptanceRecord) => {
+          setAcceptanceRecords(prev => {
+            const next = [...prev, rec];
+            void persistWorkspaceWithOverrides({ acceptanceRecords: next });
+            return next;
+          });
+        }
       },
       account: { currentUser, logs: filteredLogs, transactions, resources: filteredResources, users: filteredUsers },
       personnel: { 
@@ -1150,7 +1176,7 @@ const App: React.FC = () => {
   }, [filteredLogs, auditLogs, filteredResources, filteredUsers, managedUsers, businessUnits, transactions, currentUser, systemLogs, currentTime, 
        onSystemAdjustment, onLogSubmit, onConsumptionSubmit, processAudit, onSubmitTransaction, 
        onAuditTransaction, onAddResource, onUpdateResource, onDeleteResource, onUpdateUsers, onClearTestData,
-       circuitBreakers, onAddCircuitBreaker, onRecoverCircuitBreaker]);
+       circuitBreakers, onAddCircuitBreaker, onRecoverCircuitBreaker, persistWorkspaceWithOverrides]);
 
   const components = useMemo(() => {
     if (!currentUser) return {} as any;

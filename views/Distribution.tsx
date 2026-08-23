@@ -12,7 +12,7 @@ import { resolveLogBusinessMonth, getLocalMonthString, getLocalDateString, resol
 import { formatAmount, formatRatio, formatPercent } from "../src/utils/formatters";
 import { InfoTip } from "../src/components/InfoTip";
 import { BusinessDateFilter } from "../src/components/BusinessDateFilter";
-import { fetchDistributionData, syncWorkspace, createCdtzRecord } from "../src/services/api";
+import { fetchDistributionData, createCdtzRecord } from "../src/services/api";
 import {
   ValueCreationLog,
   AuditStatus,
@@ -204,10 +204,6 @@ const Distribution: React.FC<DistributionProps> = ({
           status: '已承兑',
           operatorId: currentUser.id
         };
-
-        if (onAddAcceptanceRecord) {
-          onAddAcceptanceRecord(newRecord);
-        }
 
         try {
           await createCdtzRecord(newRecord);
