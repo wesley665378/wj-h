@@ -311,7 +311,7 @@ const SystemInstructions: React.FC = () => {
                 <span className="font-black text-slate-900 text-sm">款专 2% 专项金库</span>
               </div>
               <p className="text-slate-500 text-xs font-bold leading-relaxed">
-                针对分类或职责标为高级<strong>「款专」</strong>的用户行，实时穿透汇总所有由其在资源中负责的矿山（`assignedToRevenue` 为其 ID）名下的收款 2% 专项累计余额。并于行内高亮呈递“收款2%金库：￥{'{coll2_Sum}'}”的高对比度暗绿色徽标。
+                针对分类或职责标为高级<strong>「款专」</strong>的用户行，实时穿透汇总所有由其在资源中负责的矿山（`assignedToRevenue` 为其 ID）名下的收款 2% 专项累计余额。并于行内高亮呈递“收款2%金库：{'{coll2_Sum}'}”的高对比度暗绿色徽标。
               </p>
             </div>
 
@@ -321,7 +321,7 @@ const SystemInstructions: React.FC = () => {
                 <span className="font-black text-slate-900 text-sm">产专 5% 专项蓄水池</span>
               </div>
               <p className="text-slate-500 text-xs font-bold leading-relaxed">
-                针对分类或职责标为高级<strong>「产专」</strong>的用户行，实时汇总该专家管理的矿山（`assignedToValue` 为其 ID）名下的 5% 产值专项包余额。于分配行内呈现“产值5%蓄水：￥{'{out5_Sum}'}”的精美琥珀色微章，控制手动超标派发。
+                针对分类或职责标为高级<strong>「产专」</strong>的用户行，实时汇总该专家管理的矿山（`assignedToValue` 为其 ID）名下的 5% 产值专项包余额。于分配行内呈现“产值5%蓄水：{'{out5_Sum}'}”的精美琥珀色微章，控制手动超标派发。
               </p>
             </div>
           </div>

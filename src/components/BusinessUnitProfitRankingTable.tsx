@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { User, ValueCreationLog, MiningResource, InternalTransaction } from '../../types';
 import { computeBusinessUnitProfitRanking, UnitRankingRow } from '../utils/businessUnitProfitRanking';
 import { useCostPrivacy } from '../hooks/useCostPrivacy';
+import { formatMoney } from '../utils/formatMoney';
 import { Card } from './UI';
 import { Trophy, ChevronDown, ChevronUp, Eye, EyeOff, Info } from 'lucide-react';
 
@@ -68,7 +69,7 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
     if (isCostField) {
       return maskMoney(val);
     }
-    return val.toLocaleString();
+    return formatMoney(val);
   };
 
   return (

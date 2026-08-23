@@ -6,7 +6,6 @@ import {
   Cell, Legend, CartesianGrid, PieChart, Pie 
 } from 'recharts';
 import { Card, ProgressBar } from '../src/components/UI';
-import StandardModal from '../src/components/StandardModal';
 import * as XLSX from 'xlsx';
 import { UI_LABELS } from '../src/constants/uiLabels';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
@@ -131,15 +130,6 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   const [filterDateRange, setFilterDateRange] = useState({ start: '', end: '' });
   const [selectedTx, setSelectedTx] = useState<InternalTransaction | null>(null);
   const [selectedTxIds, setSelectedTxIds] = useState<string[]>([]);
-  const [showConfirmModal, setShowConfirmModal] = useState<{ 
-    show: boolean, 
-    txId?: string, 
-    batch?: boolean, 
-    action?: 'approve' | 'reject' | 'return' | 'modify' | 'withdraw' | 'agree',
-    title?: string,
-    message?: string,
-    onConfirm?: () => void
-  }>({ show: false });
   
   // 修改交易时的临时状态
   const [modifyingTx, setModifyingTx] = useState<InternalTransaction | null>(null);
@@ -395,7 +385,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
 
       if (totalRevenue > initialRev || totalValue > initialVal) {
         recordFailure(currentUser.id, currentUser.name, `矿山[${miningId}]资源超限`, 'resource_limit_exceeded');
-        showAlert(`交易失败：矿山[${miningId}]资源超限。当前款初: ${initialRev.toLocaleString()}, 产初: ${initialVal.toLocaleString()}`);
+        showAlert(`交易失败：矿山[${miningId}]资源超限。当前款初: ${Math.round(initialRev)}, 产初: ${Math.round(initialVal)}`);
         return;
       }
     }
@@ -511,7 +501,6 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
         };
         onSubmitTransaction(updatedTx);
         setModifyingTx(null);
-        setShowConfirmModal({ show: false });
         showAlert(`交易 [${modifyingTx.id}] 已修改并重新提交发起方验证！`);
         return;
       }
@@ -591,13 +580,11 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
 
       onAuditTransaction(tx.id, nextStatus, updatedResource);
       showAlert(`交易 [${tx.id}] 确认成功！${updatedResource ? `矿山 [${tx.miningId}] 已同步指派给 [${userList.find(u => u.id === tx.receiverId)?.center || '接收单元'}]。` : ''}`);
-      setShowConfirmModal({ show: false });
       return;
     }
 
     onAuditTransaction(tx.id, nextStatus);
     showAlert(`交易 [${tx.id}] 状态更新成功！`);
-    setShowConfirmModal({ show: false });
   };
 
   const handleBatchAudit = async (action: 'approve' | 'reject' | 'return' | 'modify' | 'withdraw' | 'agree') => {
@@ -607,8 +594,33 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     }
     const count = selectedTxIds.length;
     setSelectedTxIds([]);
-    setShowConfirmModal({ show: false });
     showAlert(`批量操作完成！共处理 ${count} 条交易指令。`);
+  };
+
+  const handleOpenConfirmModal = (modal: { 
+    show?: boolean; 
+    txId?: string; 
+    batch?: boolean; 
+    action?: 'approve' | 'reject' | 'return' | 'modify' | 'withdraw' | 'agree';
+    title?: string;
+    message?: string;
+    onConfirm?: () => void;
+  }) => {
+    if (!modal || modal.show === false) return;
+    const msg = modal.message || '您确定要执行此操作吗？此操作可能无法撤销。';
+    showConfirm(
+      msg,
+      () => {
+        if (modal.onConfirm) {
+          modal.onConfirm();
+        } else if (modal.batch && modal.action) {
+          handleBatchAudit(modal.action);
+        } else if (modal.txId && modal.action) {
+          const tx = transactions.find(t => t.id === modal.txId);
+          if (tx) handleAudit(tx, modal.action);
+        }
+      }
+    );
   };
 
   const startModify = (tx: InternalTransaction) => {
@@ -1214,7 +1226,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
           setModRevenueAmount={setModRevenueAmount}
           modValueAmount={modValueAmount}
           setModValueAmount={setModValueAmount}
-          setShowConfirmModal={setShowConfirmModal}
+          setShowConfirmModal={handleOpenConfirmModal}
           selectedTxIds={selectedTxIds}
           setSelectedTxIds={setSelectedTxIds}
           exportToExcel={exportToExcel}
@@ -1462,47 +1474,6 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
         </div>
       )}
 
-      {/* 二次确认对话框 */}
-      <StandardModal
-        isOpen={!!showConfirmModal.show}
-        onClose={() => setShowConfirmModal({ show: false })}
-        title="城市守护者"
-        subtitle="内部交易状态流转与审核确权"
-        maxWidthClassName="max-w-md"
-      >
-        <div className="p-6 text-center bg-white">
-          <div className="w-20 h-20 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-6">
-            <span className="text-4xl">⚠️</span>
-          </div>
-          <p className="text-slate-500 font-bold leading-relaxed mb-8">
-            {showConfirmModal.message || '您确定要执行此操作吗？此操作可能无法撤销。'}
-          </p>
-          <div className="grid grid-cols-2 gap-4">
-            <button
-              onClick={() => setShowConfirmModal({ show: false })}
-              className="py-4 rounded-2xl border border-slate-200 text-slate-500 font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-all focus:outline-none"
-            >
-              取消
-            </button>
-            <button
-              onClick={() => {
-                if (showConfirmModal.onConfirm) {
-                  showConfirmModal.onConfirm();
-                } else if (showConfirmModal.txId && showConfirmModal.action) {
-                  const tx = transactions.find(t => t.id === showConfirmModal.txId);
-                  if (tx) handleAudit(tx, showConfirmModal.action);
-                } else if (showConfirmModal.batch && showConfirmModal.action) {
-                  handleBatchAudit(showConfirmModal.action);
-                }
-                setShowConfirmModal({ show: false });
-              }}
-              className="py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest bg-indigo-600 text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all focus:outline-none"
-            >
-              确认执行
-            </button>
-          </div>
-        </div>
-      </StandardModal>
       <CityGuardianModal state={modalState} onClose={closeModal} />
     </div>
   );

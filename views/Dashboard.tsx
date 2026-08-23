@@ -23,6 +23,7 @@ import {
   sumIncomeProductionPackage 
 } from '../src/utils/reconcileMiningFromLogs';
 import { getLocalMonthString, resolveLogBusinessMonth, getLocalDateString } from '../src/utils/dateUtils';
+import { formatMoney, roundMoney } from '../src/utils/formatMoney';
 
 interface DashboardProps {
   logs: ValueCreationLog[];
@@ -1049,9 +1050,9 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
           </div>
           <div className="flex items-end gap-2">
             <span className="text-3xl font-black tracking-tighter text-slate-900">
-              <span className="text-lg mr-1 opacity-50"></span>{displayReservoirInflow.toLocaleString()}
+              <span className="text-lg mr-1 opacity-50"></span>{formatMoney(displayReservoirInflow)}
             </span>
-            <span className="text-[10px] font-bold text-slate-400 mb-1">/ {displayTotalRigidExpenses.toLocaleString()}</span>
+            <span className="text-[10px] font-bold text-slate-400 mb-1">/ {formatMoney(displayTotalRigidExpenses)}</span>
           </div>
           <div className="mt-4 h-1.5 bg-slate-100 rounded-full overflow-hidden relative">
             <div 
@@ -1060,7 +1061,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
             />
             <div className="absolute top-0 left-[100%] w-px h-full bg-rose-500 z-10" title="盈亏平衡线"></div>
           </div>
-          <p className="mt-2 text-[9px] font-bold text-slate-400 italic">离“核心均衡”还有 {Math.max(0, displayReservoirInflow - displayTotalRigidExpenses).toLocaleString()} 额度</p>
+          <p className="mt-2 text-[9px] font-bold text-slate-400 italic">离“核心均衡”还有 {formatMoney(Math.max(0, displayReservoirInflow - displayTotalRigidExpenses))} 额度</p>
         </Card>
 
       </div>
@@ -1384,22 +1385,22 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
               <div className="water-pool text-white shadow-lg w-[24%] h-32" style={{ background: 'linear-gradient(135deg, #a855f7, #7e22ce)', left: '44%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-1s' }}>
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none whitespace-nowrap">统筹池</h4>
-                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{displayPlatformCoordinationPool.toLocaleString()}</div>
+                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{formatMoney(displayPlatformCoordinationPool)}</div>
               </div>
 
               {/* 1. 收产包 (Top Left) */}
               <div className="water-pool text-white shadow-lg w-[24%] h-36" style={{ background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', left: '18%', top: '25%', transform: 'translate(-50%, -50%)', animationDelay: '0s' }}>
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-0.5 relative z-10 drop-shadow-md leading-none">收产包</h4>
-                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md border-b border-blue-400/50 pb-0.5 mb-1 w-[95%] leading-none text-center">{displayIncomeWaterPool.toLocaleString()}</div>
+                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md border-b border-blue-400/50 pb-0.5 mb-1 w-[95%] leading-none text-center">{formatMoney(displayIncomeWaterPool)}</div>
                 <div className="grid grid-cols-2 gap-1 relative z-10 w-[95%] text-[8px] md:text-[9px]">
                   <div className="bg-amber-500/20 px-1 py-0.5 rounded flex flex-col items-center">
                     <span className="font-bold">收款包</span>
-                    <span className="font-mono">{displayRevenueWater.toLocaleString()}</span>
+                    <span className="font-mono">{formatMoney(displayRevenueWater)}</span>
                   </div>
                   <div className="bg-emerald-500/20 px-1 py-0.5 rounded flex flex-col items-center">
                     <span className="font-bold">产兑包</span>
-                    <span className="font-mono">{displayValueWater.toLocaleString()}</span>
+                    <span className="font-mono">{formatMoney(displayValueWater)}</span>
                   </div>
                 </div>
               </div>
@@ -1446,14 +1447,14 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
               <div className="water-pool text-white shadow-lg w-[24%] h-32" style={{ background: 'linear-gradient(135deg, #10b981, #047857)', left: '82%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-3s' }}>
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none">奖金池</h4>
-                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{displayTotalBonusPool.toLocaleString()}</div>
+                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{formatMoney(displayTotalBonusPool)}</div>
               </div>
 
               {/* 4. 承兑池 (Bottom Right) */}
               <div className="water-pool text-white shadow-lg w-[24%] h-32" style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)', left: '82%', top: '85%', transform: 'translate(-50%, -50%)', animationDelay: '-4s' }}>
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none">承兑池</h4>
-                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{displayTotalBonusPool.toLocaleString()}</div>
+                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{formatMoney(displayTotalBonusPool)}</div>
               </div>
 
               {/* 5. 分红池 (Bottom Left) */}
@@ -1461,10 +1462,10 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none">分红池</h4>
                 <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md border-b border-white/20 pb-0.5 mb-1 w-[90%] leading-none text-center">
-                  {displayDividendPool.toLocaleString()}
+                  {formatMoney(displayDividendPool)}
                 </div>
                 <div className={`text-[8px] font-bold ${waterMetrics.fhctzCost > 0 ? 'text-amber-300' : 'text-white/40'} relative z-10 uppercase tracking-tighter`}>
-                  {`统筹补足(fhctz): ${waterMetrics.fhctzCost.toLocaleString()}`}
+                  {`统筹补足(fhctz): ${formatMoney(waterMetrics.fhctzCost)}`}
                 </div>
               </div>
 
@@ -1503,11 +1504,11 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-2 border-t border-slate-50">
                               <div className="flex justify-between items-center">
                                 <span className="text-[9px] text-slate-500">产值初限</span>
-                                <span className="text-[9px] font-bold text-slate-700">{Math.round(c.valueLimit).toLocaleString()}</span>
+                                <span className="text-[9px] font-bold text-slate-700">{formatMoney(c.valueLimit)}</span>
                               </div>
                               <div className="flex justify-between items-center">
                                 <span className="text-[9px] text-slate-500">收款初限</span>
-                                <span className="text-[9px] font-bold text-slate-700">{Math.round(c.revenueLimit).toLocaleString()}</span>
+                                <span className="text-[9px] font-bold text-slate-700">{formatMoney(c.revenueLimit)}</span>
                               </div>
                             </div>
 
@@ -1532,7 +1533,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                                         <Info size={10} className="text-blue-300 cursor-help" />
                                       </InfoTip>
                                     </div>
-                                    <span className="text-xs font-black text-blue-900 leading-none mt-1">{Math.round(c.value5Percent).toLocaleString()}</span>
+                                    <span className="text-xs font-black text-blue-900 leading-none mt-1">{formatMoney(c.value5Percent)}</span>
                                   </div>
                                   <div className="flex flex-col border-l border-blue-100 pl-3">
                                     <div className="flex items-center gap-1">
@@ -1546,7 +1547,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                                       </InfoTip>
                                     </div>
                                     <div className="flex items-baseline gap-1.5 mt-1">
-                                      <span className="text-xs font-black text-blue-900 leading-none">{Math.round(c.revenue2Percent).toLocaleString()}</span>
+                                      <span className="text-xs font-black text-blue-900 leading-none">{formatMoney(c.revenue2Percent)}</span>
                                     </div>
                                   </div>
                                 </div>
@@ -1784,7 +1785,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                       {Object.entries(unconfirmedValueByReceiver).map(([receiver, amount]) => (
                         <div key={receiver} className="flex justify-between text-[10px] font-bold">
                           <span className="text-slate-600">{receiver}</span>
-                          <span className="text-rose-600">{amount.toLocaleString()}</span>
+                          <span className="text-rose-600">{formatMoney(amount)}</span>
                         </div>
                       ))}
                       {Object.keys(unconfirmedValueByReceiver).length === 0 && (
@@ -1797,24 +1798,24 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                       <div>
                         <div className="flex items-center justify-between mb-3">
                           <span className="text-[10px] font-black text-yellow-700 uppercase tracking-widest"> {UI_LABELS.REVENUE}</span>
-                          <span className="text-[9px] font-bold text-slate-400">款当: {q.revenue.capacity.toLocaleString()}</span>
+                          <span className="text-[9px] font-bold text-slate-400">款当: {formatMoney(q.revenue.capacity)}</span>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div className="bg-white p-3 rounded-2xl border border-slate-200">
                             <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.PENDING}</p>
-                            <p className="text-sm font-black text-amber-600 font-mono">{q.revenue.pending.toLocaleString()}</p>
+                            <p className="text-sm font-black text-amber-600 font-mono">{formatMoney(q.revenue.pending)}</p>
                           </div>
                           <div className="bg-white p-3 rounded-2xl border border-slate-200">
                             <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.CONFIRMED}</p>
-                            <p className="text-sm font-black text-emerald-600 font-mono">{q.revenue.confirmed.toLocaleString()}</p>
+                            <p className="text-sm font-black text-emerald-600 font-mono">{formatMoney(q.revenue.confirmed)}</p>
                           </div>
                           <div className="bg-white p-3 rounded-2xl border border-slate-200 relative">
                             <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.UNCONFIRMED}</p>
-                            <p className="text-sm font-black text-rose-600 font-mono">{q.revenue.unconfirmed.toLocaleString()}</p>
+                            <p className="text-sm font-black text-rose-600 font-mono">{formatMoney(q.revenue.unconfirmed)}</p>
                           </div>
                           <div className="bg-white p-3 rounded-2xl border border-slate-200">
                             <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.MINED}</p>
-                            <p className="text-sm font-black text-blue-600 font-mono">{q.revenue.mined.toLocaleString()}</p>
+                            <p className="text-sm font-black text-blue-600 font-mono">{formatMoney(q.revenue.mined)}</p>
                           </div>
                         </div>
                       </div>
@@ -1823,7 +1824,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                       <div className="flex items-center justify-center py-1 bg-slate-100/50 rounded-xl border border-dashed border-slate-200">
                         <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
                           价值转化缺口: <span className={q.value.confirmed > q.revenue.confirmed ? 'text-rose-500' : 'text-emerald-500'}>
-                            {(q.value.confirmed - q.revenue.confirmed).toLocaleString()}
+                            {formatMoney(q.value.confirmed - q.revenue.confirmed)}
                           </span>
                         </span>
                       </div>
@@ -1832,24 +1833,24 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                       <div>
                         <div className="flex items-center justify-between mb-3">
                           <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest"> {UI_LABELS.VALUE}</span>
-                          <span className="text-[9px] font-bold text-slate-400">产当: {q.value.capacity.toLocaleString()}</span>
+                          <span className="text-[9px] font-bold text-slate-400">产当: {formatMoney(q.value.capacity)}</span>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div className="bg-white p-3 rounded-2xl border border-slate-200">
                             <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.PENDING}</p>
-                            <p className="text-sm font-black text-amber-600 font-mono">{q.value.pending.toLocaleString()}</p>
+                            <p className="text-sm font-black text-amber-600 font-mono">{formatMoney(q.value.pending)}</p>
                           </div>
                           <div className="bg-white p-3 rounded-2xl border border-slate-200">
                             <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.CONFIRMED}</p>
-                            <p className={`text-sm font-black font-mono ${purityInfo.isRed ? 'text-rose-600' : 'text-emerald-600'}`}>{q.value.confirmed.toLocaleString()}</p>
+                            <p className={`text-sm font-black font-mono ${purityInfo.isRed ? 'text-rose-600' : 'text-emerald-600'}`}>{formatMoney(q.value.confirmed)}</p>
                           </div>
                           <div className="bg-white p-3 rounded-2xl border border-slate-200 relative">
                             <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.UNCONFIRMED}</p>
-                            <p className="text-sm font-black text-rose-600 font-mono">{q.value.unconfirmed.toLocaleString()}</p>
+                            <p className="text-sm font-black text-rose-600 font-mono">{formatMoney(q.value.unconfirmed)}</p>
                           </div>
                           <div className="bg-white p-3 rounded-2xl border border-slate-200">
                             <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.MINED}</p>
-                            <p className="text-sm font-black text-blue-600 font-mono">{q.value.mined.toLocaleString()}</p>
+                            <p className="text-sm font-black text-blue-600 font-mono">{formatMoney(q.value.mined)}</p>
                           </div>
                         </div>
                       </div>
@@ -1893,29 +1894,29 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center space-x-2">
-                             <span className="text-xs font-black text-amber-500 font-mono">{q.value.pending.toLocaleString()}</span>
+                             <span className="text-xs font-black text-amber-500 font-mono">{formatMoney(q.value.pending)}</span>
                              <span className="text-slate-200">/</span>
-                             <span className="text-xs font-black text-emerald-600 font-mono">{q.value.confirmed.toLocaleString()}</span>
+                             <span className="text-xs font-black text-emerald-600 font-mono">{formatMoney(q.value.confirmed)}</span>
                              <span className="text-slate-200">/</span>
-                             <span className="text-xs font-black font-mono text-slate-400">{q.value.unconfirmed.toLocaleString()}</span>
+                             <span className="text-xs font-black font-mono text-slate-400">{formatMoney(q.value.unconfirmed)}</span>
                              <span className="text-slate-200">/</span>
-                             <span className="text-xs font-black text-blue-600 font-mono">{q.value.mined.toLocaleString()}</span>
+                             <span className="text-xs font-black text-blue-600 font-mono">{formatMoney(q.value.mined)}</span>
                           </div>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center space-x-2">
-                             <span className="text-xs font-black text-amber-500 font-mono">{q.revenue.pending.toLocaleString()}</span>
+                             <span className="text-xs font-black text-amber-500 font-mono">{formatMoney(q.revenue.pending)}</span>
                              <span className="text-slate-200">/</span>
-                             <span className="text-xs font-black text-emerald-600 font-mono">{q.revenue.confirmed.toLocaleString()}</span>
+                             <span className="text-xs font-black text-emerald-600 font-mono">{formatMoney(q.revenue.confirmed)}</span>
                              <span className="text-slate-200">/</span>
-                             <span className="text-xs font-black text-slate-400 font-mono">{q.revenue.unconfirmed.toLocaleString()}</span>
+                             <span className="text-xs font-black text-slate-400 font-mono">{formatMoney(q.revenue.unconfirmed)}</span>
                              <span className="text-slate-200">/</span>
-                             <span className="text-xs font-black text-blue-600 font-mono">{q.revenue.mined.toLocaleString()}</span>
+                             <span className="text-xs font-black text-blue-600 font-mono">{formatMoney(q.revenue.mined)}</span>
                           </div>
                         </td>
                         <td className="px-6 py-4">
                           <span className={`text-xs font-black font-mono ${q.value.confirmed > q.revenue.confirmed ? 'text-rose-500' : 'text-emerald-500'}`}>
-                            {(q.value.confirmed - q.revenue.confirmed).toLocaleString()}
+                            {formatMoney(q.value.confirmed - q.revenue.confirmed)}
                           </span>
                         </td>
                         <td className="px-6 py-4">

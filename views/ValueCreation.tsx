@@ -46,7 +46,7 @@ import {
   isDateInRange,
   isLogInFilter,
 } from '../src/utils/dateUtils';
-import { formatAmount } from '../src/utils/formatters';
+import { formatAmount, formatMoney, roundMoney } from '../src/utils/formatMoney';
 import { InfoTip } from '../src/components/InfoTip';
 import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
 
@@ -746,7 +746,25 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       // 1. 物理上限校验
       const purifiedTotalAmount = totalAmount;
       if (purifiedTotalAmount > maxAllowed + 0.01) { // 允许 0.01 误差
-        showAlert(`超额限制：本次注入提纯后积分（${Math.round(purifiedTotalAmount).toLocaleString()}）超过了当前最高可提炼量（${Math.round(maxAllowed).toLocaleString()}）。\n\n核算逻辑：预计资源储量上限 - 已确 - 待确 = 最高提炼量。`);
+        const initialCap = selectedCategory === RefineCategory.Value 
+          ? Math.round(getInitialValueCapacity(selectedResource))
+          : Math.round(getInitialRevenueCapacity(selectedResource));
+        const confirmed = selectedCategory === RefineCategory.Value
+          ? Math.round(mineralOccupancy.confirmedValue)
+          : Math.round(mineralOccupancy.confirmedRevenue);
+        const pending = selectedCategory === RefineCategory.Value
+          ? Math.round(mineralOccupancy.pendingValue)
+          : Math.round(mineralOccupancy.pendingRevenue);
+        const mined = selectedCategory === RefineCategory.Value
+          ? Math.round(mineralOccupancy.minedValue)
+          : Math.round(mineralOccupancy.minedRevenue);
+        const maxVal = Math.round(maxAllowed);
+
+        const calcFormula = selectedCategory === RefineCategory.Value
+          ? `产初(${initialCap}) - 已确(${confirmed}) - 待确(${pending}) - 入库(${mined}) = 最高可提炼量(${maxVal})`
+          : `款初(${initialCap}) - 已确(${confirmed}) - 待确(${pending}) - 入库(${mined}) = 最高可提炼量(${maxVal})`;
+
+        showAlert(`超额限制：本次注入提纯后积分（${Math.round(purifiedTotalAmount)}）超过了当前最高可提炼量（${maxVal}）。\n\n核算口径：\n${calcFormula}`);
         return;
       }
       
@@ -813,7 +831,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       if (selectedCategory === RefineCategory.Value && selectedRefineType === RefineType.Outsourced && selectedResource.monthlyQuota !== undefined) {
         const monthlyUsed = selectedResource.monthlyUsed || 0;
         if (monthlyUsed + totalAmount > selectedResource.monthlyQuota + 0.01) {
-          showAlert(`本月(N=${selectedResource.rhythmMonthN})授权额度不足。\n当前已录入：${Math.round(monthlyUsed).toLocaleString()}\n本次尝试：${Math.round(totalAmount).toLocaleString()}\n本月上限：${Math.round(selectedResource.monthlyQuota).toLocaleString()}\n\n请联系经营单元更新提炼指令或调整月份。`);
+          showAlert(`本月(N=${selectedResource.rhythmMonthN})授权额度不足。\n当前已录入：${formatMoney(monthlyUsed)}\n本次尝试：${formatMoney(totalAmount)}\n本月上限：${formatMoney(selectedResource.monthlyQuota)}\n\n请联系经营单元更新提炼指令或调整月份。`);
           return;
         }
       }
@@ -994,21 +1012,21 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         const postHedge = preHedge * cWeight * b2Weight;
         const hasHedge = cWeight < 1 || b2Weight < 1;
         valuePackageDisplay = hasHedge
-          ? `${Math.round(preHedge)} → ${Math.round(postHedge)}`
-          : `${Math.round(postHedge)}`;
+          ? `${formatMoney(preHedge)} → ${formatMoney(postHedge)}`
+          : `${formatMoney(postHedge)}`;
       } else if (log.category === RefineCategory.Revenue) {
         const preHedge = rawAmount * 0.933 * factor;
         const postHedge = preHedge * cWeight;
         const hasHedge = cWeight < 1;
         revenuePackageDisplay = hasHedge
-          ? `${Math.round(preHedge)} → ${Math.round(postHedge)}`
-          : `${Math.round(postHedge)}`;
+          ? `${formatMoney(preHedge)} → ${formatMoney(postHedge)}`
+          : `${formatMoney(postHedge)}`;
       }
 
       const isLogRev = log.category === RefineCategory.Revenue;
       const displayInjection = isLogRev
-        ? (log.rawAmount != null ? Math.round(log.rawAmount * 0.933) : Math.round(log.amount || 0))
-        : (log.rawAmount != null ? log.rawAmount : log.amount || 0);
+        ? (log.rawAmount != null ? roundMoney(log.rawAmount * 0.933) : roundMoney(log.amount || 0))
+        : (log.rawAmount != null ? roundMoney(log.rawAmount) : roundMoney(log.amount || 0));
 
       return {
         '矿山编号': log.miningId,
@@ -1182,13 +1200,13 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 {selectedMiningId && (
                   <div className="w-full bg-slate-50 border border-slate-200 p-3 rounded-md shadow-sm space-y-2">
                     <div className="flex justify-between items-center text-[9px] font-bold">
-                       <span className="text-slate-500">款初: <span className="text-indigo-600">{getInitialRevenueCapacity(selectedResource).toLocaleString()}</span> | 款当: <span className="text-amber-600">{getCurrentRevenueCapacity(selectedResource, logs).toLocaleString()}</span></span>
-                       <span className="text-slate-500">产初: <span className="text-indigo-600">{getInitialValueCapacity(selectedResource).toLocaleString()}</span> | 产当: <span className="text-emerald-600">{getCurrentValueCapacity(selectedResource, logs).toLocaleString()}</span></span>
+                       <span className="text-slate-500">款初: <span className="text-indigo-600">{formatMoney(getInitialRevenueCapacity(selectedResource))}</span> | 款当: <span className="text-amber-600">{formatMoney(getCurrentRevenueCapacity(selectedResource, logs))}</span></span>
+                       <span className="text-slate-500">产初: <span className="text-indigo-600">{formatMoney(getInitialValueCapacity(selectedResource))}</span> | 产当: <span className="text-emerald-600">{formatMoney(getCurrentValueCapacity(selectedResource, logs))}</span></span>
                     </div>
                     <div className="flex justify-between items-center text-[9px] font-bold">
-                       <span className="text-slate-500">已注入累计: <span className="text-blue-600">{alreadyInjected.toLocaleString()}</span></span>
+                       <span className="text-slate-500">已注入累计: <span className="text-blue-600">{formatMoney(alreadyInjected)}</span></span>
                        <span className="text-slate-500">剩余接收额度: <span className={(receivedLimit !== Infinity && remainingQuota < selectedCollectors.reduce((s, c) => s + c.amount, 0)) ? "text-rose-600" : "text-emerald-600"}>
-                        {receivedLimit === Infinity ? '无交易限制' : remainingQuota.toLocaleString()}
+                        {receivedLimit === Infinity ? '无交易限制' : formatMoney(remainingQuota)}
                        </span></span>
                     </div>
                     {receivedLimit !== Infinity && (alreadyInjected + selectedCollectors.reduce((s, c) => s + c.amount, 0) > receivedLimit) && (
@@ -1325,14 +1343,14 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-8 bg-slate-50/50 p-4 rounded-sm border border-slate-100 animate-in slide-in-from-left-2 duration-300">
                <ProgressBar 
                  label=" 收款目前矿山资源进度" 
-                 subLabel={(mineralOccupancy.confirmedRevenue + mineralOccupancy.minedRevenue) >= getCurrentRevenueCapacity(selectedResource) ? "已采集" : `${Math.round(mineralOccupancy.confirmedRevenue + mineralOccupancy.minedRevenue).toLocaleString()} / ${Math.round(getCurrentRevenueCapacity(selectedResource)).toLocaleString()}`}
+                 subLabel={(mineralOccupancy.confirmedRevenue + mineralOccupancy.minedRevenue) >= getCurrentRevenueCapacity(selectedResource) ? "已采集" : `${formatMoney(mineralOccupancy.confirmedRevenue + mineralOccupancy.minedRevenue)} / ${formatMoney(getCurrentRevenueCapacity(selectedResource))}`}
                  value={Math.min(mineralOccupancy.confirmedRevenue + mineralOccupancy.minedRevenue, getCurrentRevenueCapacity(selectedResource))}
                  max={getCurrentRevenueCapacity(selectedResource)}
                  color="bg-amber-500"
                />
                <ProgressBar 
                  label=" 产值目前矿山资源进度" 
-                 subLabel={(mineralOccupancy.confirmedValue + mineralOccupancy.minedValue) >= getCurrentValueCapacity(selectedResource) ? "已采集" : `${Math.round(mineralOccupancy.confirmedValue + mineralOccupancy.minedValue).toLocaleString()} / ${Math.round(getCurrentValueCapacity(selectedResource)).toLocaleString()}`}
+                 subLabel={(mineralOccupancy.confirmedValue + mineralOccupancy.minedValue) >= getCurrentValueCapacity(selectedResource) ? "已采集" : `${formatMoney(mineralOccupancy.confirmedValue + mineralOccupancy.minedValue)} / ${formatMoney(getCurrentValueCapacity(selectedResource))}`}
                  value={Math.min(mineralOccupancy.confirmedValue + mineralOccupancy.minedValue, getCurrentValueCapacity(selectedResource))}
                  max={getCurrentValueCapacity(selectedResource)}
                  color="bg-emerald-500"
@@ -1503,7 +1521,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                       <div className="relative">
                         <input
                           type="text"
-                          value={calculateNetValueForCollector(c.id, c.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          value={formatMoney(calculateNetValueForCollector(c.id, c.amount))}
                           readOnly
                           className="w-full border border-slate-200 bg-slate-50 rounded-sm px-2 py-1.5 text-sm font-bold font-mono outline-none cursor-not-allowed h-10"
                         />
@@ -1543,35 +1561,35 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                   <div className="grid grid-cols-4 gap-4">
                     <div className="bg-white p-2 rounded border border-emerald-100">
                       <p className="text-[8px] text-emerald-500 font-bold uppercase mb-1">当前已确权</p>
-                      <p className="text-sm font-black text-emerald-700 font-mono">{Math.round(currentConfirmed).toLocaleString()}</p>
+                      <p className="text-sm font-black text-emerald-700 font-mono">{formatMoney(currentConfirmed)}</p>
                     </div>
                     <div className="bg-emerald-100 p-2 rounded border border-emerald-300">
                       <p className="text-[8px] text-emerald-600 font-bold uppercase mb-1">预计已确权</p>
                       <p className="text-sm font-black text-emerald-800 font-mono">
-                        {Math.round(finalConfirmed).toLocaleString()}
+                        {formatMoney(finalConfirmed)}
                       </p>
                     </div>
                     <div className="bg-amber-50 p-2 rounded border border-amber-200 flex flex-col justify-center">
                       <p className="text-[8px] text-amber-600 font-bold uppercase mb-1">预计待确权</p>
                       <p className="text-sm font-black text-amber-700 font-mono">
-                        {Math.round(finalPending).toLocaleString()}
+                        {formatMoney(finalPending)}
                       </p>
                       <div className="text-[8px] text-amber-600/80 mt-1 font-mono leading-tight border-t border-amber-200/50 pt-1">
-                        <p>原待确权: {Math.round(currentPending).toLocaleString()}</p>
-                        <p>+ 本次提报: {Math.round(totalInput).toLocaleString()}</p>
-                        <p>- 联动转换: {Math.round(conversionAmount).toLocaleString()}</p>
+                        <p>原待确权: {formatMoney(currentPending)}</p>
+                        <p>+ 本次提报: {formatMoney(totalInput)}</p>
+                        <p>- 联动转换: {formatMoney(conversionAmount)}</p>
                       </div>
                     </div>
                     <div className="bg-white p-2 rounded border border-slate-100">
                       <p className="text-[8px] text-slate-400 font-bold uppercase mb-1">剩余未确权</p>
                       <p className="text-sm font-black text-slate-600 font-mono">
-                        {Math.round(remainingUnconfirmed).toLocaleString()}
+                        {formatMoney(remainingUnconfirmed)}
                       </p>
                     </div>
                   </div>
 
                   <div className="text-[8px] text-emerald-600/70 font-bold uppercase pt-2 border-t border-emerald-100 flex justify-between">
-                    <span>产当：{Math.round(getCurrentValueCapacity(selectedResource)).toLocaleString()}</span>
+                    <span>产当：{formatMoney(getCurrentValueCapacity(selectedResource))}</span>
                     <span>预计确权率：{confirmationRate}%</span>
                   </div>
                 </div>
@@ -1583,7 +1601,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 <div className="flex items-center space-x-4">
                   <div className="text-center px-4 py-2 bg-slate-100 rounded-sm">
                     <p className="text-[8px] font-bold text-slate-400 uppercase">总注入积分</p>
-                    <p className="text-lg font-black text-slate-800 font-mono">{selectedCollectors.reduce((sum, c) => sum + c.amount, 0).toLocaleString()}</p>
+                    <p className="text-lg font-black text-slate-800 font-mono">{formatMoney(selectedCollectors.reduce((sum, c) => sum + c.amount, 0))}</p>
                   </div>
                   <div className="text-center px-4 py-2 bg-emerald-50 rounded-sm border border-emerald-100 relative group">
                     <p className="text-[8px] font-bold text-emerald-600 uppercase">
@@ -1596,7 +1614,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                         return '总收款包/产兑包';
                       })()}
                     </p>
-                    <p className="text-lg font-black text-emerald-700 font-mono">+{Math.round(totalNetValue).toLocaleString()}</p>
+                    <p className="text-lg font-black text-emerald-700 font-mono">+{formatMoney(totalNetValue)}</p>
                     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-4 py-2 bg-slate-900 border border-slate-700 text-white text-[9px] font-bold rounded-lg shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-20">
                       <div className="space-y-1">
                         <p className="border-b border-slate-700 pb-1 text-blue-400">核算路径分析</p>
@@ -1708,24 +1726,24 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                   <span className="w-1.5 h-3.5 bg-yellow-500 mr-2 rounded-full"></span>
                   {UI_LABELS.REVENUE}
                 </span>
-                <span className="text-[10px] font-bold text-slate-400">{UI_LABELS.REVENUE}当限: {Math.round(quadrantData.revenue.capacity).toLocaleString()}</span>
+                <span className="text-[10px] font-bold text-slate-400">{UI_LABELS.REVENUE}当限: {formatMoney(quadrantData.revenue.capacity)}</span>
               </div>
               <div className="grid grid-cols-4 gap-3">
                 <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                   <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.PENDING}</p>
-                  <p className="text-xs font-black text-amber-600 font-mono">{Math.round(quadrantData.revenue.pending).toLocaleString()}</p>
+                  <p className="text-xs font-black text-amber-600 font-mono">{formatMoney(quadrantData.revenue.pending)}</p>
                 </div>
                 <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                   <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.CONFIRMED}</p>
-                  <p className="text-xs font-black text-emerald-600 font-mono">{Math.round(quadrantData.revenue.confirmed).toLocaleString()}</p>
+                  <p className="text-xs font-black text-emerald-600 font-mono">{formatMoney(quadrantData.revenue.confirmed)}</p>
                 </div>
                 <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                   <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.UNCONFIRMED}</p>
-                  <p className="text-xs font-black text-rose-600 font-mono">{Math.round(quadrantData.revenue.unconfirmed).toLocaleString()}</p>
+                  <p className="text-xs font-black text-rose-600 font-mono">{formatMoney(quadrantData.revenue.unconfirmed)}</p>
                 </div>
                 <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                   <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.MINED}</p>
-                  <p className="text-xs font-black text-blue-600 font-mono">{Math.round(quadrantData.revenue.mined).toLocaleString()}</p>
+                  <p className="text-xs font-black text-blue-600 font-mono">{formatMoney(quadrantData.revenue.mined)}</p>
                 </div>
               </div>
             </div>
@@ -1737,24 +1755,24 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                   <span className="w-1.5 h-3.5 bg-rose-500 mr-2 rounded-full"></span>
                   {UI_LABELS.VALUE}
                 </span>
-                <span className="text-[10px] font-bold text-slate-400">{UI_LABELS.VALUE}当限: {Math.round(quadrantData.value.capacity).toLocaleString()}</span>
+                <span className="text-[10px] font-bold text-slate-400">{UI_LABELS.VALUE}当限: {formatMoney(quadrantData.value.capacity)}</span>
               </div>
               <div className="grid grid-cols-4 gap-3">
                 <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                   <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.PENDING}</p>
-                  <p className="text-xs font-black text-amber-600 font-mono">{Math.round(quadrantData.value.pending).toLocaleString()}</p>
+                  <p className="text-xs font-black text-amber-600 font-mono">{formatMoney(quadrantData.value.pending)}</p>
                 </div>
                 <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                   <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.CONFIRMED}</p>
-                  <p className="text-xs font-black text-emerald-600 font-mono">{Math.round(quadrantData.value.confirmed).toLocaleString()}</p>
+                  <p className="text-xs font-black text-emerald-600 font-mono">{formatMoney(quadrantData.value.confirmed)}</p>
                 </div>
                 <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                   <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.UNCONFIRMED}</p>
-                  <p className="text-xs font-black text-rose-600 font-mono">{Math.round(quadrantData.value.unconfirmed).toLocaleString()}</p>
+                  <p className="text-xs font-black text-rose-600 font-mono">{formatMoney(quadrantData.value.unconfirmed)}</p>
                 </div>
                 <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                   <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.MINED}</p>
-                  <p className="text-xs font-black text-blue-600 font-mono">{Math.round(quadrantData.value.mined).toLocaleString()}</p>
+                  <p className="text-xs font-black text-blue-600 font-mono">{formatMoney(quadrantData.value.mined)}</p>
                 </div>
               </div>
             </div>
@@ -1766,21 +1784,21 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           <div className="bg-gradient-to-br from-indigo-50 to-indigo-100/50 p-4 rounded-sm border border-indigo-200 shadow-sm flex flex-col justify-between">
             <div>
               <p className="text-[10px] text-indigo-700 font-bold uppercase tracking-wider mb-1">收产包</p>
-              <p className="text-2xl font-black text-indigo-900 font-mono">{Math.round(summaryIncomePackage).toLocaleString()}</p>
+              <p className="text-2xl font-black text-indigo-900 font-mono">{formatMoney(summaryIncomePackage)}</p>
             </div>
             <p className="text-[9px] text-indigo-500 mt-2 font-medium">公式: 收款包 + 产兑包 (与看板「收产包」主数据精确对齐)</p>
           </div>
           <div className="bg-gradient-to-br from-amber-50 to-amber-100/50 p-4 rounded-sm border border-amber-200 shadow-sm flex flex-col justify-between">
             <div>
               <p className="text-[10px] text-amber-700 font-bold uppercase tracking-wider mb-1">收款包</p>
-              <p className="text-2xl font-black text-amber-900 font-mono">{Math.round(summaryRevenuePackage).toLocaleString()}</p>
+              <p className="text-2xl font-black text-amber-900 font-mono">{formatMoney(summaryRevenuePackage)}</p>
             </div>
             <p className="text-[9px] text-amber-500 mt-2 font-medium">公式: 收款包合计</p>
           </div>
           <div className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 p-4 rounded-sm border border-emerald-200 shadow-sm flex flex-col justify-between">
             <div>
               <p className="text-[10px] text-emerald-700 font-bold uppercase tracking-wider mb-1">产兑包</p>
-              <p className="text-2xl font-black text-emerald-950 font-mono">{Math.round(summaryValuePackage).toLocaleString()}</p>
+              <p className="text-2xl font-black text-emerald-950 font-mono">{formatMoney(summaryValuePackage)}</p>
             </div>
             <p className="text-[9px] text-emerald-600 mt-2 font-medium">公式: 产兑包合计</p>
           </div>
@@ -1926,7 +1944,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                         {log.confirmationType || '手动确权'}
                       </span>
                     </td>
-                    <td className="px-2 py-4 text-right font-mono font-bold text-slate-700">{displayInjection.toLocaleString()}</td>
+                    <td className="px-2 py-4 text-right font-mono font-bold text-slate-700">{formatMoney(displayInjection)}</td>
                     <td className="px-2 py-4 text-right font-mono font-black text-slate-900 bg-slate-50/50">
                       {cWeight.toFixed(4)}
                     </td>
@@ -1936,15 +1954,15 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     <td className="px-2 py-4 text-right font-mono font-bold text-emerald-600">
                       {isValueLine ? (
                         valHasHedge
-                          ? `${Math.round(valPreHedge).toLocaleString()} → ${Math.round(valPostHedge).toLocaleString()}`
-                          : Math.round(valPostHedge).toLocaleString()
+                          ? `${formatMoney(valPreHedge)} → ${formatMoney(valPostHedge)}`
+                          : formatMoney(valPostHedge)
                       ) : '—'}
                     </td>
                     <td className="px-2 py-4 text-right font-mono font-bold text-amber-600">
                       {isRevenueLine ? (
                         revHasHedge
-                          ? `${Math.round(revPreHedge).toLocaleString()} → ${Math.round(revPostHedge).toLocaleString()}`
-                          : Math.round(revPostHedge).toLocaleString()
+                          ? `${formatMoney(revPreHedge)} → ${formatMoney(revPostHedge)}`
+                          : formatMoney(revPostHedge)
                       ) : '—'}
                     </td>
                     <td className="px-2 py-4 text-slate-500 font-mono">

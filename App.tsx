@@ -27,6 +27,7 @@ import LegalOverlay from './components/LegalOverlay';
 import { Toaster, toast } from 'sonner';
 import { auditLog } from './src/services/api';
 import { getLocalDateString, getLocalMonthString } from './src/utils/dateUtils';
+import { roundMoney } from './src/utils/formatMoney';
 
 const INITIAL_USERS: User[] = [
   { id: 'admin', userId: 'admin', name: '系统管理员', role: Role.Admin, category: '系统管理员', salaryPackageType: 'NPC工资包', userStatus: 'active' },
@@ -372,7 +373,7 @@ const App: React.FC = () => {
     // 2. Linkage logic (Pending Value -> Confirmed Value)
     nextResources = nextResources.map(res => {
       const capacityRemaining = res.revenueCapacity - res.confirmedValue;
-      const revenueBasedLimit = Math.max(0, Number((res.confirmedRevenue - res.confirmedValue).toFixed(2)));
+      const revenueBasedLimit = Math.max(0, roundMoney(res.confirmedRevenue - res.confirmedValue));
       const actualAmountToConvert = capacityRemaining <= 0 ? 0 : Math.min(res.pendingValue, revenueBasedLimit);
       
       if (actualAmountToConvert > 0) {
@@ -407,10 +408,10 @@ const App: React.FC = () => {
             const confirmedLog: ValueCreationLog = {
               ...item.log,
               id: `M${(Date.now() % 100000000).toString().padStart(8, '0')}`,
-              amount: Number(remainingToConvert.toFixed(2)),
-              dynamicCost: Number((item.log.dynamicCost * ratio).toFixed(2)),
-              cClassCost: item.log.cClassCost ? Number((item.log.cClassCost * ratio).toFixed(2)) : undefined,
-              netValue: Number((item.log.netValue * ratio).toFixed(2)),
+              amount: roundMoney(remainingToConvert),
+              dynamicCost: roundMoney(item.log.dynamicCost * ratio),
+              cClassCost: item.log.cClassCost ? roundMoney(item.log.cClassCost * ratio) : undefined,
+              netValue: roundMoney(item.log.netValue * ratio),
               status: AuditStatus.Confirmed,
               confirmedAt: Date.now(),
               confirmationType: '联动确权'
@@ -418,10 +419,10 @@ const App: React.FC = () => {
       
             nextLogs[item.index] = {
               ...item.log,
-              amount: Number((logAmount - remainingToConvert).toFixed(2)),
-              dynamicCost: Number((item.log.dynamicCost * (1 - ratio)).toFixed(2)),
-              cClassCost: item.log.cClassCost ? Number((item.log.cClassCost * (1 - ratio)).toFixed(2)) : undefined,
-              netValue: Number((item.log.netValue * (1 - ratio)).toFixed(2)),
+              amount: roundMoney(logAmount - remainingToConvert),
+              dynamicCost: roundMoney(item.log.dynamicCost * (1 - ratio)),
+              cClassCost: item.log.cClassCost ? roundMoney(item.log.cClassCost * (1 - ratio)) : undefined,
+              netValue: roundMoney(item.log.netValue * (1 - ratio)),
             };
 
             newLogsToAdd.push(confirmedLog);
@@ -438,9 +439,9 @@ const App: React.FC = () => {
         if (actualConvertedAmount > 0) {
           resourcesChanged = true;
           const updatedRes = { ...res };
-          updatedRes.pendingValue = Math.max(0, Number((updatedRes.pendingValue - actualConvertedAmount).toFixed(2)));
-          updatedRes.confirmedValue = Number((updatedRes.confirmedValue + actualConvertedAmount).toFixed(2));
-          updatedRes.unconfirmedValue = Math.max(0, Number((updatedRes.valueCapacity - updatedRes.confirmedValue - updatedRes.pendingValue).toFixed(2)));
+          updatedRes.pendingValue = Math.max(0, roundMoney(updatedRes.pendingValue - actualConvertedAmount));
+          updatedRes.confirmedValue = roundMoney(updatedRes.confirmedValue + actualConvertedAmount);
+          updatedRes.unconfirmedValue = Math.max(0, roundMoney(updatedRes.valueCapacity - updatedRes.confirmedValue - updatedRes.pendingValue));
           return updatedRes;
         }
       }

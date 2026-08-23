@@ -16,6 +16,7 @@ import {
   isSalaryActiveForMonth
 } from '../src/utils/employmentStatus';
 import { getLocalDateString } from '../src/utils/dateUtils';
+import { formatMoney } from '../src/utils/formatMoney';
 
 interface PersonnelPoolProps {
   user: User;
@@ -45,7 +46,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
   const [showForm, setShowForm] = useState(false);
   const [showAddAccountForm, setShowAddAccountForm] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [activeCategory, setActiveCategory] = useState<'全部' | '采集主体' | '管理与VP' | '组件权限设置' | '批量导入 EXCEL'>('全部');
+  const [activeCategory, setActiveCategory] = useState<'全部' | '采集主体' | '管理与VP'>('全部');
   const [searchQuery, setSearchQuery] = useState('');
   
 
@@ -1014,7 +1015,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
              </div>
              <div className="space-y-8">
                {(() => {
-                  const collectors = filteredUsers.filter(u => u.category?.includes('专') || u.role === Role.Rank);
+                  const collectors = filteredUsers.filter(u => u.category?.includes('专') || u.role === Role.Rank || u.role === Role.RevenueCollector || u.role === Role.ValueCollector || activeCategory !== '采集主体');
                   const groups: Record<string, User[]> = {};
                   businessUnits.forEach(unit => { groups[unit] = []; });
                   collectors.forEach(u => {
@@ -1028,49 +1029,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                     return a.localeCompare(b);
                   }).map(([center, centerUsers], idx) => (
                   <div key={idx} className="space-y-4">
-                    <h5 className="text-xs font-black text-slate-500 tracking-widest uppercase border-b border-slate-100 pb-2 flex items-center">
+                    <h5 className="text-xs font-black text-slate-700 tracking-widest uppercase border-b border-slate-100 pb-2 flex items-center">
                       <span className="w-1.5 h-1.5 rounded-full bg-blue-500 mr-2"></span>
-                      {center} <span className="ml-2 text-[9px] bg-slate-100 px-2 py-0.5 rounded-full font-mono">{centerUsers.length}</span>
+                      {center} <span className="ml-2 text-[9px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-mono font-bold">{centerUsers.length} 人</span>
                     </h5>
                     
-                      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                        {centerUsers.map((u) => {
-                          const isInactive = u.userStatus === 'inactive';
-                          return (
-                            <div key={u.id} className={`bg-white p-5 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl transition-all group relative ${isInactive ? 'opacity-60 bg-slate-50' : ''}`}>
-                              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex space-x-1">
-                                <button onClick={() => handleEdit(u)} className="p-1 px-2 bg-blue-50 text-blue-600 rounded text-[8px] font-black uppercase">属性</button>
-                                <button 
-                                  onClick={() => toggleUserStatus(u)} 
-                                  className={`p-1 px-2 ${isInactive ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-600'} rounded text-[8px] font-black uppercase`}
-                                >
-                                  {isInactive ? '复职' : '离职'}
-                                </button>
-                              </div>
-                              <div className="flex items-center space-x-3">
-                                <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-xl shadow-lg overflow-hidden">
-                                  {u.avatar ? <img src={u.avatar} className="w-full h-full object-cover" /> : getRoleIcon(u.role)}
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-2">
-                                    <h5 className="font-black text-slate-900 text-xs truncate">{u.name}</h5>
-                                    {isInactive && <span className="text-[8px] bg-slate-200 text-slate-500 px-1 rounded font-black italic">EXIT</span>}
-                                  </div>
-                                  <p className="text-[9px] text-slate-400 font-mono">工号: {u.id}</p>
-                                  {u.resignDate && (
-                                    <p className="text-[8px] text-rose-500 font-black mt-0.5">离职日: {u.resignDate}</p>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="mt-4 flex items-center justify-between border-t border-slate-50 pt-3">
-                                <Badge className="text-[8px] px-1.5 bg-blue-50/50 text-blue-600 border-none">{u.category}</Badge>
-                                <span className="text-[10px] font-black text-slate-700 font-mono">{(u.salaryPackage || 0).toLocaleString()}</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
                       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-2xs overflow-hidden">
                         <div className="overflow-x-auto">
                           <table className="w-full text-center border-collapse">
@@ -1109,7 +1072,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                                         <Badge className="text-[8px] px-2 py-0.5 bg-blue-50 text-blue-600 border-none">{u.category}</Badge>
                                       </td>
                                       <td className="py-2.5 px-4 font-mono font-bold text-slate-800 whitespace-nowrap">
-                                        {(u.salaryPackage || 0).toLocaleString()}
+                                        {formatMoney(u.salaryPackage || 0)}
                                       </td>
                                       <td className="py-2.5 px-4 whitespace-nowrap">
                                         {isInactive ? (
@@ -1447,17 +1410,17 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                            </div>
                          </div>
 
-                         <div className="flex items-center space-x-2">
-                           {isCustom ? (
-                             <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[9px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200/80">
-                               <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mr-1.5 animate-pulse"></span>
-                               自定义模式 ({enabledCount}/12)
-                             </span>
-                           ) : (
-                             <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[9px] font-black bg-slate-100 text-slate-600 border border-slate-200">
-                               默认职级模式 ({enabledCount}/12)
-                             </span>
-                           )}
+                          <div className="flex items-center space-x-2">
+                            {isCustom ? (
+                              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[9px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200/80">
+                                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mr-1.5 animate-pulse"></span>
+                                自定义模式 ({enabledCount}/{MENU_ITEMS.length})
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[9px] font-black bg-slate-100 text-slate-600 border border-slate-200">
+                                默认职级模式 ({enabledCount}/{MENU_ITEMS.length})
+                              </span>
+                            )}
 
                            <div className="flex items-center space-x-1 pl-2 border-l border-slate-100">
                              <button

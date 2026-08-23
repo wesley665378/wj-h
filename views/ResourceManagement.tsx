@@ -5,6 +5,7 @@ import { Card, ProgressBar, Badge, ProjectStatusBadge } from '../src/components/
 import * as XLSX from 'xlsx';
 import { deriveProjectStatus } from '../src/utils/projectStatus';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
+import { roundMoney, formatMoney } from '../src/utils/formatMoney';
 import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { MiningResourceQueryView, normalizeMiningId } from '../src/components/MiningResourceQueryView';
@@ -110,8 +111,8 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
     setNewMiningId(res.id);
     setSelectedType(res.types[0] || null);
     // 统一步骤：UI 显示为原始基准，存储为提纯后的基准
-    setRevenueCapacity(Number((res.revenueCapacity / 0.933).toFixed(2)));
-    setValueCapacity(Number((res.valueCapacity / 0.933).toFixed(2)));
+    setRevenueCapacity(roundMoney(res.revenueCapacity / 0.933));
+    setValueCapacity(roundMoney(res.valueCapacity / 0.933));
     setAssigneeRevenue(res.assignedToRevenue || res.assignedTo || '');
     setAssigneeValue(res.assignedToValue || res.assignedTo || '');
     setCustomRevenueFactor(res.customRevenueFactor);
@@ -176,8 +177,8 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
     let authorizedQuota = undefined;
     
     // 统一步骤：将用户输入的原始容量转换为 0.933 提纯后的基准进行存储
-    const purifiedRevenueCapacity = Number((revenueCapacity * 0.933).toFixed(2));
-    const purifiedValueCapacity = Number((valueCapacity * 0.933).toFixed(2));
+    const purifiedRevenueCapacity = roundMoney(revenueCapacity * 0.933);
+    const purifiedValueCapacity = roundMoney(valueCapacity * 0.933);
 
     const currentLogged = existingResource ? (existingResource.confirmedValue + existingResource.pendingValue + existingResource.minedValue) : 0;
 
@@ -185,7 +186,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       const baseLimit = purifiedValueCapacity / (totalMonths || 1);
       const monthlyDynamicLimit = baseLimit * monthN * 1.1;
       const globalRemaining = Math.max(0, purifiedValueCapacity - currentLogged);
-      authorizedQuota = Math.min(monthlyDynamicLimit, globalRemaining);
+      authorizedQuota = roundMoney(Math.min(monthlyDynamicLimit, globalRemaining));
     }
 
     const resourceData: MiningResource = {
@@ -223,11 +224,11 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       ),
       pendingValue: existingResource ? existingResource.pendingValue : 0,
       confirmedValue: existingResource ? existingResource.confirmedValue : 0,
-      unconfirmedValue: existingResource ? Math.max(0, Number((purifiedValueCapacity - existingResource.confirmedValue - existingResource.pendingValue - existingResource.minedValue).toFixed(2))) : purifiedValueCapacity,
+      unconfirmedValue: existingResource ? Math.max(0, roundMoney(purifiedValueCapacity - existingResource.confirmedValue - existingResource.pendingValue - existingResource.minedValue)) : purifiedValueCapacity,
       valueDepleted: existingResource ? existingResource.valueDepleted : false,
       pendingRevenue: existingResource ? existingResource.pendingRevenue : 0,
       confirmedRevenue: existingResource ? existingResource.confirmedRevenue : 0,
-      unconfirmedRevenue: existingResource ? Math.max(0, Number((purifiedRevenueCapacity - existingResource.confirmedRevenue - existingResource.pendingRevenue - existingResource.minedRevenue).toFixed(2))) : purifiedRevenueCapacity,
+      unconfirmedRevenue: existingResource ? Math.max(0, roundMoney(purifiedRevenueCapacity - existingResource.confirmedRevenue - existingResource.pendingRevenue - existingResource.minedRevenue)) : purifiedRevenueCapacity,
       revenueDepleted: existingResource ? existingResource.revenueDepleted : false,
     };
 
@@ -237,15 +238,15 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
 
     const actionText = editingId ? '保存矿山指令' : '下达矿山指令';
     showConfirm(
-      `确定${actionText}？\n\n【矿山编号】${newMiningId}\n【提炼类型】${selectedType}\n【收款指派】${assigneeRevenue}\n【产值指派】${assigneeValue}\n【款初】${Math.round(purifiedRevenueCapacity).toLocaleString()}\n【产初】${Math.round(purifiedValueCapacity).toLocaleString()}`,
+      `确定${actionText}？\n\n【矿山编号】${newMiningId}\n【提炼类型】${selectedType}\n【收款指派】${assigneeRevenue}\n【产值指派】${assigneeValue}\n【款初】${formatMoney(purifiedRevenueCapacity)}\n【产初】${formatMoney(purifiedValueCapacity)}`,
       async () => {
         if (editingId) {
           onUpdateResource(resourceData);
-          const quotaInfo = isOutsourced ? `\n本月(N=${monthN})授权额度：${Math.round(authorizedQuota || 0).toLocaleString()} 积分` : '';
+          const quotaInfo = isOutsourced ? `\n本月(N=${monthN})授权额度：${formatMoney(authorizedQuota || 0)} 积分` : '';
           showAlert(`矿山 ${newMiningId} 指令已更新。${quotaInfo}`);
         } else {
           onAddResource(resourceData);
-          const quotaInfo = isOutsourced ? `\n本月(N=${monthN})授权额度：${Math.round(authorizedQuota || 0).toLocaleString()} 积分` : '';
+          const quotaInfo = isOutsourced ? `\n本月(N=${monthN})授权额度：${formatMoney(authorizedQuota || 0)} 积分` : '';
           showAlert(`指令下达成功：矿山 ${newMiningId} 已分配。${quotaInfo}`);
         }
         handleCancelEdit();
@@ -431,53 +432,53 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
 
               {/* 收款全盘条 */}
               <div className="space-y-1.5">
-                <div className="flex justify-between items-center text-xs font-black">
-                  <div className="flex items-center gap-2 text-amber-600">
-                    <span>收款价值流</span>
-                    <span className="text-[10px] font-bold text-slate-500 bg-amber-50 border border-amber-200/60 px-2 py-0.5 rounded-md">
-                      款初: {Math.round(totalRevCap).toLocaleString()}
-                    </span>
-                  </div>
-                  <span className="text-amber-600">{revProgressStr}%</span>
-                </div>
-                <div className="flex h-3 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner">
-                  <div style={{ width: `${revPendingPct}%` }} className="bg-amber-400 h-full transition-all" title={`待确权: ${Math.round(rev.pending).toLocaleString()}`} />
-                  <div style={{ width: `${revConfirmedPct}%` }} className="bg-emerald-500 h-full transition-all" title={`已确权: ${Math.round(rev.confirmed).toLocaleString()}`} />
-                  <div style={{ width: `${revUnconfirmedPct}%` }} className="bg-slate-300 h-full transition-all" title={`未确权: ${Math.round(rev.unconfirmed).toLocaleString()}`} />
-                  <div style={{ width: `${revMinedPct}%` }} className="bg-blue-500 h-full transition-all" title={`入库: ${Math.round(rev.mined).toLocaleString()}`} />
-                </div>
-                <div className="flex justify-between text-[10px] text-slate-400 font-bold px-1">
-                  <span>待: {Math.round(rev.pending).toLocaleString()}</span>
-                  <span>已: {Math.round(rev.confirmed).toLocaleString()}</span>
-                  <span>未: {Math.round(rev.unconfirmed).toLocaleString()}</span>
-                  <span>入: {Math.round(rev.mined).toLocaleString()}</span>
-                </div>
-              </div>
+                 <div className="flex justify-between items-center text-xs font-black">
+                   <div className="flex items-center gap-2 text-amber-600">
+                     <span>收款价值流</span>
+                     <span className="text-[10px] font-bold text-slate-500 bg-amber-50 border border-amber-200/60 px-2 py-0.5 rounded-md">
+                       款初: {formatMoney(totalRevCap)}
+                     </span>
+                   </div>
+                   <span className="text-amber-600">{revProgressStr}%</span>
+                 </div>
+                 <div className="flex h-3 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner">
+                   <div style={{ width: `${revPendingPct}%` }} className="bg-amber-400 h-full transition-all" title={`待确权: ${formatMoney(rev.pending)}`} />
+                   <div style={{ width: `${revConfirmedPct}%` }} className="bg-emerald-500 h-full transition-all" title={`已确权: ${formatMoney(rev.confirmed)}`} />
+                   <div style={{ width: `${revUnconfirmedPct}%` }} className="bg-slate-300 h-full transition-all" title={`未确权: ${formatMoney(rev.unconfirmed)}`} />
+                   <div style={{ width: `${revMinedPct}%` }} className="bg-blue-500 h-full transition-all" title={`入库: ${formatMoney(rev.mined)}`} />
+                 </div>
+                 <div className="flex justify-between text-[10px] text-slate-400 font-bold px-1">
+                   <span>待: {formatMoney(rev.pending)}</span>
+                   <span>已: {formatMoney(rev.confirmed)}</span>
+                   <span>未: {formatMoney(rev.unconfirmed)}</span>
+                   <span>入: {formatMoney(rev.mined)}</span>
+                 </div>
+               </div>
 
-              {/* 产值全盘条 */}
-              <div className="space-y-1.5 pt-2">
-                <div className="flex justify-between items-center text-xs font-black">
-                  <div className="flex items-center gap-2 text-emerald-600">
-                    <span>产值价值流</span>
-                    <span className="text-[10px] font-bold text-slate-500 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-md">
-                      产初: {Math.round(totalValCap).toLocaleString()}
-                    </span>
-                  </div>
-                  <span className="text-emerald-600">{valProgressStr}%</span>
-                </div>
-                <div className="flex h-3 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner">
-                  <div style={{ width: `${valPendingPct}%` }} className="bg-amber-400 h-full transition-all" title={`待确权: ${Math.round(val.pending).toLocaleString()}`} />
-                  <div style={{ width: `${valConfirmedPct}%` }} className="bg-emerald-500 h-full transition-all" title={`已确权: ${Math.round(val.confirmed).toLocaleString()}`} />
-                  <div style={{ width: `${valUnconfirmedPct}%` }} className="bg-slate-300 h-full transition-all" title={`未确权: ${Math.round(val.unconfirmed).toLocaleString()}`} />
-                  <div style={{ width: `${valMinedPct}%` }} className="bg-blue-500 h-full transition-all" title={`入库: ${Math.round(val.mined).toLocaleString()}`} />
-                </div>
-                <div className="flex justify-between text-[10px] text-slate-400 font-bold px-1">
-                  <span>待: {Math.round(val.pending).toLocaleString()}</span>
-                  <span>已: {Math.round(val.confirmed).toLocaleString()}</span>
-                  <span>未: {Math.round(val.unconfirmed).toLocaleString()}</span>
-                  <span>入: {Math.round(val.mined).toLocaleString()}</span>
-                </div>
-              </div>
+               {/* 产值全盘条 */}
+               <div className="space-y-1.5 pt-2">
+                 <div className="flex justify-between items-center text-xs font-black">
+                   <div className="flex items-center gap-2 text-emerald-600">
+                     <span>产值价值流</span>
+                     <span className="text-[10px] font-bold text-slate-500 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-md">
+                       产初: {formatMoney(totalValCap)}
+                     </span>
+                   </div>
+                   <span className="text-emerald-600">{valProgressStr}%</span>
+                 </div>
+                 <div className="flex h-3 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner">
+                   <div style={{ width: `${valPendingPct}%` }} className="bg-amber-400 h-full transition-all" title={`待确权: ${formatMoney(val.pending)}`} />
+                   <div style={{ width: `${valConfirmedPct}%` }} className="bg-emerald-500 h-full transition-all" title={`已确权: ${formatMoney(val.confirmed)}`} />
+                   <div style={{ width: `${valUnconfirmedPct}%` }} className="bg-slate-300 h-full transition-all" title={`未确权: ${formatMoney(val.unconfirmed)}`} />
+                   <div style={{ width: `${valMinedPct}%` }} className="bg-blue-500 h-full transition-all" title={`入库: ${formatMoney(val.mined)}`} />
+                 </div>
+                 <div className="flex justify-between text-[10px] text-slate-400 font-bold px-1">
+                   <span>待: {formatMoney(val.pending)}</span>
+                   <span>已: {formatMoney(val.confirmed)}</span>
+                   <span>未: {formatMoney(val.unconfirmed)}</span>
+                   <span>入: {formatMoney(val.mined)}</span>
+                 </div>
+               </div>
             </div>
           </Card>
         );
@@ -552,8 +553,8 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                           const rawRevCap = Number(row['款初'] || row['收款上限'] || row['收款额度'] || 0);
                           const rawValCap = Number(row['产初'] || row['产值上限'] || row['产值额度'] || 0);
                           // 批量导入时也进行提纯转换
-                          const revCap = Number((rawRevCap * 0.933).toFixed(2));
-                          const valCap = Number((rawValCap * 0.933).toFixed(2));
+                          const revCap = roundMoney(rawRevCap * 0.933);
+                          const valCap = roundMoney(rawValCap * 0.933);
                           
                           const assRev = row['收款指派'] || row['执行单元'] || businessUnits[0];
                           const assVal = row['产值指派'] || row['执行单元'] || businessUnits[0];
@@ -1032,8 +1033,8 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                           className="h-1.5"
                         />
                         <p className="text-[9px] text-slate-400 mt-2 flex justify-between font-bold">
-                          <span>已用: {Math.round(res.monthlyUsed || 0).toLocaleString()}</span>
-                          <span>本月当: {Math.round(res.monthlyQuota).toLocaleString()}</span>
+                          <span>已用: {formatMoney(res.monthlyUsed || 0)}</span>
+                          <span>本月当: {formatMoney(res.monthlyQuota)}</span>
                         </p>
                       </div>
                     )}

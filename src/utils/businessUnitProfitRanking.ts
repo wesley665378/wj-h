@@ -2,6 +2,7 @@ import { ValueCreationLog, MiningResource, AuditStatus, RefineCategory, User, In
 import { resolveLogPackageNet } from './reconcileMiningFromLogs';
 import { getUserSalaryByMonth } from './business';
 import { resolveLogBusinessMonth, isDateInRange, resolveLogBusinessDate } from './dateUtils';
+import { roundMoney } from './formatMoney';
 
 export interface UnitRankingRow {
   unitName: string;
@@ -326,14 +327,14 @@ export function computeBusinessUnitProfitRanking(
       unitName: m.unitName,
       managers: m.managers,
       rowType: 'total',
-      revenue: Math.round(m.revenuePackage),
-      outputValue: Math.round(m.confirmedValuePackage),
-      revenuePackage: Math.round(m.revenuePackage),
-      valuePackage: Math.round(m.row1ValuePackage),
-      incomeValuePackage: Math.round(m.row1IncomeValuePackage),
-      totalCost: Math.round(m.totalCost),
-      monthlyProfit: Math.round(m.row1MonthlyProfit),
-      yearlyProfit: Math.round(yearlyConfirmedProfit),
+      revenue: roundMoney(m.revenuePackage),
+      outputValue: roundMoney(m.confirmedValuePackage),
+      revenuePackage: roundMoney(m.revenuePackage),
+      valuePackage: roundMoney(m.row1ValuePackage),
+      incomeValuePackage: roundMoney(m.row1IncomeValuePackage),
+      totalCost: roundMoney(m.totalCost),
+      monthlyProfit: roundMoney(m.row1MonthlyProfit),
+      yearlyProfit: roundMoney(yearlyConfirmedProfit),
       rank: assignedRank,
       isNoActivity: m.isNoActivity
     });
@@ -343,14 +344,14 @@ export function computeBusinessUnitProfitRanking(
       unitName: m.unitName,
       managers: m.managers,
       rowType: 'in_transit',
-      revenue: Math.round(m.revenuePackage), // 收款包两行同值
-      outputValue: Math.round(m.confirmedValuePackage + m.pendingLinkageValuePackage), // 已确权+联动待确权
-      revenuePackage: Math.round(m.revenuePackage), // 收款包两行同值
-      valuePackage: Math.round(m.row2ValuePackage), // 已确权+联动待确权
-      incomeValuePackage: Math.round(m.row2IncomeValuePackage), // 收产
-      totalCost: Math.round(m.totalCost), // 成本也填
-      monthlyProfit: Math.round(m.row2MonthlyProfit), // 月度盈亏
-      yearlyProfit: Math.round(yearlyTotalProfit), // 年度盈亏
+      revenue: roundMoney(m.revenuePackage), // 收款包两行同值
+      outputValue: roundMoney(m.confirmedValuePackage + m.pendingLinkageValuePackage), // 已确权+联动待确权
+      revenuePackage: roundMoney(m.revenuePackage), // 收款包两行同值
+      valuePackage: roundMoney(m.row2ValuePackage), // 已确权+联动待确权
+      incomeValuePackage: roundMoney(m.row2IncomeValuePackage), // 收产
+      totalCost: roundMoney(m.totalCost), // 成本也填
+      monthlyProfit: roundMoney(m.row2MonthlyProfit), // 月度盈亏
+      yearlyProfit: roundMoney(yearlyTotalProfit), // 年度盈亏
       rank: assignedRank, // 排名按第二行排序后的对应数值
       isNoActivity: m.isNoActivity
     });

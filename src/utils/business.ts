@@ -1,5 +1,6 @@
 import { User, Role, ValueCreationLog, MiningResource, RefineCategory, AuditStatus } from '../../types';
 import { TIER_COEFFICIENTS } from '../constants/coefficients';
+import { roundMoney } from './formatMoney';
 import {
   getInitialRevenueCapacity,
   getInitialValueCapacity,
@@ -47,8 +48,8 @@ export function calculateDualTrackCoreMatrices(mining: DualTrackMiningContext) {
   const cValueWeight = N > 0 ? Math.max(0, (N - sumCValuePoints) / N) : 1;
 
   return {
-    updatedRevenueLimit: Number(updatedRevenueLimit.toFixed(2)),
-    updatedValueLimit: Number(updatedValueLimit.toFixed(2)),
+    updatedRevenueLimit: roundMoney(updatedRevenueLimit),
+    updatedValueLimit: roundMoney(updatedValueLimit),
     cRevenueWeight: Number(cRevenueWeight.toFixed(6)),
     cValueWeight: Number(cValueWeight.toFixed(6))
   };

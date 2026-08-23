@@ -7,6 +7,7 @@ import { sumConfirmedRevenuePackage, sumIncomeProductionPackage } from '../src/u
 import { getUserSalaryByMonth } from '../src/utils/business';
 import { isSalaryActiveForMonth } from '../src/utils/employmentStatus';
 import { getLocalMonthString, resolveLogBusinessMonth, resolveLogBusinessDate, isDateInRange, isLogInFilter } from '../src/utils/dateUtils';
+import { formatMoney, roundMoney } from '../src/utils/formatMoney';
 import { 
   Users, 
   Droplets, 
@@ -123,7 +124,7 @@ const ReservoirVisualizer: React.FC<{
         <div className="flex items-center gap-2 text-xs font-bold">
           <span className="text-slate-400 font-medium">统筹水库净差额:</span>
           <span className={`font-mono ${netBalance >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
-            {netBalance >= 0 ? '+' : ''}{Math.round(netBalance).toLocaleString()}
+            {netBalance >= 0 ? '+' : ''}{formatMoney(netBalance)}
           </span>
         </div>
       </div>
@@ -241,8 +242,8 @@ const ReservoirVisualizer: React.FC<{
               <span className="text-sm md:text-base font-black text-white tracking-wider">统筹池</span>
               
               <div className="mt-2 flex flex-col items-center gap-0.5">
-                <span className="text-[10px] text-slate-400 font-medium">总流入: <span className="font-mono text-blue-300 font-bold">{Math.round(totalInflow).toLocaleString()}</span></span>
-                <span className="text-[10px] text-slate-400 font-medium">总补足: <span className="font-mono text-amber-300 font-bold">{Math.round(totalSupplement).toLocaleString()}</span></span>
+                <span className="text-[10px] text-slate-400 font-medium">总流入: <span className="font-mono text-blue-300 font-bold">{formatMoney(totalInflow)}</span></span>
+                <span className="text-[10px] text-slate-400 font-medium">总补足: <span className="font-mono text-amber-300 font-bold">{formatMoney(totalSupplement)}</span></span>
               </div>
 
               <div className={`mt-2.5 px-2.5 py-0.5 rounded-full border text-[9px] font-black tracking-wide ${
@@ -309,7 +310,7 @@ const ReservoirVisualizer: React.FC<{
                     </span>
 
                     <span className="text-[9px] font-mono text-slate-400 mt-1 font-semibold">
-                      +{Math.round(m.inflow20).toLocaleString()}
+                      +{formatMoney(m.inflow20)}
                     </span>
                   </div>
 
@@ -325,23 +326,23 @@ const ReservoirVisualizer: React.FC<{
                       <div className="space-y-1 text-[10px]">
                         <div className="flex justify-between text-slate-300">
                           <span>已确权收款包:</span>
-                          <span className="font-mono text-white font-bold">{Math.round(m.confirmedRevenuePackage).toLocaleString()}</span>
+                          <span className="font-mono text-white font-bold">{formatMoney(m.confirmedRevenuePackage)}</span>
                         </div>
                         <div className="flex justify-between text-blue-300 font-semibold">
                           <span>统筹流入 (20%):</span>
-                          <span className="font-mono font-bold">+{Math.round(m.inflow20).toLocaleString()}</span>
+                          <span className="font-mono font-bold">+{formatMoney(m.inflow20)}</span>
                         </div>
                         <div className="flex justify-between text-slate-300">
                           <span>单元收产包:</span>
-                          <span className="font-mono text-white font-bold">{Math.round(m.incomeProductionPackage).toLocaleString()}</span>
+                          <span className="font-mono text-white font-bold">{formatMoney(m.incomeProductionPackage)}</span>
                         </div>
                         <div className="flex justify-between text-slate-300">
                           <span>刚性薪资包:</span>
-                          <span className="font-mono text-white font-bold">{Math.round(m.unitSalary).toLocaleString()}</span>
+                          <span className="font-mono text-white font-bold">{formatMoney(m.unitSalary)}</span>
                         </div>
                         <div className="flex justify-between text-amber-300 font-semibold border-t border-slate-700 pt-1 mt-1">
                           <span>统筹补足额:</span>
-                          <span className="font-mono font-bold">{m.unitSupplement > 0 ? `-${Math.round(m.unitSupplement).toLocaleString()}` : '0'}</span>
+                          <span className="font-mono font-bold">{m.unitSupplement > 0 ? `-${formatMoney(m.unitSupplement)}` : '0'}</span>
                         </div>
                       </div>
                     </div>
@@ -388,20 +389,20 @@ const ReservoirVisualizer: React.FC<{
                   <div>
                     <span className="text-slate-400 block">20% 流入</span>
                     <span className="font-mono font-bold text-blue-600 text-xs">
-                      +{Math.round(m.inflow20).toLocaleString()}
+                      +{formatMoney(m.inflow20)}
                     </span>
                   </div>
                   <div>
                     <span className="text-slate-400 block">统筹补足</span>
                     <span className={`font-mono font-bold text-xs ${isDeficit ? 'text-amber-600' : 'text-slate-400'}`}>
-                      {isDeficit ? `-${Math.round(m.unitSupplement).toLocaleString()}` : '0'}
+                      {isDeficit ? `-${formatMoney(m.unitSupplement)}` : '0'}
                     </span>
                   </div>
                 </div>
 
                 <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[9px] text-slate-500">
-                  <span>收款包: {Math.round(m.confirmedRevenuePackage).toLocaleString()}</span>
-                  <span>薪资包: {Math.round(m.unitSalary).toLocaleString()}</span>
+                  <span>收款包: {formatMoney(m.confirmedRevenuePackage)}</span>
+                  <span>薪资包: {formatMoney(m.unitSalary)}</span>
                 </div>
               </div>
             );
@@ -504,11 +505,11 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
   const handleExport = () => {
     const data = centerMetrics.map(m => ({
       '经营单元': m.center,
-      '已确权收款包': Math.round(m.confirmedRevenuePackage),
-      '经营单元流入': Math.round(m.inflow20),
-      '单元收产包': Math.round(m.incomeProductionPackage),
-      '单元刚性工资': Math.round(m.unitSalary),
-      '统筹补足': Math.round(m.unitSupplement)
+      '已确权收款包': roundMoney(m.confirmedRevenuePackage),
+      '经营单元流入': roundMoney(m.inflow20),
+      '单元收产包': roundMoney(m.incomeProductionPackage),
+      '单元刚性工资': roundMoney(m.unitSalary),
+      '统筹补足': roundMoney(m.unitSupplement)
     }));
     
     const ws = XLSX.utils.json_to_sheet(data);
@@ -576,7 +577,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
         <StatCard 
           label="经营单元流入 (20%)" 
           value={platformCoordinationInflow} 
-          subText={`确权收款包面值: ${Math.round(totalConfirmedRevenuePackage).toLocaleString()}`}
+          subText={`确权收款包面值: ${formatMoney(totalConfirmedRevenuePackage)}`}
           accentColor="blue"
           icon={<Droplets className="w-5 h-5 text-blue-600" />}
           badge="统筹注入"
@@ -600,7 +601,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
         <StatCard 
           label="动态消耗积分 (C/B2)" 
           value={totalCPoints + totalB2Points} 
-          subText={`C类: ${Math.round(totalCPoints).toLocaleString()} | B2类: ${Math.round(totalB2Points).toLocaleString()}`}
+          subText={`C类: ${formatMoney(totalCPoints)} | B2类: ${formatMoney(totalB2Points)}`}
           accentColor="indigo"
           icon={<Coins className="w-5 h-5 text-indigo-600" />}
           badge="已核销"
@@ -690,22 +691,22 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
                       </div>
                     </td>
                     <td className="px-6 py-4 text-right font-mono font-semibold text-slate-700">
-                      {Math.round(m.confirmedRevenuePackage).toLocaleString()}
+                      {formatMoney(m.confirmedRevenuePackage)}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <span className="font-mono font-bold text-blue-600">
-                        +{Math.round(m.inflow20).toLocaleString()}
+                        +{formatMoney(m.inflow20)}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right font-mono font-semibold text-slate-700">
-                      {Math.round(m.incomeProductionPackage).toLocaleString()}
+                      {formatMoney(m.incomeProductionPackage)}
                     </td>
                     <td className="px-6 py-4 text-right font-mono font-semibold text-slate-700">
-                      {Math.round(m.unitSalary).toLocaleString()}
+                      {formatMoney(m.unitSalary)}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <span className={`font-mono font-bold ${isDeficit ? 'text-amber-600' : 'text-slate-300'}`}>
-                        {isDeficit ? `-${Math.round(m.unitSupplement).toLocaleString()}` : '0'}
+                        {isDeficit ? `-${formatMoney(m.unitSupplement)}` : '0'}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-center">
@@ -753,15 +754,15 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
           <div className="flex flex-wrap items-center gap-6 font-mono text-xs">
             <div>
               <span className="text-slate-400 font-sans font-medium mr-1.5">确权收款总计:</span>
-              <span className="text-slate-900 font-bold">{Math.round(totalConfirmedRevenuePackage).toLocaleString()}</span>
+              <span className="text-slate-900 font-bold">{formatMoney(totalConfirmedRevenuePackage)}</span>
             </div>
             <div>
               <span className="text-slate-400 font-sans font-medium mr-1.5">20% 流入总计:</span>
-              <span className="text-blue-600 font-bold">+{Math.round(platformCoordinationInflow).toLocaleString()}</span>
+              <span className="text-blue-600 font-bold">+{formatMoney(platformCoordinationInflow)}</span>
             </div>
             <div>
               <span className="text-slate-400 font-sans font-medium mr-1.5">统筹补足总计:</span>
-              <span className="text-amber-600 font-bold">-{Math.round(finalSupplementValue).toLocaleString()}</span>
+              <span className="text-amber-600 font-bold">-{formatMoney(finalSupplementValue)}</span>
             </div>
           </div>
         </div>
@@ -835,7 +836,7 @@ const StatCard: React.FC<{
           )}
         </div>
         <h4 className={`text-2xl md:text-3xl font-black tracking-tight font-mono ${style.valueColor}`}>
-          {Math.round(value).toLocaleString()}
+          {formatMoney(value)}
         </h4>
       </div>
       {subText && (
