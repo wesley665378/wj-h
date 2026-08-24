@@ -3,7 +3,7 @@ import { User, SystemOperationLog } from '../../types';
 import { fetchClientIp } from '../api/auth';
 import { getAuthToken, clearAuthToken } from '../api/client';
 
-export interface UseAppSessionSyncReturn {
+export interface UseSessionMetaReturn {
   clientIp: string;
   currentTime: Date;
   systemLogs: SystemOperationLog[];
@@ -11,7 +11,7 @@ export interface UseAppSessionSyncReturn {
   clearSessionState: () => void;
 }
 
-export const useAppSessionSync = (currentUser: User | null): UseAppSessionSyncReturn => {
+export const useSessionMeta = (currentUser: User | null): UseSessionMetaReturn => {
   const [clientIp, setClientIp] = useState<string>('127.0.0.1');
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
   const [systemLogs, setSystemLogs] = useState<SystemOperationLog[]>(() => {

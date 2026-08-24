@@ -13,8 +13,6 @@ import Evaluation from './views/Evaluation';
 import Distribution from './views/Distribution';
 import PersonnelPool from './views/PersonnelPool';
 import InternalTransactions from './views/InternalTransactions';
-import { buildValueEfficiencySnapshots } from './src/utils/valueEfficiencySnapshots';
-import { buildJzfpSnapshot } from './src/utils/jzfpSnapshot';
 import DynamicConsumption from './views/DynamicConsumption';
 import MyAccount from './views/MyAccount';
 import SystemInstructions from './views/SystemInstructions';
@@ -36,8 +34,8 @@ import {
   setAuthToken,
   clearAuthToken
 } from './src/api';
-import { useAppSessionSync } from './src/hooks/useAppSessionSync';
-import { buildSyncPayload } from './src/app/workspaceSync';
+import { useSessionMeta } from './src/hooks/useSessionMeta';
+import { buildSyncPayload, buildAppSyncPayload } from './src/app/workspaceSync';
 import { getLocalDateString, getLocalMonthString } from './src/utils/dateUtils';
 import { roundMoney } from './src/utils/formatMoney';
 
@@ -101,7 +99,7 @@ const App: React.FC = () => {
   const [legalTab, setLegalTab] = useState<'agreement' | 'privacy'>('agreement');
 
   // Unified session sync hook (IP, time, operation logs, clear state)
-  const { clientIp, currentTime, systemLogs, addSystemLog, clearSessionState } = useAppSessionSync(currentUser);
+  const { clientIp, currentTime, systemLogs, addSystemLog, clearSessionState } = useSessionMeta(currentUser);
 
   const handleOpenLegal = (tab: 'agreement' | 'privacy') => {
     setLegalTab(tab);
@@ -269,42 +267,21 @@ const App: React.FC = () => {
       toast.error('工作区尚未加载完成，请稍后再试');
       return;
     }
-    const nextUsers = overrides?.users ?? managedUsers;
-    const nextLogs = overrides?.logs ?? logs;
-    const nextTxs = overrides?.transactions ?? transactions;
-    const nextRes = overrides?.miningResources ?? miningResources;
-    const nextCBs = overrides?.circuitBreakers ?? circuitBreakers;
-    const nextSamples = overrides?.meetingSamples ?? meetingSamples;
-    const nextAcc = overrides?.acceptanceRecords ?? acceptanceRecords;
-    const nextUnits = overrides?.businessUnits ?? businessUnits;
 
-    const dtcbLogs = nextLogs.filter(l => l.confirmationType === '手动确权');
-    const jzczLogs = nextLogs.filter(l => l.confirmationType !== '手动确权');
-    const snapshots = buildValueEfficiencySnapshots(nextUsers, nextLogs, nextRes, filterMonth);
-    const jzfpSnapshots = buildJzfpSnapshot(nextUsers, nextLogs, filterMonth);
-
-    const canWriteTownCenters = currentUser?.role === Role.Admin || currentUser?.role === Role.npcxie;
-
-    const payload = {
-      ...buildSyncPayload({
-        managedUsers: nextUsers,
-        logs: jzczLogs,
-        dtcbLogs: dtcbLogs,
-        transactions: nextTxs,
-        miningResources: nextRes,
-        businessUnits: canWriteTownCenters ? nextUnits : [],
-        circuitBreakers: nextCBs,
-        systemLogs,
-        fhctzRecords: [],
-        settlementPayouts: [],
-        valueEfficiencySnapshots: snapshots,
-        systemConfig: undefined,
-      }),
-      acceptanceRecords: nextAcc,
-      jzfp: jzfpSnapshots,
-      rdq: nextCBs,
-      meetingSamples: nextSamples,
-    };
+    const payload = buildAppSyncPayload({
+      managedUsers,
+      logs,
+      transactions,
+      miningResources,
+      businessUnits,
+      circuitBreakers,
+      systemLogs,
+      meetingSamples,
+      acceptanceRecords,
+      filterMonth,
+      currentUser,
+      overrides,
+    });
 
     try {
       await syncWorkspace(payload);
@@ -753,23 +730,21 @@ const App: React.FC = () => {
       if (!currentUser || !workspaceLoaded) return;
 
       try {
-        const dtcbLogs = logs.filter(l => l.confirmationType === '手动确权');
-        const jzczLogs = logs.filter(l => l.confirmationType !== '手动确权');
-        const snapshots = buildValueEfficiencySnapshots(managedUsers, logs, miningResources, filterMonth);
-        const jzfpSnapshots = buildJzfpSnapshot(managedUsers, logs, filterMonth);
-        
-        await syncWorkspace({ 
-          users: managedUsers,
-          dtcb: dtcbLogs,
-          logs: jzczLogs,
+        const payload = buildAppSyncPayload({
+          managedUsers,
+          logs,
           transactions,
           miningResources,
-          valueEfficiencySnapshots: snapshots,
-          acceptanceRecords,
-          jzfp: jzfpSnapshots,
           businessUnits,
-          meetingSamples
+          circuitBreakers,
+          systemLogs,
+          meetingSamples,
+          acceptanceRecords,
+          filterMonth,
+          currentUser,
         });
+        
+        await syncWorkspace(payload);
       } catch (err) {
         console.error('数据同步失败:', err);
       }
@@ -788,7 +763,7 @@ const App: React.FC = () => {
 
       return () => clearTimeout(timer);
     }
-  }, [managedUsers, logs, transactions, businessUnits, miningResources, filterMonth, currentUser, workspaceLoaded, acceptanceRecords, meetingSamples]);
+  }, [managedUsers, logs, transactions, businessUnits, miningResources, circuitBreakers, systemLogs, meetingSamples, acceptanceRecords, filterMonth, currentUser, workspaceLoaded]);
 
   useEffect(() => {
     localStorage.setItem('shihe_resources', JSON.stringify(miningResources));

@@ -6,7 +6,6 @@ import { UserTableRow } from '../src/components/UserTableRow';
 import { MENU_ITEMS, RANK_DICTIONARY } from '../constants';
 import { checkUserPermission, RANK_CONFIG } from '../src/utils/business';
 import { getLocalMonthString } from '../src/utils/dateUtils';
-import { syncWorkspace } from '../src/api';
 import { 
   resolveBusinessUnitName, 
   canonicalizeBusinessUnitLabel, 
@@ -210,13 +209,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
         mustChangePassword: isAutoCategory || userPassword === '66668888'
       };
       
+      isSyncing.current = true;
       try {
         const nextUsers = [...users, newUser];
-        if (persist) {
-          await persist({ users: nextUsers });
-        } else {
-          await syncWorkspace({ users: nextUsers });
-        }
+        const ok = await persistOrAlert({ users: nextUsers });
+        if (!ok) return;
         
         // 成功后更新本地内存
         onUpdateUsers(nextUsers);
@@ -336,11 +333,8 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
 
     isSyncing.current = true;
     try {
-      if (persist) {
-        await persist({ users: nextUsers });
-      } else {
-        await syncWorkspace({ users: nextUsers });
-      }
+      const ok = await persistOrAlert({ users: nextUsers });
+      if (!ok) return;
       
       // If editing existing user, still use onUpdatePassword for clarity/legacy
       if (editingUserId && formData.password) {
@@ -407,12 +401,9 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
     
     isSyncing.current = true;
     try {
+      const ok = await persistOrAlert({ businessUnits: updatedUnits });
+      if (!ok) return;
       onUpdateBusinessUnits(updatedUnits);
-      if (persist) {
-        await persist({ businessUnits: updatedUnits });
-      } else {
-        await syncWorkspace({ businessUnits: updatedUnits });
-      }
       setNewCenterName('');
       showAlert(`成功新增单元: ${formattedName}`);
     } catch (err) {
@@ -449,13 +440,10 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
 
     isSyncing.current = true;
     try {
+      const ok = await persistOrAlert({ businessUnits: updatedUnits, users: updatedUsers });
+      if (!ok) return;
       onUpdateBusinessUnits(updatedUnits);
       onUpdateUsers(updatedUsers);
-      if (persist) {
-        await persist({ businessUnits: updatedUnits, users: updatedUsers });
-      } else {
-        await syncWorkspace({ businessUnits: updatedUnits, users: updatedUsers });
-      }
       setEditingCenter(null);
       showAlert(`单元 [${oldName}] 已重命名为 [${newName}]`);
     } catch (err) {
@@ -489,13 +477,10 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       });
       
       try {
+        const ok = await persistOrAlert({ businessUnits: updatedUnits, users: updatedUsers });
+        if (!ok) return;
         onUpdateBusinessUnits(updatedUnits);
         onUpdateUsers(updatedUsers);
-        if (persist) {
-          await persist({ businessUnits: updatedUnits, users: updatedUsers });
-        } else {
-          await syncWorkspace({ businessUnits: updatedUnits, users: updatedUsers });
-        }
         showAlert(`已成功注销单元 [${name}] 及其关联别名，并已清空关联人员归属。`);
       } catch (err) {
         showAlert('注销单元写库同步失败，请重试');
@@ -654,14 +639,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
           const finalUnits = [...businessUnits, ...unitsToAdd];
 
           try {
+            const ok = await persistOrAlert({ users: finalUsers, businessUnits: finalUnits });
+            if (!ok) return;
             onUpdateUsers(finalUsers);
             if (unitsToAdd.length > 0) {
               onUpdateBusinessUnits(finalUnits);
-            }
-            if (persist) {
-              await persist({ users: finalUsers, businessUnits: finalUnits });
-            } else {
-              await syncWorkspace({ users: finalUsers, businessUnits: finalUnits });
             }
             showAlert('批量导入成功。');
           } catch (err) {
@@ -705,12 +687,9 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
 
       const updatedUsers = users.map(u => u.id === userToToggle.id ? { ...u, userStatus: 'active' as const, resignDate: undefined } : u);
       try {
+        const ok = await persistOrAlert({ users: updatedUsers });
+        if (!ok) return;
         onUpdateUsers(updatedUsers);
-        if (persist) {
-          await persist({ users: updatedUsers });
-        } else {
-          await syncWorkspace({ users: updatedUsers });
-        }
         showAlert(`${userToToggle.name} 已成功复职。`, () => {
           // 提示旧对冲单仍在
           showAlert('提示：复职操作不会自动冲销原有的离职对冲单，如需调整请在「动态消耗」中手动处理。');
@@ -776,12 +755,9 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
 
       const updatedUsers = users.filter(u => u.id !== userId);
       try {
+        const ok = await persistOrAlert({ users: updatedUsers });
+        if (!ok) return;
         onUpdateUsers(updatedUsers);
-        if (persist) {
-          await persist({ users: updatedUsers });
-        } else {
-          await syncWorkspace({ users: updatedUsers });
-        }
         showAlert('帐号注销成功');
       } catch (err) {
         showAlert(`帐号注销失败：${(err as Error).message || '网络问题'}`);
@@ -809,16 +785,10 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       : [...currentPermissions, permissionId];
 
     const updatedUsers = users.map(u => u.id === userId ? { ...u, permissions: newPermissions } : u);
-    onUpdateUsers(updatedUsers);
 
-    try {
-      if (persist) {
-        await persist({ users: updatedUsers });
-      } else {
-        await syncWorkspace({ users: updatedUsers });
-      }
-    } catch (err) {
-      showAlert(`权限修改同步失败：${(err as Error).message || '网络错误'}`);
+    const ok = await persistOrAlert({ users: updatedUsers });
+    if (ok) {
+      onUpdateUsers(updatedUsers);
     }
   };
 
@@ -829,16 +799,10 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
     }
     const allIds = MENU_ITEMS.map(item => item.id);
     const updatedUsers = users.map(u => u.id === userId ? { ...u, permissions: allIds } : u);
-    onUpdateUsers(updatedUsers);
-    try {
-      if (persist) {
-        await persist({ users: updatedUsers });
-      } else {
-        await syncWorkspace({ users: updatedUsers });
-      }
+    const ok = await persistOrAlert({ users: updatedUsers });
+    if (ok) {
+      onUpdateUsers(updatedUsers);
       showAlert('已成功为该成员开启全部组件访问权限');
-    } catch (err) {
-      showAlert(`权限修改同步失败：${(err as Error).message || '网络错误'}`);
     }
   };
 
@@ -848,16 +812,10 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       return;
     }
     const updatedUsers = users.map(u => u.id === userId ? { ...u, permissions: [] } : u);
-    onUpdateUsers(updatedUsers);
-    try {
-      if (persist) {
-        await persist({ users: updatedUsers });
-      } else {
-        await syncWorkspace({ users: updatedUsers });
-      }
+    const ok = await persistOrAlert({ users: updatedUsers });
+    if (ok) {
+      onUpdateUsers(updatedUsers);
       showAlert('已关停该成员的所有组件访问权限');
-    } catch (err) {
-      showAlert(`权限修改同步失败：${(err as Error).message || '网络错误'}`);
     }
   };
 
@@ -874,16 +832,10 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       }
       return u;
     });
-    onUpdateUsers(updatedUsers);
-    try {
-      if (persist) {
-        await persist({ users: updatedUsers });
-      } else {
-        await syncWorkspace({ users: updatedUsers });
-      }
+    const ok = await persistOrAlert({ users: updatedUsers });
+    if (ok) {
+      onUpdateUsers(updatedUsers);
       showAlert('已成功重置为职级默认权限配置');
-    } catch (err) {
-      showAlert(`重置权限同步失败：${(err as Error).message || '网络错误'}`);
     }
   };
 
