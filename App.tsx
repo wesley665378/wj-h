@@ -930,7 +930,7 @@ const App: React.FC = () => {
     if (!currentUser) return {} as any;
     return {
       kanban: { 
-        logs: filteredLogs, 
+        logs: auditLogs, 
         resources: filteredResources, 
         users: filteredUsers, 
         currentUser, 
@@ -945,7 +945,7 @@ const App: React.FC = () => {
         user: currentUser, 
         users: filteredUsers,
         resources: filteredResources, 
-        logs: filteredLogs, 
+        logs: auditLogs, 
         onLogSubmit, 
         onSwitchTab: setActiveTab,
         transactions,
@@ -959,9 +959,9 @@ const App: React.FC = () => {
         user: currentUser, 
         users: filteredUsers, 
         resources: filteredResources, 
-        logs: filteredLogs, 
-        jzczLogs: filteredLogs.filter(l => l.confirmationType !== '手动确权'),
-        dtcbLogs: filteredLogs.filter(l => l.confirmationType === '手动确权'),
+        logs: auditLogs, 
+        jzczLogs: auditLogs.filter(l => l.confirmationType !== '手动确权'),
+        dtcbLogs: auditLogs.filter(l => l.confirmationType === '手动确权'),
         onLogSubmit: onConsumptionSubmit,
         persistWorkspaceWithOverrides
       },
@@ -1009,7 +1009,7 @@ const App: React.FC = () => {
         allResources: miningResources,
         transactions: filteredTransactions, 
         allTransactions: transactions,
-        logs: filteredLogs,
+        logs: auditLogs,
         onSubmitTransaction,
         onAuditTransaction,
         onUpdateResource,
@@ -1024,8 +1024,8 @@ const App: React.FC = () => {
       resources: { 
         user: currentUser, 
         resources: isAdminOrNPC ? miningResources : filteredResources,
-        logs: isAdminOrNPC ? logs : filteredLogs,
-        dtcbLogs: (isAdminOrNPC ? logs : filteredLogs).filter(l => l.confirmationType === '手动确权' || !!l.costCategory || !!(l as any).consumptionType),
+        logs: isAdminOrNPC ? logs : auditLogs,
+        dtcbLogs: (isAdminOrNPC ? logs : auditLogs).filter(l => l.confirmationType === '手动确权' || !!l.costCategory || !!(l as any).consumptionType),
         transactions: isAdminOrNPC ? transactions : filteredTransactions,
         managedUsers: isAdminOrNPC ? managedUsers : filteredUsers,
         onAddResource,
@@ -1034,7 +1034,7 @@ const App: React.FC = () => {
         businessUnits: businessUnits
       },
       reservoir: { 
-        logs: filteredLogs,
+        logs: auditLogs,
         auditLogs: auditLogs,
         resources: isAdminOrNPC ? miningResources : filteredResources,
         users: isAdminOrNPC ? managedUsers : filteredUsers,

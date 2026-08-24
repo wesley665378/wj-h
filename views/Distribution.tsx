@@ -138,6 +138,8 @@ const Distribution: React.FC<DistributionProps> = ({
     diffReason: "",
   });
 
+  const isLocalEmbedded = import.meta.env.VITE_USE_LOCAL_AUTH === 'true';
+
   const canRegisterPayout = useMemo(() => {
     if (!currentUser) return false;
     const role = currentUser.role as string;
@@ -208,9 +210,6 @@ const Distribution: React.FC<DistributionProps> = ({
 
         try {
           await createCdtzRecord(newRecord);
-          if (onAddAcceptanceRecord) {
-            onAddAcceptanceRecord(newRecord);
-          }
           showAlert(`已成功写入承兑台账 cdtz！对 [${bonusTarget.userName}] 的 ${bonusForm.category} 发放：${fmtAmount(bonusForm.amount)}`);
         } catch (err) {
           showAlert("写入承兑台账 cdtz 失败，请重试");
@@ -359,24 +358,6 @@ const Distribution: React.FC<DistributionProps> = ({
         let nextDebt = 0;
         let theoreticalBonus = 0;
 
-        const allocConfirmed = calculateBonusAllocation(
-            effectiveMonth,
-            user,
-            logs,
-            resources,
-            users,
-            AuditStatus.Confirmed
-        );
-
-        const allocApproved = calculateBonusAllocation(
-            effectiveMonth,
-            user,
-            logs,
-            resources,
-            users,
-            AuditStatus.Approved
-        );
-
         let historyDebtConfirmed = 0;
         let nextDebtConfirmed = 0;
         let currentSurplusConfirmed = 0;
@@ -390,56 +371,99 @@ const Distribution: React.FC<DistributionProps> = ({
         let historyRecordsConfirmed: any[] = [];
         let historyRecordsApproved: any[] = [];
 
-        if (allocConfirmed.ratio > 0 || allocApproved.ratio > 0) {
-            historyDebtConfirmed = Math.abs(allocConfirmed.history);
-            currentSurplusConfirmed = allocConfirmed.current;
-            netRedundancyConfirmed = allocConfirmed.quota;
-            nextDebtConfirmed = Math.abs(allocConfirmed.newDebt);
+        let netBonusApprovedVal = 0;
+        let netBonusConfirmedVal = 0;
 
-            historyDebtApproved = Math.abs(allocApproved.history);
-            currentSurplusApproved = allocApproved.current;
-            netRedundancyApproved = allocApproved.quota;
-            nextDebtApproved = Math.abs(allocApproved.newDebt);
-            
-            historyRecordsConfirmed = allocConfirmed.historyRecords;
-            historyRecordsApproved = allocApproved.historyRecords;
+        let ratioVal = 0;
+        let theoreticalBonusConfirmedVal = 0;
+        let theoreticalBonusApprovedVal = 0;
+        let yearlyBonusApprovedVal = 0;
 
-            // To maintain compatibility or general showing, let's pick Confirmed for the modal header if needed
-            historyDebt = historyDebtConfirmed;
-            currentSurplus = currentSurplusConfirmed;
-            netRedundancy = netRedundancyConfirmed;
-            nextDebt = nextDebtConfirmed;
-            theoreticalBonus = allocConfirmed.theoreticalBonus;
-        }
-
-        // 如果远程 distribution API 返回了数据，以服务端为准
         const serverItem = serverDistribution?.find(s => s.userId === user.id);
-        if (serverItem) {
-          historyDebtConfirmed = serverItem.historyDebtConfirmed ?? historyDebtConfirmed;
-          currentSurplusConfirmed = serverItem.currentSurplusConfirmed ?? currentSurplusConfirmed;
-          netRedundancyConfirmed = serverItem.netRedundancyConfirmed ?? netRedundancyConfirmed;
-          nextDebtConfirmed = serverItem.nextDebtConfirmed ?? nextDebtConfirmed;
-          
-          historyDebtApproved = serverItem.historyDebtApproved ?? historyDebtApproved;
-          currentSurplusApproved = serverItem.currentSurplusApproved ?? currentSurplusApproved;
-          netRedundancyApproved = serverItem.netRedundancyApproved ?? netRedundancyApproved;
-          nextDebtApproved = serverItem.nextDebtApproved ?? nextDebtApproved;
 
-          historyDebt = serverItem.historyDebt ?? historyDebt;
-          currentSurplus = serverItem.currentSurplus ?? currentSurplus;
-          netRedundancy = serverItem.netRedundancy ?? netRedundancy;
-          nextDebt = serverItem.nextDebt ?? nextDebt;
-          theoreticalBonus = serverItem.theoreticalBonusConfirmed ?? serverItem.theoreticalBonus ?? theoreticalBonus;
-          if (serverItem.historyRecordsConfirmed) {
-            historyRecordsConfirmed = serverItem.historyRecordsConfirmed;
-          }
-          if (serverItem.historyRecordsApproved) {
-            historyRecordsApproved = serverItem.historyRecordsApproved;
-          }
-        }
+        if (!isLocalEmbedded) {
+          // 远程生产模式：仅依赖 serverDistribution API 数据，不做 calculateBonusAllocation 静默降级
+          if (serverItem) {
+            historyDebtConfirmed = serverItem.historyDebtConfirmed ?? 0;
+            currentSurplusConfirmed = serverItem.currentSurplusConfirmed ?? 0;
+            netRedundancyConfirmed = serverItem.netRedundancyConfirmed ?? 0;
+            nextDebtConfirmed = serverItem.nextDebtConfirmed ?? 0;
 
-        const netBonusApprovedVal = serverItem?.theoreticalBonusApproved ?? (allocApproved.ratio > 0 ? allocApproved.theoreticalBonus : 0);
-        const netBonusConfirmedVal = serverItem?.theoreticalBonusConfirmed ?? (allocConfirmed.ratio > 0 ? allocConfirmed.theoreticalBonus : 0); 
+            historyDebtApproved = serverItem.historyDebtApproved ?? 0;
+            currentSurplusApproved = serverItem.currentSurplusApproved ?? 0;
+            netRedundancyApproved = serverItem.netRedundancyApproved ?? 0;
+            nextDebtApproved = serverItem.nextDebtApproved ?? 0;
+
+            historyDebt = serverItem.historyDebt ?? 0;
+            currentSurplus = serverItem.currentSurplus ?? 0;
+            netRedundancy = serverItem.netRedundancy ?? 0;
+            nextDebt = serverItem.nextDebt ?? 0;
+
+            theoreticalBonus = serverItem.theoreticalBonusConfirmed ?? serverItem.theoreticalBonus ?? 0;
+            netBonusConfirmedVal = serverItem.theoreticalBonusConfirmed ?? 0;
+            netBonusApprovedVal = serverItem.theoreticalBonusApproved ?? 0;
+
+            ratioVal = serverItem.ratio ?? (currentSurplus > 0 ? 1 : 0);
+            theoreticalBonusConfirmedVal = serverItem.theoreticalBonusConfirmed ?? serverItem.theoreticalBonus ?? 0;
+            theoreticalBonusApprovedVal = serverItem.theoreticalBonusApproved ?? 0;
+            yearlyBonusApprovedVal = serverItem.yearlyBonusApproved ?? 0;
+
+            if (serverItem.historyRecordsConfirmed) {
+              historyRecordsConfirmed = serverItem.historyRecordsConfirmed;
+            }
+            if (serverItem.historyRecordsApproved) {
+              historyRecordsApproved = serverItem.historyRecordsApproved;
+            }
+          }
+        } else {
+          // 本地嵌入模式：使用 calculateBonusAllocation 算力引擎
+          const allocConfirmed = calculateBonusAllocation(
+              effectiveMonth,
+              user,
+              logs,
+              resources,
+              users,
+              AuditStatus.Confirmed
+          );
+
+          const allocApproved = calculateBonusAllocation(
+              effectiveMonth,
+              user,
+              logs,
+              resources,
+              users,
+              AuditStatus.Approved
+          );
+
+          if (allocConfirmed.ratio > 0 || allocApproved.ratio > 0) {
+              historyDebtConfirmed = Math.abs(allocConfirmed.history);
+              currentSurplusConfirmed = allocConfirmed.current;
+              netRedundancyConfirmed = allocConfirmed.quota;
+              nextDebtConfirmed = Math.abs(allocConfirmed.newDebt);
+
+              historyDebtApproved = Math.abs(allocApproved.history);
+              currentSurplusApproved = allocApproved.current;
+              netRedundancyApproved = allocApproved.quota;
+              nextDebtApproved = Math.abs(allocApproved.newDebt);
+              
+              historyRecordsConfirmed = allocConfirmed.historyRecords;
+              historyRecordsApproved = allocApproved.historyRecords;
+
+              historyDebt = historyDebtConfirmed;
+              currentSurplus = currentSurplusConfirmed;
+              netRedundancy = netRedundancyConfirmed;
+              nextDebt = nextDebtConfirmed;
+              theoreticalBonus = allocConfirmed.theoreticalBonus;
+          }
+
+          netBonusConfirmedVal = allocConfirmed.ratio > 0 ? allocConfirmed.theoreticalBonus : 0;
+          netBonusApprovedVal = allocApproved.ratio > 0 ? allocApproved.theoreticalBonus : 0;
+
+          ratioVal = allocConfirmed.ratio;
+          theoreticalBonusConfirmedVal = allocConfirmed.theoreticalBonus;
+          theoreticalBonusApprovedVal = allocApproved.theoreticalBonus;
+          yearlyBonusApprovedVal = yearlyBaseValApproved * allocApproved.ratio;
+        } 
 
         const userObj = users.find((u) => u.id === user.id);
         const userCenter = userObj?.center || "";
@@ -462,7 +486,7 @@ const Distribution: React.FC<DistributionProps> = ({
           netRedundancy,
           nextDebt,
           theoreticalBonus,
-          ratio: allocConfirmed.ratio,
+          ratio: ratioVal,
           centerLevelBonus,
 
           historyRecordsConfirmed,
@@ -473,8 +497,8 @@ const Distribution: React.FC<DistributionProps> = ({
           currentSurplusApproved,
           netRedundancyConfirmed,
           netRedundancyApproved,
-          theoreticalBonusConfirmed: allocConfirmed.theoreticalBonus,
-          theoreticalBonusApproved: allocApproved.theoreticalBonus,
+          theoreticalBonusConfirmed: theoreticalBonusConfirmedVal,
+          theoreticalBonusApproved: theoreticalBonusApprovedVal,
 
           confirmedValueConfirmed: confirmedMetrics.productionPackage, // Keeping for backward compatibility if used
           bCostConfirmed: confirmedMetrics.b1Cost,
@@ -503,7 +527,7 @@ const Distribution: React.FC<DistributionProps> = ({
           // Yearly data
           yearlyIncomeApproved: yearlyBaseValApproved,
           yearlyIncomeConfirmed: yearlyBaseValConfirmed,
-          yearlyBonusApproved: yearlyBaseValApproved * allocApproved.ratio,
+          yearlyBonusApproved: yearlyBonusApprovedVal,
 
           cWeight: C_WEIGHT,
           salaryPackage,
