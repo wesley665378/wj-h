@@ -11,6 +11,7 @@ import {
 } from '../../types';
 import { buildValueEfficiencySnapshots } from '../utils/valueEfficiencySnapshots';
 import { buildJzfpSnapshot } from '../utils/jzfpSnapshot';
+import { pickUserForWorkspaceSync } from '../utils/userSyncPayload';
 
 export interface BuildSyncPayloadInput {
   managedUsers?: User[];
@@ -56,6 +57,7 @@ export interface BuildAppSyncPayloadInput {
   acceptanceRecords: AcceptanceRecord[];
   filterMonth: string;
   currentUser: User | null;
+  includePassword?: boolean;
   overrides?: Partial<{
     users: User[];
     logs: ValueCreationLog[];
@@ -70,16 +72,10 @@ export interface BuildAppSyncPayloadInput {
 
 /** 从 App 当前 state 构建 sync payload，persist 与防抖 sync 共用 */
 export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<string, unknown> {
-  const { overrides } = input;
+  const { overrides, includePassword } = input;
   const nextUsers = overrides?.users ?? input.managedUsers;
-  // strip plain-text password if present
-  const cleanedUsers = nextUsers.map(u => {
-    if ('password' in u) {
-      const { password, ...rest } = u;
-      return rest;
-    }
-    return u;
-  });
+  // Use utility to handle password stripping based on includePassword option
+  const cleanedUsers = nextUsers.map(u => pickUserForWorkspaceSync(u, { includePassword }));
 
   const nextLogs = overrides?.logs ?? input.logs;
   const nextTxs = overrides?.transactions ?? input.transactions;
@@ -94,7 +90,11 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
   const snapshots = buildValueEfficiencySnapshots(cleanedUsers, nextLogs, nextRes, input.filterMonth);
   const jzfpSnapshots = buildJzfpSnapshot(cleanedUsers, nextLogs, input.filterMonth);
 
-  const canWrite = input.currentUser?.role === Role.Admin && nextUnits && nextUnits.length > 0;
+  const canSendBusinessUnits = input.currentUser?.role === Role.Admin && nextUnits && nextUnits.length > 0;
+
+  const isInitialUsersPlaceholder = 
+    cleanedUsers.length === 0 || 
+    (cleanedUsers.length <= 3 && cleanedUsers.every(u => u.id === 'admin' || u.id === '1635' || u.id === 'npcxie'));
 
   const payload: Record<string, any> = {
     ...buildSyncPayload({
@@ -103,7 +103,7 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
       dtcbLogs: dtcbLogs,
       transactions: nextTxs,
       miningResources: nextRes,
-      businessUnits: canWrite ? nextUnits : undefined,
+      businessUnits: canSendBusinessUnits ? nextUnits : undefined,
       circuitBreakers: nextCBs,
       systemLogs: input.systemLogs,
       fhctzRecords: [],
@@ -117,9 +117,40 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
     meetingSamples: nextSamples,
   };
 
-  if (!canWrite) {
+  if (!canSendBusinessUnits) {
     delete payload.businessUnits;
     delete payload.townCenters;
+  }
+
+  if (isInitialUsersPlaceholder) {
+    delete payload.users;
+  }
+
+  // Anti-Data-Loss (防清库) Safeguard:
+  // "sync 禁止传 [] 给 settlementPayouts/cdtz、dtcb、fhctz、jzfp、zhjzpj"
+  // "无数据必须省略字段，不得写死 settlementPayouts:[]、fhctzRecords:[]"
+  const keysToOmitIfEmpty = [
+    'settlementPayouts',
+    'miningResources',   // cdtz
+    'dtcb',
+    'fhctzRecords',      // fhctz
+    'fhctz',
+    'jzfp',
+    'valueEfficiencySnapshots', // zhjzpj
+    'logs',
+    'transactions',
+    'circuitBreakers',
+    'rdq',
+    'meetingSamples',
+    'acceptanceRecords'
+  ];
+
+  for (const key of keysToOmitIfEmpty) {
+    if (payload[key] !== undefined) {
+      if (Array.isArray(payload[key]) && payload[key].length === 0) {
+        delete payload[key];
+      }
+    }
   }
 
   return payload;

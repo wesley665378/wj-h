@@ -41,7 +41,11 @@ export interface SyncWorkspacePayload {
 }
 
 export const fetchWorkspaceData = async (): Promise<WorkspaceDataResponse> => {
-  return apiClient.get<WorkspaceDataResponse>('/api/workspace');
+  const res = await apiClient.get<any>('/api/workspace');
+  if (res && res.code !== undefined && res.data !== undefined) {
+    return res.data as WorkspaceDataResponse;
+  }
+  return res as WorkspaceDataResponse;
 };
 
 export const syncWorkspace = async (payload: SyncWorkspacePayload): Promise<{ success: boolean; error?: string }> => {

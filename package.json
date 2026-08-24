@@ -1,7 +1,7 @@
 {
   "name": "城市守护者价值循环智能体",
   "private": true,
-  "version": "3.5.19",
+  "version": "3.5.23",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",

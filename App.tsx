@@ -75,24 +75,30 @@ const INITIAL_MINING_RESOURCES: MiningResource[] = [
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    try {
-      const saved = localStorage.getItem('shihe_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch (e) {
-      console.error('Failed to parse user from localStorage', e);
-      return null;
+    if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
+      try {
+        const saved = localStorage.getItem('shihe_user');
+        return saved ? JSON.parse(saved) : null;
+      } catch (e) {
+        console.error('Failed to parse user from localStorage', e);
+        return null;
+      }
     }
+    return null;
   });
   
   const [businessUnits, setBusinessUnits] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('shihe_business_units');
-      const parsed = saved ? JSON.parse(saved) : ['RC', '经营单元-001'];
-      return Array.isArray(parsed) ? parsed : ['RC', '经营单元-001'];
-    } catch (e) {
-      console.error('Failed to parse business units', e);
-      return ['RC', '经营单元-001'];
+    if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
+      try {
+        const saved = localStorage.getItem('shihe_business_units');
+        const parsed = saved ? JSON.parse(saved) : ['RC', '经营单元-001'];
+        return Array.isArray(parsed) ? parsed : ['RC', '经营单元-001'];
+      } catch (e) {
+        console.error('Failed to parse business units', e);
+        return ['RC', '经营单元-001'];
+      }
     }
+    return ['RC', '经营单元-001'];
   });
 
   const [managedUsers, setManagedUsers] = useState<User[]>(INITIAL_USERS);
@@ -191,10 +197,22 @@ const App: React.FC = () => {
           }
           if (data.circuitBreakers && Array.isArray(data.circuitBreakers)) {
             setCircuitBreakers(data.circuitBreakers);
-            localStorage.setItem('shihe_circuit_breakers', JSON.stringify(data.circuitBreakers));
+            if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
+              try {
+                localStorage.setItem('shihe_circuit_breakers', JSON.stringify(data.circuitBreakers));
+              } catch (e) {
+                console.warn(e);
+              }
+            }
           } else if (data.rdq && Array.isArray(data.rdq)) {
             setCircuitBreakers(data.rdq);
-            localStorage.setItem('shihe_circuit_breakers', JSON.stringify(data.rdq));
+            if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
+              try {
+                localStorage.setItem('shihe_circuit_breakers', JSON.stringify(data.rdq));
+              } catch (e) {
+                console.warn(e);
+              }
+            }
           }
           if (data.meetingSamples && Array.isArray(data.meetingSamples)) {
             setMeetingSamples(data.meetingSamples);
@@ -208,8 +226,8 @@ const App: React.FC = () => {
       } catch (err) {
         console.error('无法从后端获取工作区数据:', err);
         toastApiError(err, '工作区加载失败，当前可能为缓存数据');
-        // 发生错误时，依然标记为就绪，以便用户能继续操作（使用本地缓存或初始数据）
-        setWorkspaceLoaded(true);
+        // GET workspace 失败后禁止自动 sync，因此保持 workspaceLoaded 为 false
+        setWorkspaceLoaded(false);
       }
     };
     fetchWorkspace();
@@ -218,14 +236,20 @@ const App: React.FC = () => {
     fetch(`${import.meta.env.VITE_API_BASE || ''}/api/admin/migrate`, { method: 'POST' }).catch(() => {});
     
     // 清除已废弃的数据
-    const currentUnits = localStorage.getItem('shihe_business_units');
-    if (currentUnits) {
-      let units = JSON.parse(currentUnits);
-      const toRemove = ['经营单元-001', '经营单元-002', '统筹池'];
-      if (units.some((t: string) => toRemove.includes(t))) {
-        units = units.filter((t: string) => !toRemove.includes(t));
-        localStorage.setItem('shihe_business_units', JSON.stringify(units));
-        setBusinessUnits(units);
+    if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
+      const currentUnits = localStorage.getItem('shihe_business_units');
+      if (currentUnits) {
+        try {
+          let units = JSON.parse(currentUnits);
+          const toRemove = ['经营单元-001', '经营单元-002', '统筹池'];
+          if (units.some((t: string) => toRemove.includes(t))) {
+            units = units.filter((t: string) => !toRemove.includes(t));
+            localStorage.setItem('shihe_business_units', JSON.stringify(units));
+            setBusinessUnits(units);
+          }
+        } catch (e) {
+          console.warn(e);
+        }
       }
     }
     
@@ -237,8 +261,15 @@ const App: React.FC = () => {
   const [transactions, setTransactions] = useState<InternalTransaction[]>([]);
   const [acceptanceRecords, setAcceptanceRecords] = useState<AcceptanceRecord[]>([]);
   const [circuitBreakers, setCircuitBreakers] = useState<CircuitBreaker[]>(() => {
-    const saved = localStorage.getItem('shihe_circuit_breakers');
-    return saved ? JSON.parse(saved) : [];
+    if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
+      try {
+        const saved = localStorage.getItem('shihe_circuit_breakers');
+        return saved ? JSON.parse(saved) : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
   });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
@@ -276,6 +307,7 @@ const App: React.FC = () => {
       filterMonth,
       currentUser,
       overrides,
+      includePassword: (overrides?.users || managedUsers).some(u => typeof (u as any).password === 'string' && (u as any).password.length > 0)
     });
 
     try {
@@ -564,7 +596,13 @@ const App: React.FC = () => {
     setCircuitBreakers(prev => {
       const exists = prev.some(item => item.id === cb.id);
       const next = exists ? prev.map(item => item.id === cb.id ? cb : item) : [...prev, cb];
-      localStorage.setItem('shihe_circuit_breakers', JSON.stringify(next));
+      if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
+        try {
+          localStorage.setItem('shihe_circuit_breakers', JSON.stringify(next));
+        } catch (e) {
+          console.warn(e);
+        }
+      }
       persistWorkspaceWithOverrides({ circuitBreakers: next });
       return next;
     });
@@ -574,7 +612,13 @@ const App: React.FC = () => {
   const onRecoverCircuitBreaker = React.useCallback((id: string) => {
     setCircuitBreakers(prev => {
       const next = prev.map(cb => cb.id === id ? { ...cb, status: 'recovered' as const } : cb);
-      localStorage.setItem('shihe_circuit_breakers', JSON.stringify(next));
+      if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
+        try {
+          localStorage.setItem('shihe_circuit_breakers', JSON.stringify(next));
+        } catch (e) {
+          console.warn(e);
+        }
+      }
       persistWorkspaceWithOverrides({ circuitBreakers: next });
       const cbItem = prev.find(c => c.id === id);
       if (cbItem && cbItem.status === 'active') {
@@ -702,18 +746,20 @@ const App: React.FC = () => {
       return;
     }
 
-    try {
-      const savedResources = localStorage.getItem('shihe_resources');
-      if (savedResources) setMiningResources(JSON.parse(savedResources));
-    } catch (e) {
-      console.warn('Failed to parse shihe_resources from localStorage', e);
-    }
+    if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
+      try {
+        const savedResources = localStorage.getItem('shihe_resources');
+        if (savedResources) setMiningResources(JSON.parse(savedResources));
+      } catch (e) {
+        console.warn('Failed to parse shihe_resources from localStorage', e);
+      }
 
-    try {
-      const savedTransactions = localStorage.getItem('shihe_transactions');
-      if (savedTransactions) setTransactions(JSON.parse(savedTransactions));
-    } catch (e) {
-      console.warn('Failed to parse shihe_transactions from localStorage', e);
+      try {
+        const savedTransactions = localStorage.getItem('shihe_transactions');
+        if (savedTransactions) setTransactions(JSON.parse(savedTransactions));
+      } catch (e) {
+        console.warn('Failed to parse shihe_transactions from localStorage', e);
+      }
     }
   }, [onClearTestData]);
 
@@ -736,6 +782,7 @@ const App: React.FC = () => {
           acceptanceRecords,
           filterMonth,
           currentUser,
+          includePassword: false
         });
         
         await syncWorkspace(payload);
@@ -761,9 +808,15 @@ const App: React.FC = () => {
   }, [managedUsers, logs, transactions, businessUnits, miningResources, circuitBreakers, systemLogs, meetingSamples, acceptanceRecords, filterMonth, currentUser, workspaceLoaded]);
 
   useEffect(() => {
-    localStorage.setItem('shihe_resources', JSON.stringify(miningResources));
-    localStorage.setItem('shihe_circuit_breakers', JSON.stringify(circuitBreakers));
-    localStorage.setItem('shihe_user', JSON.stringify(currentUser));
+    if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
+      try {
+        localStorage.setItem('shihe_resources', JSON.stringify(miningResources));
+        localStorage.setItem('shihe_circuit_breakers', JSON.stringify(circuitBreakers));
+        localStorage.setItem('shihe_user', JSON.stringify(currentUser));
+      } catch (e) {
+        console.warn('Failed to save state to localStorage', e);
+      }
+    }
   }, [miningResources, circuitBreakers, currentUser]);
 
   // 自动恢复过期的熔断
@@ -826,9 +879,16 @@ const App: React.FC = () => {
       try {
         const user = await fetchSessionUser();
         setCurrentUser(user);
-        localStorage.setItem('shihe_user', JSON.stringify(user));
+        if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
+          try {
+            localStorage.setItem('shihe_user', JSON.stringify(user));
+          } catch (e) {
+            console.warn('Failed to save shihe_user to localStorage:', e);
+          }
+        }
       } catch (err) {
         console.error('Session verification failed on mount:', err);
+        clearAuthToken();
         handleLogout();
         toast.error('会话已过期，请重新登录');
       }

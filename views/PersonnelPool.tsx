@@ -16,6 +16,7 @@ import {
 } from '../src/utils/businessUnitName';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { assertAcceptablePassword } from '../src/utils/security';
+import { stripUsersPasswords } from '../src/utils/userSyncPayload';
 import { 
   suggestResignHedgeAmount, 
   getResignHedgeFormulaDesc,
@@ -216,7 +217,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
         if (!ok) return;
         
         // 成功后更新本地内存
-        onUpdateUsers(nextUsers);
+        onUpdateUsers(stripUsersPasswords(nextUsers));
         
         showAlert('新人格实体创建成功，并已成功注入矩阵。');
         setNewUserFormData({ 
@@ -345,7 +346,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       }
       
       // 成功后更新内存
-      onUpdateUsers(nextUsers);
+      onUpdateUsers(stripUsersPasswords(nextUsers));
       
       showAlert(editingUserId ? '用户信息更新成功。' : '新的人格实体已成功注入矩阵。');
       resetForm();
@@ -641,7 +642,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
           try {
             const ok = await persistOrAlert({ users: finalUsers, businessUnits: finalUnits });
             if (!ok) return;
-            onUpdateUsers(finalUsers);
+            onUpdateUsers(stripUsersPasswords(finalUsers));
             if (unitsToAdd.length > 0) {
               onUpdateBusinessUnits(finalUnits);
             }

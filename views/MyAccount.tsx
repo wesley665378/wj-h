@@ -88,8 +88,11 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
     return aggregateUserMonthMetrics(logs, currentUser, effectiveMonth, resources, users, [AuditStatus.Confirmed, AuditStatus.Approved]);
   }, [logs, currentUser, effectiveMonth, resources, users]);
 
-  // 奖金与欠产分配本地计算（始终按 effectiveMonth）
+  // 奖金与欠产分配本地计算（仅 VITE_USE_LOCAL_AUTH === 'true' 才跑）
   const bonusResult = useMemo(() => {
+    if (import.meta.env.VITE_USE_LOCAL_AUTH !== 'true') {
+      return { quota: 0, newDebt: 0, history: 0 };
+    }
     return calculateBonusAllocation(effectiveMonth, currentUser, logs, resources, users, AuditStatus.Confirmed);
   }, [effectiveMonth, currentUser, logs, resources, users]);
 
@@ -145,15 +148,15 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
   // 权威分配 API 返回值优先，API 异常/无数据时：如果是远程模式，禁止静默降级至本地计算
   const currentBalance = import.meta.env.VITE_USE_LOCAL_AUTH === 'true'
     ? localBalance
-    : (serverDistributionItem ? (serverDistributionItem.currentSurplusConfirmed ?? serverDistributionItem.currentSurplus ?? 0) : null);
+    : (serverDistributionItem ? (serverDistributionItem.confirmed?.currentSurplus ?? serverDistributionItem.currentSurplusConfirmed ?? serverDistributionItem.currentSurplus ?? 0) : null);
 
   const bonusQuota = import.meta.env.VITE_USE_LOCAL_AUTH === 'true'
     ? localBonusQuota
-    : (serverDistributionItem ? (serverDistributionItem.theoreticalBonusConfirmed ?? serverDistributionItem.theoreticalBonus ?? 0) : null);
+    : (serverDistributionItem ? (serverDistributionItem.confirmed?.theoreticalBonus ?? serverDistributionItem.theoreticalBonusConfirmed ?? serverDistributionItem.theoreticalBonus ?? 0) : null);
 
   const historicalDebt = import.meta.env.VITE_USE_LOCAL_AUTH === 'true'
     ? localDebt
-    : (serverDistributionItem ? (serverDistributionItem.nextDebtConfirmed ?? serverDistributionItem.nextDebt ?? serverDistributionItem.historyDebt ?? 0) : null);
+    : (serverDistributionItem ? (serverDistributionItem.confirmed?.newDebt ?? serverDistributionItem.nextDebtConfirmed ?? serverDistributionItem.nextDebt ?? serverDistributionItem.historyDebt ?? 0) : null);
 
   // 明细列表过滤（按当前维度过滤后的 activeLogs 进行搜索与筛选）
   const filteredDetailLogs = useMemo(() => {

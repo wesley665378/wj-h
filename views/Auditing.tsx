@@ -986,12 +986,12 @@ const Auditing: React.FC<AuditingProps> = ({
               <table className="w-full text-left min-w-[1600px] border-collapse">
                 <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
                   <tr>
-                    <th className="px-4 py-6">申报编号 / 时间</th>
-                    <th className="px-4 py-6">删除</th>
-                    <th className="px-4 py-6">删除时间</th>
-                    <th className="px-4 py-6 text-center">矿山编号</th>
-                    <th className="px-4 py-6 font-bold text-slate-800">采集主体</th>
+                    <th className="px-4 py-6">申报编号</th>
+                    <th className="px-4 py-6">业务日期</th>
+                    <th className="px-4 py-6">提报日期</th>
+                    <th className="px-4 py-6">探照灯类型</th>
                     <th className="px-4 py-6 text-center">经营单元</th>
+                    <th className="px-4 py-6 font-bold text-slate-800">采集主体</th>
                     <th className="px-3 py-6 text-right text-blue-600">A</th>
                     <th className="px-3 py-6 text-right text-amber-600">C积分</th>
                     <th className="px-4 py-6 text-right text-amber-700 font-extrabold bg-amber-50/20">C权</th>
@@ -1010,57 +1010,23 @@ const Auditing: React.FC<AuditingProps> = ({
                   {(activeTab === "history" ? historyTasks : consumptionTasks).map((log) => {
                     if (!log) return null;
                     const { cWeightValue, b2WeightValue, revLimitStr, valLimitCStr, valLimitB2Str } = calculateConsumptionMirrorFields(log, resources, logs);
+                    
+                    const collectorDisplay = log.costCategory === 'C' ? 'sys_C' : (log.costCategory === 'B' && log.valueConsumptionMode === 'B2' ? 'sys_B2' : (users.find(u => u.id === log.recordedCollectorId)?.name || log.recordedCollectorId));
 
                     return (
                       <tr key={log.id} className="hover:bg-rose-50/30 transition-colors group">
                         <td className="px-4 py-6">
-                          <span className="font-mono text-[10px] font-black text-slate-300 block mb-1 group-hover:text-rose-400">#{log.id}</span>
-                          <span className="text-[9px] font-bold text-slate-500 block">
-                            提报: {resolveLogBusinessDate(log)} ({resolveLogBusinessMonth(log)})
-                          </span>
-                          <span className="text-[8px] text-slate-400 block">
-                            提报: {formatSubmissionDate(log.timestamp)}
-                          </span>
+                          <span className="font-mono text-[11px] font-black text-slate-900 group-hover:text-rose-600">#{log.id}</span>
                         </td>
-                        <td className="px-4 py-6">
-                          {log.deleted ? (
-                            <span className="text-[10px] font-black text-rose-500">已删除</span>
-                          ) : (
-                            onDeleteLog ? (
-                              <button
-                                onClick={() => {
-                                  showConfirm(`确定要删除审计记录 #${log.id} 吗？`, () => {
-                                    onDeleteLog(log.id);
-                                  });
-                                }}
-                                className="px-3 py-1 bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white rounded text-[9px] font-black uppercase transition-all"
-                              >
-                                删除
-                              </button>
-                            ) : '-'
-                          )}
-                        </td>
-                        <td className="px-4 py-6">
-                          <span className="text-[10px] font-mono font-bold text-slate-500 whitespace-nowrap">
-                            {log.deletedAt || '-'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-6 text-center">
-                          <span className="inline-block px-3 py-1 bg-slate-900 text-white rounded-lg font-mono text-[10px] font-black shadow-sm">
-                            {log.miningId}
-                          </span>
-                        </td>
-                        <td className="px-4 py-6">
-                          <div className="flex items-center space-x-2 mb-1">
-                            <span className="text-xs font-black text-slate-900">{users.find(u => u.id === log.recordedCollectorId)?.name || log.recordedCollectorId}</span>
-                            <span className="text-[8px] px-2 py-0.5 rounded font-black bg-slate-100 text-slate-500">{log.type}</span>
-                          </div>
-                        </td>
+                        <td className="px-4 py-6 text-[10px] font-mono font-bold text-slate-600">{resolveLogBusinessDate(log)} ({resolveLogBusinessMonth(log)})</td>
+                        <td className="px-4 py-6 text-[10px] font-mono text-slate-500">{formatSubmissionDate(log.timestamp)}</td>
+                        <td className="px-4 py-6 text-[10px] font-black text-slate-500">{log.type}</td>
                         <td className="px-4 py-6 text-center">
                             <span className="text-xs font-black text-slate-900 block">
                               {users.find((u) => u.id === log.rankId)?.center || "未分配"}
                             </span>
                         </td>
+                        <td className="px-4 py-6 font-bold text-slate-900 text-xs">{collectorDisplay}</td>
                         <td className="px-3 py-6 text-right font-mono font-bold text-blue-600">
                           {log.costCategory === 'A' ? maskMoney(Math.round(log.dynamicCost)) : '-'}
                         </td>

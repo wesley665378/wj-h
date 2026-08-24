@@ -25,14 +25,6 @@ export const fetchClientIp = async (): Promise<string> => {
   }
 };
 
-export const updatePasswordApi = async (userId: string, newPassword: string, oldPassword?: string): Promise<{ success: boolean; message?: string }> => {
-  return apiClient.post<{ success: boolean; message?: string }>('/api/auth/update-password', {
-    userId,
-    newPassword,
-    oldPassword
-  });
-};
-
 export const changePasswordApi = async (
   userId: string,
   newPassword: string,

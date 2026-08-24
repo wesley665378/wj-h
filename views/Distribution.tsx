@@ -55,8 +55,6 @@ interface DistributionProps {
   transactions: InternalTransaction[];
   resources: MiningResource[];
   onSubmitTransaction?: (tx: InternalTransaction) => void;
-  acceptanceRecords?: AcceptanceRecord[];
-  onAddAcceptanceRecord?: (record: AcceptanceRecord) => void;
 }
 
 interface BonusCalculation {
@@ -110,8 +108,11 @@ const fmtDebt = (val: number | undefined | null): string => {
   if (val === undefined || val === null || isNaN(val) || Math.round(val) === 0) {
     return "0";
   }
-  const abs = Math.abs(Math.round(val));
-  return `-${abs.toLocaleString()}`;
+  const rounded = Math.round(val);
+  if (rounded < 0) {
+    return rounded.toLocaleString();
+  }
+  return `-${rounded.toLocaleString()}`;
 };
 
 const Distribution: React.FC<DistributionProps> = ({
@@ -121,8 +122,6 @@ const Distribution: React.FC<DistributionProps> = ({
   transactions,
   resources,
   onSubmitTransaction,
-  acceptanceRecords = [],
-  onAddAcceptanceRecord,
 }) => {
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
@@ -281,19 +280,19 @@ const Distribution: React.FC<DistributionProps> = ({
         const userObj = users.find((u) => u.id === serverItem.userId);
         const userCenter = userObj?.center || "";
 
-        let centerLevelBonus = 0;
-        if (serverItem.category === "经管员高款专" || serverItem.category === "经管员高产专") {
-          centerLevelBonus = resources
-            .filter((r) => r.assignedTo === userCenter)
-            .reduce((sum, r) => sum + (r.incentiveOutput5 || 0) + (r.incentiveCollection2 || 0), 0);
-        }
+        const conf = serverItem.confirmed || {};
+        const app = serverItem.approved || {};
 
-        const currentSurplus = serverItem.currentSurplus ?? 0;
-        const historyDebt = serverItem.historyDebt ?? 0;
-        const nextDebt = serverItem.nextDebt ?? 0;
-        const netRedundancy = serverItem.netRedundancy ?? 0;
-        const theoreticalBonus = serverItem.theoreticalBonus ?? 0;
-        const ratioVal = serverItem.ratio ?? 0.05;
+        const centerLevelBonus = serverItem.centerLevelBonus ?? 0;
+        const isRevenueExpert = (serverItem.category || "").includes("款专");
+        const isChan = (serverItem.category || "").includes("产专") || serverItem.category === "经管员高产专";
+
+        const currentSurplus = conf.currentSurplus ?? 0;
+        const historyDebt = conf.historyDebt ?? 0;
+        const nextDebt = conf.newDebt ?? 0;
+        const netRedundancy = conf.quota ?? 0;
+        const theoreticalBonus = conf.theoreticalBonus ?? 0;
+        const ratioVal = conf.ratio ?? 0.05;
 
         const userLogsMonthly = logs.filter(l => 
           l.recordedCollectorId === serverItem.userId && 
@@ -301,64 +300,94 @@ const Distribution: React.FC<DistributionProps> = ({
           resolveLogBusinessMonth(l) === effectiveMonth
         );
 
+        const confirmedMetrics = aggregateUserMonthMetrics(logs, userObj || { id: serverItem.userId } as User, effectiveMonth, resources, users, [AuditStatus.Confirmed]);
+        const approvedMetrics = aggregateUserMonthMetrics(logs, userObj || { id: serverItem.userId } as User, effectiveMonth, resources, users, [AuditStatus.Approved]);
+
+        const baseValueConfirmed = isChan ? confirmedMetrics.productionPackage : confirmedMetrics.revenuePackage;
+        const baseValueApproved = isChan ? approvedMetrics.productionPackage : approvedMetrics.revenuePackage;
+
+        let yearlyBaseValConfirmed = 0;
+        let yearlyBaseValApproved = 0;
+        let yearlyBonusApproved = 0;
+
+        const currentYear = effectiveMonth
+          ? effectiveMonth.split("-")[0]
+          : new Date().getFullYear().toString();
+
+        const userLogsYearly = logs.filter(l => 
+          l.recordedCollectorId === serverItem.userId && 
+          (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved) &&
+          resolveLogBusinessMonth(l).startsWith(currentYear)
+        );
+
+        const yearlyMonths = Array.from(new Set(userLogsYearly.map(l => resolveLogBusinessMonth(l))));
+        for (const m of yearlyMonths) {
+          const mConf = aggregateUserMonthMetrics(userLogsYearly, userObj || { id: serverItem.userId } as User, m, resources, users, [AuditStatus.Confirmed]);
+          const mApp = aggregateUserMonthMetrics(userLogsYearly, userObj || { id: serverItem.userId } as User, m, resources, users, [AuditStatus.Approved]);
+          yearlyBaseValConfirmed += (isChan ? mConf.productionPackage : mConf.revenuePackage);
+          yearlyBaseValApproved += (isChan ? mApp.productionPackage : mApp.revenuePackage);
+        }
+
+        yearlyBonusApproved = yearlyBaseValApproved * (app.ratio ?? 0.05);
+
         return {
           userId: serverItem.userId,
           userName: serverItem.userName,
           category: serverItem.category || "初级专家",
-          isRevenueExpert: serverItem.isRevenueExpert ?? false,
-          isChan: serverItem.isChan ?? false,
-          historyDebt: historyDebt,
-          currentSurplus: currentSurplus,
-          netRedundancy: netRedundancy,
-          nextDebt: nextDebt,
-          theoreticalBonus: theoreticalBonus,
-          ratio: ratioVal,
+          isRevenueExpert,
+          isChan,
+          historyDebt: conf.historyDebt ?? 0,
+          currentSurplus: conf.currentSurplus ?? 0,
+          netRedundancy: conf.quota ?? 0,
+          nextDebt: conf.newDebt ?? 0,
+          theoreticalBonus: conf.theoreticalBonus ?? 0,
+          ratio: conf.ratio ?? 0.05,
           centerLevelBonus,
 
-          historyRecordsConfirmed: serverItem.historyRecords || [],
-          historyRecordsApproved: serverItem.historyRecords || [],
-          historyDebtConfirmed: serverItem.historyDebtConfirmed ?? historyDebt,
-          historyDebtApproved: serverItem.historyDebtApproved ?? historyDebt,
-          currentSurplusConfirmed: currentSurplus,
-          currentSurplusApproved: currentSurplus,
-          netRedundancyConfirmed: netRedundancy,
-          netRedundancyApproved: netRedundancy,
-          theoreticalBonusConfirmed: serverItem.theoreticalBonusConfirmed ?? theoreticalBonus,
-          theoreticalBonusApproved: serverItem.theoreticalBonusApproved ?? theoreticalBonus,
-          yearlyBonusApproved: serverItem.yearlyBonusApproved ?? 0,
+          historyRecordsConfirmed: conf.historyRecords || [],
+          historyRecordsApproved: app.historyRecords || [],
+          historyDebtConfirmed: conf.historyDebt ?? 0,
+          historyDebtApproved: app.historyDebt ?? 0,
+          currentSurplusConfirmed: conf.currentSurplus ?? 0,
+          currentSurplusApproved: app.currentSurplus ?? 0,
+          netRedundancyConfirmed: conf.quota ?? 0,
+          netRedundancyApproved: app.quota ?? 0,
+          theoreticalBonusConfirmed: conf.theoreticalBonus ?? 0,
+          theoreticalBonusApproved: app.theoreticalBonus ?? 0,
+          yearlyBonusApproved: app.theoreticalBonus ?? yearlyBonusApproved,
 
-          confirmedValueConfirmed: serverItem.isChan ? currentSurplus : 0,
-          bCostConfirmed: 0,
-          b2CostConfirmed: 0,
-          aCostConfirmed: 0,
-          confirmedGoldConfirmed: !serverItem.isChan ? currentSurplus : 0,
-          baseValueConfirmed: serverItem.isChan ? currentSurplus : 0,
-          netBonusConfirmed: serverItem.theoreticalBonusConfirmed ?? theoreticalBonus,
-          isBreakthroughConfirmed: currentSurplus > 0,
-          gapToBreakthroughConfirmed: currentSurplus > 0 ? 0 : Math.abs(currentSurplus),
+          confirmedValueConfirmed: isChan ? baseValueConfirmed : 0,
+          bCostConfirmed: confirmedMetrics.b1Cost ?? 0,
+          b2CostConfirmed: confirmedMetrics.b2Cost ?? 0,
+          aCostConfirmed: confirmedMetrics.aCost ?? 0,
+          confirmedGoldConfirmed: !isChan ? baseValueConfirmed : 0,
+          baseValueConfirmed: baseValueConfirmed,
+          netBonusConfirmed: conf.theoreticalBonus ?? 0,
+          isBreakthroughConfirmed: (conf.currentSurplus ?? 0) > 0,
+          gapToBreakthroughConfirmed: (conf.currentSurplus ?? 0) > 0 ? 0 : Math.abs(conf.currentSurplus ?? 0),
           paymentMatchRateConfirmed: 1,
 
-          confirmedValueApproved: serverItem.isChan ? currentSurplus : 0,
-          bCostApproved: 0,
-          b2CostApproved: 0,
-          aCostApproved: 0,
-          confirmedGoldApproved: !serverItem.isChan ? currentSurplus : 0,
-          baseValueApproved: serverItem.isChan ? currentSurplus : 0,
-          netBonusApproved: serverItem.theoreticalBonusApproved ?? theoreticalBonus,
-          isBreakthroughApproved: currentSurplus > 0,
-          gapToBreakthroughApproved: currentSurplus > 0 ? 0 : Math.abs(currentSurplus),
+          confirmedValueApproved: isChan ? baseValueApproved : 0,
+          bCostApproved: approvedMetrics.b1Cost ?? 0,
+          b2CostApproved: approvedMetrics.b2Cost ?? 0,
+          aCostApproved: approvedMetrics.aCost ?? 0,
+          confirmedGoldApproved: !isChan ? baseValueApproved : 0,
+          baseValueApproved: baseValueApproved,
+          netBonusApproved: app.theoreticalBonus ?? 0,
+          isBreakthroughApproved: (app.currentSurplus ?? 0) > 0,
+          gapToBreakthroughApproved: (app.currentSurplus ?? 0) > 0 ? 0 : Math.abs(app.currentSurplus ?? 0),
           paymentMatchRateApproved: 1,
 
           baseValuePending: 0,
-          yearlyIncomeApproved: 0,
-          yearlyIncomeConfirmed: 0,
+          yearlyIncomeApproved: yearlyBaseValApproved,
+          yearlyIncomeConfirmed: yearlyBaseValConfirmed,
 
           cWeight: TIER_COEFFICIENTS.BASE_LOSS,
           salaryPackage: userObj?.salaryPackage ?? 0,
           details: userLogsMonthly,
 
-          personalIncentiveStatus: currentSurplus > 0 ? "已激活超额价值分享" : "入库任务进行中",
-          teamDividendStatus: currentSurplus > 0 ? "已激活超额价值分享" : "入库任务进行中",
+          personalIncentiveStatus: (app.currentSurplus ?? 0) > 0 ? "已激活超额价值分享" : "入库任务进行中",
+          teamDividendStatus: (app.currentSurplus ?? 0) > 0 ? "已激活超额价值分享" : "入库任务进行中",
         };
       });
     }
