@@ -9,11 +9,10 @@ export interface LoginResponse {
 
 export const loginWithApi = async (userId: string, password: string): Promise<LoginResponse> => {
   const data = await apiClient.post<LoginResponse>('/api/auth/login', { userId, password });
-  if (data?.token) {
-    setAuthToken(data.token);
-  } else if (data?.user?.id) {
-    setAuthToken(`auth_${data.user.id}_${Date.now()}`);
+  if (!data?.token) {
+    throw new Error('登录响应缺少 token，请联系管理员检查后端鉴权');
   }
+  setAuthToken(data.token);
   return data;
 };
 

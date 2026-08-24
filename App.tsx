@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, Role, MiningResource, ValueCreationLog, AuditStatus, RefineCategory, RefineType, InternalTransaction, TransactionStatus, SystemOperationLog, CircuitBreaker, ResourceStatus, QuotaSnapshot, AcceptanceRecord, MeetingSample } from './types';
+import { canonicalizeBusinessUnitLabel, resolveBusinessUnitName } from './src/utils/businessUnitName';
 import Dashboard from './views/Dashboard';
 import ValueCreation from './views/ValueCreation';
 import { calculateHistoricalNetValue, checkUserPermission } from './src/utils/business';
@@ -30,12 +31,13 @@ import {
   syncWorkspace, 
   putAuditLog, 
   loginWithApi, 
-  createMeetingSampleApi,
+  saveMeetingSampleApi,
   toastApiError,
   setAuthToken,
   clearAuthToken
 } from './src/api';
 import { useAppSessionSync } from './src/hooks/useAppSessionSync';
+import { buildSyncPayload } from './src/app/workspaceSync';
 import { getLocalDateString, getLocalMonthString } from './src/utils/dateUtils';
 import { roundMoney } from './src/utils/formatMoney';
 
@@ -127,15 +129,18 @@ const App: React.FC = () => {
 
         if (data) {
           // 原子化更新数据
+          let fetchedUnits = businessUnits;
+          if (data.businessUnits && Array.isArray(data.businessUnits)) {
+            fetchedUnits = Array.from(new Set(data.businessUnits.map(canonicalizeBusinessUnitLabel).filter(Boolean)));
+            setBusinessUnits(fetchedUnits);
+          }
           if (data.managedUsers && Array.isArray(data.managedUsers)) {
             const backfilledUsers = data.managedUsers.map((u: any) => ({
               ...u,
-              category: u.category === '统筹水库管理员' ? '水库管理员' : u.category
+              category: u.category === '统筹水库管理员' ? '水库管理员' : u.category,
+              center: resolveBusinessUnitName(u.center, fetchedUnits) || u.center,
             }));
             setManagedUsers(backfilledUsers);
-          }
-          if (data.businessUnits && Array.isArray(data.businessUnits)) {
-            setBusinessUnits(data.businessUnits);
           }
           
           const rawLogs = [...(data.logs || []), ...(data.dtcb || [])];
@@ -201,6 +206,7 @@ const App: React.FC = () => {
         }
       } catch (err) {
         console.error('无法从后端获取工作区数据:', err);
+        toastApiError(err, '工作区加载失败，当前可能为缓存数据');
         // 发生错误时，依然标记为就绪，以便用户能继续操作（使用本地缓存或初始数据）
         setWorkspaceLoaded(true);
       }
@@ -277,26 +283,36 @@ const App: React.FC = () => {
     const snapshots = buildValueEfficiencySnapshots(nextUsers, nextLogs, nextRes, filterMonth);
     const jzfpSnapshots = buildJzfpSnapshot(nextUsers, nextLogs, filterMonth);
 
-    try {
-      await syncWorkspace({ 
-        users: nextUsers,
-        dtcb: dtcbLogs,
+    const canWriteTownCenters = currentUser?.role === Role.Admin || currentUser?.role === Role.npcxie;
+
+    const payload = {
+      ...buildSyncPayload({
+        managedUsers: nextUsers,
         logs: jzczLogs,
+        dtcbLogs: dtcbLogs,
         transactions: nextTxs,
         miningResources: nextRes,
-        valueEfficiencySnapshots: snapshots,
-        acceptanceRecords: nextAcc,
-        jzfp: jzfpSnapshots,
+        businessUnits: canWriteTownCenters ? nextUnits : [],
         circuitBreakers: nextCBs,
-        rdq: nextCBs,
-        meetingSamples: nextSamples,
-        businessUnits: nextUnits
-      });
+        systemLogs,
+        fhctzRecords: [],
+        settlementPayouts: [],
+        valueEfficiencySnapshots: snapshots,
+        systemConfig: undefined,
+      }),
+      acceptanceRecords: nextAcc,
+      jzfp: jzfpSnapshots,
+      rdq: nextCBs,
+      meetingSamples: nextSamples,
+    };
+
+    try {
+      await syncWorkspace(payload);
     } catch (err: any) {
       console.error('Data sync error:', err);
       toastApiError(err, '工作区数据同步失败');
     }
-  }, [currentUser, workspaceLoaded, managedUsers, logs, transactions, miningResources, circuitBreakers, meetingSamples, filterMonth, acceptanceRecords, businessUnits]);
+  }, [currentUser, workspaceLoaded, managedUsers, logs, transactions, miningResources, circuitBreakers, meetingSamples, filterMonth, acceptanceRecords, businessUnits, systemLogs]);
 
   const persistWorkspaceNow = React.useCallback(async () => {
     await persistWorkspaceWithOverrides();
@@ -428,7 +444,12 @@ const App: React.FC = () => {
     });
   }, [miningResources, managedUsers]);
 
-  const processAudit = React.useCallback(async (logId: string, status: AuditStatus) => {
+  const processAudit = React.useCallback(async (
+    logId: string,
+    status: AuditStatus,
+    verifiedAmount?: number,
+    auditNotes?: string,
+  ) => {
     const oldLog = logs.find(l => l.id === logId);
     if (!oldLog) return;
 
@@ -437,7 +458,8 @@ const App: React.FC = () => {
 
     try {
       // 2. 调用统一接口层确权
-      const { log, resource, snapshot, linkedLogs = [], recalibratedLogs = [] } = await putAuditLog(logId, status);
+      const extras = verifiedAmount != null || auditNotes ? { verifiedAmount, auditNotes } : undefined;
+      const { log, resource, snapshot, linkedLogs = [], recalibratedLogs = [] } = await putAuditLog(logId, status, extras);
 
       // 3. 更新界面数据 (确权响应驱动，服务端权威合并)
       setLogs(prevLogs => {
@@ -757,10 +779,12 @@ const App: React.FC = () => {
     if (currentUser && workspaceLoaded) {
       const timer = setTimeout(syncData, 2000); // 2 秒防抖
       
-      localStorage.setItem('shihe_managed_users', JSON.stringify(managedUsers));
-      localStorage.setItem('shihe_logs', JSON.stringify(logs));
-      localStorage.setItem('shihe_transactions', JSON.stringify(transactions));
-      localStorage.setItem('shihe_business_units', JSON.stringify(businessUnits));
+      if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
+        localStorage.setItem('shihe_managed_users', JSON.stringify(managedUsers));
+        localStorage.setItem('shihe_logs', JSON.stringify(logs));
+        localStorage.setItem('shihe_transactions', JSON.stringify(transactions));
+        localStorage.setItem('shihe_business_units', JSON.stringify(businessUnits));
+      }
 
       return () => clearTimeout(timer);
     }
@@ -908,7 +932,7 @@ const App: React.FC = () => {
 
   const onSaveMeetingSample = React.useCallback(async (sample: MeetingSample): Promise<boolean> => {
     try {
-      const res = await createMeetingSampleApi(sample);
+      const res = await saveMeetingSampleApi(sample);
       if (res && res.success) {
         setMeetingSamples(prev => {
           const idx = prev.findIndex(s => s.id === sample.id);
@@ -981,11 +1005,20 @@ const App: React.FC = () => {
                 const combined = [...(data.logs || []), ...(data.dtcb || [])];
                 setLogs(combined);
               }
-              if (data.managedUsers) setManagedUsers(data.managedUsers);
               if (data.transactions) setTransactions(data.transactions);
               if (data.miningResources) setMiningResources(data.miningResources);
               if (data.acceptanceRecords) setAcceptanceRecords(data.acceptanceRecords);
-              if (data.businessUnits) setBusinessUnits(data.businessUnits);
+              let refreshedUnits = businessUnits;
+              if (data.businessUnits && Array.isArray(data.businessUnits)) {
+                refreshedUnits = Array.from(new Set(data.businessUnits.map(canonicalizeBusinessUnitLabel).filter(Boolean)));
+                setBusinessUnits(refreshedUnits);
+              }
+              if (data.managedUsers) {
+                setManagedUsers(data.managedUsers.map((u: any) => ({
+                  ...u,
+                  center: resolveBusinessUnitName(u.center, refreshedUnits) || u.center,
+                })));
+              }
             }
           } catch (err) {
             console.error('Failed to refresh workspace in audit tab:', err);
@@ -1066,10 +1099,14 @@ const App: React.FC = () => {
         onClearTestData,
         businessUnits: businessUnits,
         onUpdateBusinessUnits: setBusinessUnits,
-        persist: persistWorkspaceWithOverrides
+        persist: persistWorkspaceWithOverrides,
+        allLogs: logs,
+        onAppendLog: (log: ValueCreationLog) => {
+          setLogs(prev => [...prev, log]);
+        }
       }
     };
-  }, [filteredLogs, auditLogs, filteredResources, filteredUsers, managedUsers, businessUnits, transactions, currentUser, currentTime, 
+  }, [filteredLogs, auditLogs, filteredResources, filteredUsers, managedUsers, businessUnits, transactions, currentUser, currentTime, logs,
        onSystemAdjustment, onLogSubmit, onConsumptionSubmit, processAudit, onSubmitTransaction, 
        onAuditTransaction, onAddResource, onUpdateResource, onDeleteResource, onUpdateUsers, onClearTestData,
        circuitBreakers, onAddCircuitBreaker, onRecoverCircuitBreaker, persistWorkspaceWithOverrides]);

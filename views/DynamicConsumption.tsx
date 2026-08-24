@@ -8,7 +8,6 @@ import * as XLSX from 'xlsx';
 import { UI_LABELS } from '../src/constants/uiLabels';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
 import { isProjectWritable, deriveProjectStatus } from '../src/utils/projectStatus';
-import { syncWorkspace } from '../src/api/workspace';
 import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { calculateConsumptionMirrorFields } from '../src/utils/business';
@@ -358,11 +357,11 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
         const nextDtcb = dtcbLogsToUse;
         const mergedLogs = [...(nextJzcz ?? []), ...(nextDtcb ?? [])];
         try {
-          if (persistWorkspaceWithOverrides) {
-            await persistWorkspaceWithOverrides({ logs: mergedLogs });
-          } else {
-            await syncWorkspace({ logs: mergedLogs });
+          if (!persistWorkspaceWithOverrides) {
+            showAlert('工作区同步未就绪，请刷新后重试');
+            return;
           }
+          await persistWorkspaceWithOverrides({ logs: mergedLogs });
           showAlert(`[${categoryLabel}] 动态消耗申报成功并写入数据库！`);
         } catch (err) {
           showAlert('动态消耗申报写库失败：' + ((err as Error).message || '网络问题'));
@@ -412,11 +411,11 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
         const nextDtcb = [...dtcbLogsToUse.filter((l) => l.id !== deductionLog.id), deductionLog];
         const mergedLogs = [...(jzczLogsToUse ?? []), ...nextDtcb];
         try {
-          if (persistWorkspaceWithOverrides) {
-            await persistWorkspaceWithOverrides({ logs: mergedLogs });
-          } else {
-            await syncWorkspace({ logs: mergedLogs });
+          if (!persistWorkspaceWithOverrides) {
+            showAlert('工作区同步未就绪，请刷新后重试');
+            return;
           }
+          await persistWorkspaceWithOverrides({ logs: mergedLogs });
           showAlert('非有效工时对冲申请成功并落库，等待审核冲抵刚性工资包。');
         } catch (err) {
           showAlert('对冲申请写库失败，请重试');

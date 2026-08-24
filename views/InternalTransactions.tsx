@@ -20,6 +20,12 @@ import {
   isDateInRange,
   isLogInFilter,
 } from '../src/utils/dateUtils';
+import { 
+  canonicalizeBusinessUnitLabel, 
+  businessUnitLabelsEqual, 
+  userCenterMatchesBusinessUnit,
+  resolveBusinessUnitName 
+} from '../src/utils/businessUnitName';
 import { formatAmount } from '../src/utils/formatters';
 import { InfoTip } from '../src/components/InfoTip';
 import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
@@ -194,11 +200,11 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   // SSOT: 以 businessUnits 为唯一清单基准构建经营单元列表与主责经管员
   const unitSelectionList = useMemo(() => {
     const rawUnits = Array.isArray(businessUnits) && businessUnits.length > 0 
-      ? Array.from(new Set(businessUnits.map(u => (u || '').trim()).filter(Boolean)))
-      : Array.from(new Set(userList.map(u => (u.center || '').trim()).filter(Boolean)));
+      ? Array.from(new Set(businessUnits.map(canonicalizeBusinessUnitLabel).filter(Boolean)))
+      : Array.from(new Set(userList.map(u => canonicalizeBusinessUnitLabel(u.center)).filter(Boolean)));
 
     return rawUnits.map(unitName => {
-      const unitUsers = userList.filter(u => u.center === unitName && u.userStatus !== 'inactive');
+      const unitUsers = userList.filter(u => userCenterMatchesBusinessUnit(u.center, unitName) && u.userStatus !== 'inactive');
       
       // 负责人判定谓词：与后端 isCenterManagerUser 一致 (role=rank，或 category 包含经管员，或职级串含经管员)
       const candidateManagers = unitUsers.filter(u => {
@@ -541,18 +547,17 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
           }
 
           const receiver = userList.find(u => u.id === tx.receiverId);
-          const targetCenter = receiver?.center?.trim() || '';
+          const targetCenter = resolveBusinessUnitName(receiver?.center, businessUnits) || canonicalizeBusinessUnitLabel(receiver?.center);
           if (!targetCenter) {
             showAlert(`确认失败：接收主体 [${receiver?.name || tx.receiverId}] 未配置所属经营单元。操作已中止。`);
             return;
           }
 
-          const normalizeCenter = (c: string) => (c || '').trim();
           const appendCenter = (current: string | undefined, centerToAdd: string) => {
-            const trimmedToAdd = normalizeCenter(centerToAdd);
+            const trimmedToAdd = canonicalizeBusinessUnitLabel(centerToAdd);
             if (!trimmedToAdd) return current || '';
-            const centers = (current || '').split(',').map(c => normalizeCenter(c)).filter(Boolean);
-            if (!centers.includes(trimmedToAdd)) {
+            const centers = (current || '').split(',').map(c => canonicalizeBusinessUnitLabel(c)).filter(Boolean);
+            if (!centers.some(c => businessUnitLabelsEqual(c, trimmedToAdd))) {
               centers.push(trimmedToAdd);
             }
             return centers.join(',');

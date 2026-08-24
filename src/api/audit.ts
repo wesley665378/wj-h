@@ -12,13 +12,17 @@ export interface AuditResponse {
 export const putAuditLog = async (
   logId: string,
   status: AuditStatus,
-  verifiedAmount?: number
+  extras?: { verifiedAmount?: number; auditNotes?: string } | number,
 ): Promise<AuditResponse> => {
-  return apiClient.put<AuditResponse>('/api/audit', {
-    logId,
-    status,
-    verifiedAmount
-  });
+  const body: Record<string, unknown> = { logId, status };
+  const opts = typeof extras === 'number' ? { verifiedAmount: extras } : extras;
+  if (opts?.verifiedAmount != null && Number.isFinite(opts.verifiedAmount)) {
+    body.verifiedAmount = Math.round(opts.verifiedAmount);
+  }
+  if (typeof opts?.auditNotes === 'string' && opts.auditNotes.trim()) {
+    body.auditNotes = opts.auditNotes.trim();
+  }
+  return apiClient.put<AuditResponse>('/api/audit', body);
 };
 
 export const auditLog = putAuditLog;

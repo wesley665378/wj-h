@@ -81,10 +81,11 @@ export function buildResignNonEffectiveHoursLog(
   resignDate: string, 
   hedgeAmount: number, 
   operatorId: string
-): Partial<ValueCreationLog> {
+): ValueCreationLog {
   const resignMonth = resignDate.slice(0, 7);
   
   return {
+    id: `resign-hedge-${user.id}-${Date.now()}`,
     recordedCollectorId: user.id,
     rankId: operatorId,
     category: RefineCategory.Revenue,

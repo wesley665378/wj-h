@@ -25,7 +25,6 @@ import * as XLSX from 'xlsx';
 import { calculateHistoricalNetValue, calculateDualTrackCoreMatrices, calculateT1PlusValue, calculateT1PlusRevenue } from '../src/utils/business';
 import { calculateHedgeCapacitiesAndWeights } from '../src/utils/consumptionHedge';
 import { deriveProjectStatus, isProjectWritable } from '../src/utils/projectStatus';
-import { syncWorkspace } from '../src/api/workspace';
 import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { Info, AlertCircle, CheckCircle2, X } from 'lucide-react';
@@ -255,12 +254,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   }, [getCClassCostForResource, getB2ClassCostForResource]);
 
   useEffect(() => {
-    if (users && users.length > 0) {
-      setManagedUsers(users);
-    } else {
-      const saved = localStorage.getItem('shihe_managed_users');
-      setManagedUsers(saved ? JSON.parse(saved) : USER_LIST);
-    }
+    setManagedUsers(users && users.length > 0 ? users : []);
   }, [users]);
 
   const canSelectOthers = useMemo(() => {
@@ -899,11 +893,11 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       onLogSubmit(logsToSubmit);
       const nextLogs = [...(logs ?? []), ...logsToSubmit];
       try {
-        if (persistWorkspaceWithOverrides) {
-          await persistWorkspaceWithOverrides({ logs: nextLogs });
-        } else {
-          await syncWorkspace({ logs: nextLogs });
+        if (!persistWorkspaceWithOverrides) {
+          showAlert('工作区同步未就绪，请刷新后重试');
+          return;
         }
+        await persistWorkspaceWithOverrides({ logs: nextLogs });
         showAlert(`提报指令提交成功并已落库！共提交 ${logsToSubmit.length} 条数据，预审中...`);
       } catch (err) {
         showAlert('提报落库失败，请稍后重试');

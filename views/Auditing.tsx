@@ -52,7 +52,7 @@ interface AuditingProps {
   logs: ValueCreationLog[];
   users: User[];
   resources: MiningResource[];
-  onAudit: (logId: string, status: AuditStatus, verifiedAmount?: number) => void;
+  onAudit: (logId: string, status: AuditStatus, verifiedAmount?: number, auditNotes?: string) => void;
   processingLogIds?: Set<string>;
   onRefreshWorkspace?: () => Promise<void>;
   onDeleteLog?: (logId: string) => void;
@@ -480,7 +480,7 @@ const Auditing: React.FC<AuditingProps> = ({
         onClose={() => setConfirmingLog(null)}
         auditData={mappedAuditApiData}
         onConfirm={async (id, finalConfirmedValue, auditNotes) => {
-          onAudit(id, AuditStatus.Confirmed);
+          onAudit(id, AuditStatus.Confirmed, finalConfirmedValue, auditNotes);
         }}
       />
       {/* 确权规则说明 */}

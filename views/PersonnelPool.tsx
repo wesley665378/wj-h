@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { User, Role } from '../types';
+import { User, Role, ValueCreationLog } from '../types';
 import * as XLSX from 'xlsx';
 import { Card, Badge } from '../src/components/UI';
 import { UserTableRow } from '../src/components/UserTableRow';
@@ -7,7 +7,14 @@ import { MENU_ITEMS, RANK_DICTIONARY } from '../constants';
 import { checkUserPermission, RANK_CONFIG } from '../src/utils/business';
 import { getLocalMonthString } from '../src/utils/dateUtils';
 import { syncWorkspace } from '../src/api';
-import { normalizeCenter } from '../src/utils/centerUtils';
+import { 
+  resolveBusinessUnitName, 
+  canonicalizeBusinessUnitLabel, 
+  businessUnitListHas, 
+  removeBusinessUnitFromList, 
+  businessUnitLabelsEqual, 
+  userCenterMatchesBusinessUnit 
+} from '../src/utils/businessUnitName';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { assertAcceptablePassword } from '../src/utils/security';
 import { 
@@ -27,14 +34,37 @@ interface PersonnelPoolProps {
   onClearTestData?: () => void;
   businessUnits: string[];
   onUpdateBusinessUnits: (units: string[]) => void;
-  persist?: (overrides?: any) => Promise<void>;
+  persist?: (overrides?: {
+    users?: User[];
+    businessUnits?: string[];
+    logs?: ValueCreationLog[];
+  }) => Promise<void>;
+  allLogs?: ValueCreationLog[];
+  onAppendLog?: (log: ValueCreationLog) => void;
 }
 
 const AUTO_ACCOUNT_CATEGORIES = ['经管员高款专', '经管员高产专', '经管员NPC', 'VP'];
 
-const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUsers, onUpdatePassword, onClearTestData, businessUnits, onUpdateBusinessUnits }) => {
+const PersonnelPool: React.FC<PersonnelPoolProps> = ({ 
+  user, 
+  users, 
+  onUpdateUsers, 
+  onUpdatePassword, 
+  onClearTestData, 
+  businessUnits, 
+  onUpdateBusinessUnits,
+  persist,
+  allLogs = [],
+  onAppendLog
+}) => {
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const isSyncing = useRef(false);
+
+  const persistOrAlert = async (overrides: Parameters<NonNullable<typeof persist>>[0]) => {
+    if (!persist) { showAlert('工作区同步未就绪，请刷新后重试'); return false; }
+    try { await persist(overrides); return true; }
+    catch (err) { showAlert(`同步失败：${(err as Error).message || '未知错误'}`); return false; }
+  };
 
   const isSystemAdmin = (u: User | null | undefined) => {
     if (!u) return false;
@@ -181,11 +211,15 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
       };
       
       try {
-        // 直接一次性落库，由后端 syncWorkspace 处理 password_hash
-        await syncWorkspace({ users: [...users, newUser] });
+        const nextUsers = [...users, newUser];
+        if (persist) {
+          await persist({ users: nextUsers });
+        } else {
+          await syncWorkspace({ users: nextUsers });
+        }
         
         // 成功后更新本地内存
-        onUpdateUsers([...users, newUser]);
+        onUpdateUsers(nextUsers);
         
         showAlert('新人格实体创建成功，并已成功注入矩阵。');
         setNewUserFormData({ 
@@ -302,7 +336,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
 
     isSyncing.current = true;
     try {
-      await syncWorkspace({ users: nextUsers });
+      if (persist) {
+        await persist({ users: nextUsers });
+      } else {
+        await syncWorkspace({ users: nextUsers });
+      }
       
       // If editing existing user, still use onUpdatePassword for clarity/legacy
       if (editingUserId && formData.password) {
@@ -360,16 +398,21 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
       formattedName = `${rawName} (${newCenterCategory})`;
     }
 
-    if (businessUnits.includes(formattedName) || businessUnits.includes(rawName)) {
+    const canonicalFormatted = canonicalizeBusinessUnitLabel(formattedName);
+    if (businessUnitListHas(businessUnits, canonicalFormatted) || businessUnitListHas(businessUnits, rawName)) {
       showAlert('该经营单元已存在');
       return;
     }
-    const updatedUnits = [...businessUnits, formattedName];
+    const updatedUnits = [...businessUnits, canonicalFormatted];
     
     isSyncing.current = true;
     try {
       onUpdateBusinessUnits(updatedUnits);
-      await syncWorkspace({ businessUnits: updatedUnits });
+      if (persist) {
+        await persist({ businessUnits: updatedUnits });
+      } else {
+        await syncWorkspace({ businessUnits: updatedUnits });
+      }
       setNewCenterName('');
       showAlert(`成功新增单元: ${formattedName}`);
     } catch (err) {
@@ -392,22 +435,27 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
     if (isSyncing.current) return;
 
     const newName = editCenterValue.trim();
-    if (!newName || newName === oldName) {
+    if (!newName || businessUnitLabelsEqual(newName, oldName)) {
       setEditingCenter(null);
       return;
     }
-    if (businessUnits.includes(newName)) {
+    const canonicalNewName = canonicalizeBusinessUnitLabel(newName);
+    if (businessUnitListHas(businessUnits, canonicalNewName)) {
       showAlert('该经营单元已存在');
       return;
     }
-    const updatedUnits = businessUnits.map(unit => unit === oldName ? newName : unit);
-    const updatedUsers = users.map(u => u.center === oldName ? { ...u, center: newName } : u);
+    const updatedUnits = businessUnits.map(unit => businessUnitLabelsEqual(unit, oldName) ? canonicalNewName : unit);
+    const updatedUsers = users.map(u => businessUnitLabelsEqual(u.center, oldName) ? { ...u, center: canonicalNewName } : u);
 
     isSyncing.current = true;
     try {
       onUpdateBusinessUnits(updatedUnits);
       onUpdateUsers(updatedUsers);
-      await syncWorkspace({ businessUnits: updatedUnits, users: updatedUsers });
+      if (persist) {
+        await persist({ businessUnits: updatedUnits, users: updatedUsers });
+      } else {
+        await syncWorkspace({ businessUnits: updatedUnits, users: updatedUsers });
+      }
       setEditingCenter(null);
       showAlert(`单元 [${oldName}] 已重命名为 [${newName}]`);
     } catch (err) {
@@ -417,14 +465,6 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
     }
   };
 
-  const normalizeUnitName = (str: string) => {
-    if (!str) return '';
-    return str
-      .replace(/\s*[\(（](前台|后台)[\)）]/gi, '')
-      .replace(/\s+/g, '')
-      .toLowerCase();
-  };
-
   const deleteCenter = (name: string) => {
     if (!isSystemAdmin(user)) {
       return showAlert('权限不足：仅系统管理员有权注销经营单元。');
@@ -432,14 +472,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
     showConfirm(`确定要注销单元 [${name}] 及其关联别名吗？`, async () => {
       if (isSyncing.current) return;
 
-      const targetNorm = normalizeUnitName(name);
-      const targetLower = name.trim().toLowerCase();
-
-      const updatedUnits = businessUnits.filter(c => {
-        const cNorm = normalizeUnitName(c);
-        const cLower = c.trim().toLowerCase();
-        return cNorm !== targetNorm && cLower !== targetLower;
-      });
+      const updatedUnits = removeBusinessUnitFromList(businessUnits, name);
 
       if (updatedUnits.length === 0) {
         return showAlert('注销失败：系统至少须保留一个经营单元，经营单元列表不可为空。');
@@ -449,9 +482,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
 
       const updatedUsers = users.map(u => {
         if (!u.center) return u;
-        const uCenterNorm = normalizeUnitName(u.center);
-        const uCenterLower = u.center.trim().toLowerCase();
-        if (uCenterNorm === targetNorm || uCenterLower === targetLower) {
+        if (businessUnitLabelsEqual(u.center, name) || userCenterMatchesBusinessUnit(u.center, name)) {
           return { ...u, center: '' };
         }
         return u;
@@ -460,7 +491,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
       try {
         onUpdateBusinessUnits(updatedUnits);
         onUpdateUsers(updatedUsers);
-        await syncWorkspace({ businessUnits: updatedUnits, users: updatedUsers });
+        if (persist) {
+          await persist({ businessUnits: updatedUnits, users: updatedUsers });
+        } else {
+          await syncWorkspace({ businessUnits: updatedUnits, users: updatedUsers });
+        }
         showAlert(`已成功注销单元 [${name}] 及其关联别名，并已清空关联人员归属。`);
       } catch (err) {
         showAlert('注销单元写库同步失败，请重试');
@@ -518,7 +553,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
         const name = String(findValue(['名称', '姓名', 'Name', 'name', '采集主体']) || '').trim();
         const roleStr = String(findValue(['角色', 'Role', 'role']) || '').toLowerCase().trim();
         const rawCenter = String(findValue(['责任人（单元负责）', '责任人', '经营单元', 'Center', 'center', '所属单元']) || '').trim();
-        const center = normalizeCenter(rawCenter);
+        const center = resolveBusinessUnitName(rawCenter, businessUnits);
         const rawCategory = String(findValue(['职级', '分类', 'Category', 'category', '人格分类', '人格等级分类']) || '').trim();
         
         let category: User['category'] = '初款专';
@@ -608,11 +643,14 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
           const mergedUsers = users.map(u => newUsersMap.has(u.id) ? newUsersMap.get(u.id)! : u);
           const existingIds = new Set(users.map(u => u.id));
           const uniqueNewUsers = newUsers.filter(u => !existingIds.has(u.id));
-          const finalUsers = [...mergedUsers, ...uniqueNewUsers];
+          const finalUsers = [...mergedUsers, ...uniqueNewUsers].map(u => ({
+            ...u,
+            center: resolveBusinessUnitName(u.center, businessUnits),
+          }));
 
-          const newCenters = new Set(newUsers.map(u => u.center).filter(Boolean));
-          const currentUnits = new Set(businessUnits);
-          const unitsToAdd = Array.from(newCenters).filter(c => !currentUnits.has(c));
+          const unitsToAdd = finalUsers
+            .map(u => u.center)
+            .filter(c => c && !businessUnitListHas(businessUnits, c));
           const finalUnits = [...businessUnits, ...unitsToAdd];
 
           try {
@@ -620,7 +658,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
             if (unitsToAdd.length > 0) {
               onUpdateBusinessUnits(finalUnits);
             }
-            await syncWorkspace({ users: finalUsers, businessUnits: finalUnits });
+            if (persist) {
+              await persist({ users: finalUsers, businessUnits: finalUnits });
+            } else {
+              await syncWorkspace({ users: finalUsers, businessUnits: finalUnits });
+            }
             showAlert('批量导入成功。');
           } catch (err) {
             showAlert('批量导入同步失败');
@@ -664,7 +706,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
       const updatedUsers = users.map(u => u.id === userToToggle.id ? { ...u, userStatus: 'active' as const, resignDate: undefined } : u);
       try {
         onUpdateUsers(updatedUsers);
-        await syncWorkspace({ users: updatedUsers });
+        if (persist) {
+          await persist({ users: updatedUsers });
+        } else {
+          await syncWorkspace({ users: updatedUsers });
+        }
         showAlert(`${userToToggle.name} 已成功复职。`, () => {
           // 提示旧对冲单仍在
           showAlert('提示：复职操作不会自动冲销原有的离职对冲单，如需调整请在「动态消耗」中手动处理。');
@@ -694,22 +740,25 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
       };
       const updatedUsers = users.map(u => u.id === userToResign.id ? updatedUser : u);
       
-      const syncPayload: any = { users: updatedUsers };
-      
-      // 如果对冲金额 > 0，生成一条非有效工时日志
+      const overrides: { users: User[]; logs?: ValueCreationLog[] } = { users: updatedUsers };
+      let hedgeLog: ValueCreationLog | undefined;
+
       if (hedgeAmount > 0) {
-        const hedgeLog = buildResignNonEffectiveHoursLog(
+        hedgeLog = buildResignNonEffectiveHoursLog(
           userToResign,
           resignDate,
           hedgeAmount,
           user.id // 操作管理员 ID
         );
-        syncPayload.logs = [hedgeLog];
+        overrides.logs = [...allLogs, hedgeLog];
       }
-      
-      await syncWorkspace(syncPayload);
+
+      const ok = await persistOrAlert(overrides);
+      if (!ok) return;
+
       onUpdateUsers(updatedUsers);
-      
+      if (hedgeLog) onAppendLog?.(hedgeLog);
+
       showAlert(`${userToResign.name} 已成功办理离职。${hedgeAmount > 0 ? '\n已自动生成一条「非有效工时对冲」待确权单据。' : ''}`);
       setResigningUser(null);
     } catch (err) {
@@ -728,7 +777,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
       const updatedUsers = users.filter(u => u.id !== userId);
       try {
         onUpdateUsers(updatedUsers);
-        await syncWorkspace({ users: updatedUsers });
+        if (persist) {
+          await persist({ users: updatedUsers });
+        } else {
+          await syncWorkspace({ users: updatedUsers });
+        }
         showAlert('帐号注销成功');
       } catch (err) {
         showAlert(`帐号注销失败：${(err as Error).message || '网络问题'}`);
@@ -759,7 +812,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
     onUpdateUsers(updatedUsers);
 
     try {
-      await syncWorkspace({ users: updatedUsers });
+      if (persist) {
+        await persist({ users: updatedUsers });
+      } else {
+        await syncWorkspace({ users: updatedUsers });
+      }
     } catch (err) {
       showAlert(`权限修改同步失败：${(err as Error).message || '网络错误'}`);
     }
@@ -774,7 +831,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
     const updatedUsers = users.map(u => u.id === userId ? { ...u, permissions: allIds } : u);
     onUpdateUsers(updatedUsers);
     try {
-      await syncWorkspace({ users: updatedUsers });
+      if (persist) {
+        await persist({ users: updatedUsers });
+      } else {
+        await syncWorkspace({ users: updatedUsers });
+      }
       showAlert('已成功为该成员开启全部组件访问权限');
     } catch (err) {
       showAlert(`权限修改同步失败：${(err as Error).message || '网络错误'}`);
@@ -789,7 +850,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
     const updatedUsers = users.map(u => u.id === userId ? { ...u, permissions: [] } : u);
     onUpdateUsers(updatedUsers);
     try {
-      await syncWorkspace({ users: updatedUsers });
+      if (persist) {
+        await persist({ users: updatedUsers });
+      } else {
+        await syncWorkspace({ users: updatedUsers });
+      }
       showAlert('已关停该成员的所有组件访问权限');
     } catch (err) {
       showAlert(`权限修改同步失败：${(err as Error).message || '网络错误'}`);
@@ -811,7 +876,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
     });
     onUpdateUsers(updatedUsers);
     try {
-      await syncWorkspace({ users: updatedUsers });
+      if (persist) {
+        await persist({ users: updatedUsers });
+      } else {
+        await syncWorkspace({ users: updatedUsers });
+      }
       showAlert('已成功重置为职级默认权限配置');
     } catch (err) {
       showAlert(`重置权限同步失败：${(err as Error).message || '网络错误'}`);
@@ -1022,7 +1091,8 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({ user, users, onUpdateUser
                   const groups: Record<string, User[]> = {};
                   businessUnits.forEach(unit => { groups[unit] = []; });
                   collectors.forEach(u => {
-                    const center = u.center || '未分配经营单元';
+                    const resolved = resolveBusinessUnitName(u.center, businessUnits);
+                    const center = resolved || u.center || '未分配经营单元';
                     if (!groups[center]) groups[center] = [];
                     groups[center].push(u);
                   });

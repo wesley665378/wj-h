@@ -3,6 +3,7 @@ import { resolveLogPackageNet } from './reconcileMiningFromLogs';
 import { getUserSalaryByMonth } from './business';
 import { resolveLogBusinessMonth, isDateInRange, resolveLogBusinessDate } from './dateUtils';
 import { roundMoney } from './formatMoney';
+import { userCenterMatchesBusinessUnit, businessUnitLabelsEqual } from './businessUnitName';
 
 export interface UnitRankingRow {
   unitName: string;
@@ -53,7 +54,7 @@ export interface SingleMonthUnitMetrics {
  * 多人时以顿号拼接姓名，无则显示 '暂无'。
  */
 export function getUnitManagers(unitName: string, users: User[]): string {
-  const unitUsers = users.filter(u => u.center === unitName && u.userStatus !== 'inactive');
+  const unitUsers = users.filter(u => userCenterMatchesBusinessUnit(u.center, unitName) && u.userStatus !== 'inactive');
   const managers = unitUsers.filter(u => {
     const cat = u.category || '';
     return (
@@ -88,7 +89,7 @@ export function computeUnitSingleMonth(
 
   // 1. 采集人属于该经营单元的用户 ID 集合
   const unitUserIds = new Set(
-    users.filter(u => u.center === unitName).map(u => u.id)
+    users.filter(u => userCenterMatchesBusinessUnit(u.center, unitName)).map(u => u.id)
   );
 
   // 2. 筛选当月日志
@@ -103,7 +104,7 @@ export function computeUnitSingleMonth(
   const revenueLogs = monthLogs.filter(l => 
     l.category === RefineCategory.Revenue &&
     (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved) &&
-    ((l.recordedCollectorId && unitUserIds.has(l.recordedCollectorId)) || (l as any).center === unitName || (l as any).unit === unitName)
+    ((l.recordedCollectorId && unitUserIds.has(l.recordedCollectorId)) || userCenterMatchesBusinessUnit((l as any).center || (l as any).unit, unitName))
   );
   const revenuePackage = revenueLogs.reduce((sum, l) => sum + resolveLogPackageNet(l, resources, users), 0);
 
@@ -111,7 +112,7 @@ export function computeUnitSingleMonth(
   const confirmedValueLogs = monthLogs.filter(l => 
     l.category === RefineCategory.Value &&
     l.status === AuditStatus.Confirmed &&
-    ((l.recordedCollectorId && unitUserIds.has(l.recordedCollectorId)) || (l as any).center === unitName || (l as any).unit === unitName)
+    ((l.recordedCollectorId && unitUserIds.has(l.recordedCollectorId)) || userCenterMatchesBusinessUnit((l as any).center || (l as any).unit, unitName))
   );
   const confirmedValuePackage = confirmedValueLogs.reduce((sum, l) => sum + resolveLogPackageNet(l, resources, users), 0);
 
@@ -120,13 +121,13 @@ export function computeUnitSingleMonth(
     l.category === RefineCategory.Value &&
     l.status === AuditStatus.Pending &&
     (l.confirmationType === '联动确权' || (l as any).isLinkage === true) &&
-    ((l.recordedCollectorId && unitUserIds.has(l.recordedCollectorId)) || (l as any).center === unitName || (l as any).unit === unitName)
+    ((l.recordedCollectorId && unitUserIds.has(l.recordedCollectorId)) || userCenterMatchesBusinessUnit((l as any).center || (l as any).unit, unitName))
   );
   const pendingLinkageValuePackage = pendingLinkageValueLogs.reduce((sum, l) => sum + resolveLogPackageNet(l, resources, users), 0);
 
   // 2.4 工资：本单元在职人员工资包按月汇总，排除VP/水库管理。
   const unitActiveUsers = users.filter(u => 
-    u.center === unitName && 
+    userCenterMatchesBusinessUnit(u.center, unitName) && 
     u.userStatus !== 'inactive' && 
     u.category !== 'VP' && 
     u.role !== Role.ReservoirManager
@@ -159,10 +160,10 @@ export function computeUnitSingleMonth(
 
   const bonusPayout = verifiedTxs.reduce((sum, t) => {
     const receiver = users.find(u => u.id === t.receiverId || u.userId === t.receiverId);
-    if (receiver && receiver.center === unitName) {
+    if (receiver && userCenterMatchesBusinessUnit(receiver.center, unitName)) {
       return sum + (t.amount || 0);
     }
-    if (t.receiverId === unitName) {
+    if (businessUnitLabelsEqual(t.receiverId, unitName)) {
       return sum + (t.amount || 0);
     }
     return sum;
@@ -171,7 +172,7 @@ export function computeUnitSingleMonth(
   // 2.6 动态消耗：已确权/入库，按采集人所属经营单元归集
   const confirmedConsumptionLogs = monthLogs.filter(l => 
     (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved) &&
-    ((l.recordedCollectorId && unitUserIds.has(l.recordedCollectorId)) || (l as any).center === unitName || (l as any).unit === unitName)
+    ((l.recordedCollectorId && unitUserIds.has(l.recordedCollectorId)) || userCenterMatchesBusinessUnit((l as any).center || (l as any).unit, unitName))
   );
 
   const aCost = confirmedConsumptionLogs
