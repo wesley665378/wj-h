@@ -1305,13 +1305,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                  </div>
                )}
                <div className="space-y-4">
-                 <div className="p-4 bg-indigo-50/80 border border-indigo-100 rounded-2xl text-xs font-bold text-indigo-900 flex items-center justify-between">
-                   <div className="flex items-center gap-2">
-                     <span className="text-base">🔐</span>
-                     <span>自动建号说明：当采集主体职级为 <strong>【经管员高款专, 经管员高产专, 经管员NPC, VP】</strong> 时，系统自动配发登录账号，默认初始密码为 <strong>66668888</strong>，首次登录后提醒修改密码。</span>
-                   </div>
-                 </div>
-                 <div className="overflow-x-auto">
+                  <div className="overflow-x-auto">
                    <table className="w-full text-left">
                      <thead>
                        <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 tracking-widest leading-none">
