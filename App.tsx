@@ -33,7 +33,9 @@ import {
   toastApiError,
   setAuthToken,
   clearAuthToken,
-  fetchSessionUser
+  fetchSessionUser,
+  changePasswordApi,
+  getAuthToken
 } from './src/api';
 import { useSessionMeta } from './src/hooks/useSessionMeta';
 import { buildSyncPayload, buildAppSyncPayload } from './src/app/workspaceSync';
@@ -244,14 +246,6 @@ const App: React.FC = () => {
   const [processingLogIds, setProcessingLogIds] = useState<Set<string>>(new Set());
   const [quotaSnapshots, setQuotaSnapshots] = useState<Record<string, QuotaSnapshot>>({});
   const [filterMonth, setFilterMonth] = useState<string>(() => getLocalMonthString());
-
-  // 模拟服务端密码存储 (仅在内存中，不持久化)
-  const [mockPasswords, setMockPasswords] = useState<Record<string, string>>({
-    'admin': '123',
-    '1635': '123',
-    'sh888': '123',
-    'npcxie': '123'
-  });
 
   const persistWorkspaceWithOverrides = React.useCallback(async (overrides?: {
     transactions?: InternalTransaction[];
@@ -643,22 +637,21 @@ const App: React.FC = () => {
   }, [currentUser, addSystemLog]);
 
   const onUpdatePassword = React.useCallback(async (userId: string, newPassword: string, oldPassword?: string): Promise<boolean> => {
-    // 模拟服务端鉴权与更新
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // 如果提供了旧密码，则进行校验 (用户自改)
-    if (oldPassword !== undefined) {
-      if (mockPasswords[userId] !== oldPassword) {
+    try {
+      const res = await changePasswordApi(userId, newPassword, oldPassword);
+      if (res && res.success) {
+        toast.success(res.message || '密码修改成功');
+        addSystemLog('安全设置', `用户 ${userId} 成功修改了密码`);
+        return true;
+      } else {
+        toast.error(res?.message || '修改密码失败，请重试');
         return false;
       }
+    } catch (err) {
+      toastApiError(err);
+      return false;
     }
-
-    // 模拟更新成功
-    setMockPasswords(prev => ({ ...prev, [userId]: newPassword }));
-    console.log(`[API] Updating password for user ${userId} to: ${'*'.repeat(newPassword.length)}`);
-    addSystemLog('安全设置', `用户 ${userId} 修改了登录密码`);
-    return true;
-  }, [mockPasswords, addSystemLog]);
+  }, [addSystemLog]);
 
   const onAuthenticate = React.useCallback(async (userId: string, password: string): Promise<User | null> => {
     try {
@@ -823,7 +816,7 @@ const App: React.FC = () => {
   // F5 session restoration
   useEffect(() => {
     const restoreSession = async () => {
-      const token = localStorage.getItem('shihe_auth_token');
+      const token = getAuthToken();
       if (!token) {
         if (currentUser) {
           handleLogout();
@@ -954,7 +947,7 @@ const App: React.FC = () => {
     if (!currentUser) return {} as any;
     return {
       kanban: { 
-        logs: auditLogs, 
+        logs: filteredLogs, 
         resources: filteredResources, 
         users: filteredUsers, 
         currentUser, 
@@ -969,7 +962,7 @@ const App: React.FC = () => {
         user: currentUser, 
         users: filteredUsers,
         resources: filteredResources, 
-        logs: auditLogs, 
+        logs: filteredLogs, 
         onLogSubmit, 
         onSwitchTab: setActiveTab,
         transactions,
@@ -1058,7 +1051,7 @@ const App: React.FC = () => {
         businessUnits: businessUnits
       },
       reservoir: { 
-        logs: auditLogs,
+        logs: filteredLogs,
         auditLogs: auditLogs,
         resources: isAdminOrNPC ? miningResources : filteredResources,
         users: isAdminOrNPC ? managedUsers : filteredUsers,

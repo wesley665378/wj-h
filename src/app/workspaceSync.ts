@@ -72,6 +72,15 @@ export interface BuildAppSyncPayloadInput {
 export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<string, unknown> {
   const { overrides } = input;
   const nextUsers = overrides?.users ?? input.managedUsers;
+  // strip plain-text password if present
+  const cleanedUsers = nextUsers.map(u => {
+    if ('password' in u) {
+      const { password, ...rest } = u;
+      return rest;
+    }
+    return u;
+  });
+
   const nextLogs = overrides?.logs ?? input.logs;
   const nextTxs = overrides?.transactions ?? input.transactions;
   const nextRes = overrides?.miningResources ?? input.miningResources;
@@ -82,19 +91,19 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
 
   const dtcbLogs = nextLogs.filter(l => l.confirmationType === '手动确权');
   const jzczLogs = nextLogs.filter(l => l.confirmationType !== '手动确权');
-  const snapshots = buildValueEfficiencySnapshots(nextUsers, nextLogs, nextRes, input.filterMonth);
-  const jzfpSnapshots = buildJzfpSnapshot(nextUsers, nextLogs, input.filterMonth);
+  const snapshots = buildValueEfficiencySnapshots(cleanedUsers, nextLogs, nextRes, input.filterMonth);
+  const jzfpSnapshots = buildJzfpSnapshot(cleanedUsers, nextLogs, input.filterMonth);
 
-  const canWriteTownCenters = input.currentUser?.role === Role.Admin || input.currentUser?.role === Role.npcxie;
+  const canWrite = input.currentUser?.role === Role.Admin && nextUnits && nextUnits.length > 0;
 
-  return {
+  const payload: Record<string, any> = {
     ...buildSyncPayload({
-      managedUsers: nextUsers,
+      managedUsers: cleanedUsers,
       logs: jzczLogs,
       dtcbLogs: dtcbLogs,
       transactions: nextTxs,
       miningResources: nextRes,
-      businessUnits: canWriteTownCenters ? nextUnits : [],
+      businessUnits: canWrite ? nextUnits : undefined,
       circuitBreakers: nextCBs,
       systemLogs: input.systemLogs,
       fhctzRecords: [],
@@ -107,5 +116,12 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
     rdq: nextCBs,
     meetingSamples: nextSamples,
   };
+
+  if (!canWrite) {
+    delete payload.businessUnits;
+    delete payload.townCenters;
+  }
+
+  return payload;
 }
 

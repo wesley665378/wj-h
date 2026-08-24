@@ -33,6 +33,19 @@ export const updatePasswordApi = async (userId: string, newPassword: string, old
   });
 };
 
+export const changePasswordApi = async (
+  userId: string,
+  newPassword: string,
+  oldPassword?: string
+): Promise<{ success: boolean; message?: string }> => {
+  return apiClient.post<{ success: boolean; message?: string }>('/api/auth/change-password', {
+    userId,
+    id: userId,
+    newPassword,
+    oldPassword
+  });
+};
+
 export const fetchSessionUser = async (): Promise<User> => {
   const data = await apiClient.get<{ user: User }>('/api/auth/me');
   if (!data?.user) {

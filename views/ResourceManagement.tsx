@@ -434,7 +434,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
               <div className="space-y-1.5">
                  <div className="flex justify-between items-center text-xs font-black">
                    <div className="flex items-center gap-2 text-amber-600">
-                     <span>收款价值流</span>
+                     <span>收款轨</span>
                      <span className="text-[10px] font-bold text-slate-500 bg-amber-50 border border-amber-200/60 px-2 py-0.5 rounded-md">
                        款初: {formatMoney(totalRevCap)}
                      </span>
@@ -459,7 +459,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                <div className="space-y-1.5 pt-2">
                  <div className="flex justify-between items-center text-xs font-black">
                    <div className="flex items-center gap-2 text-emerald-600">
-                     <span>产值价值流</span>
+                     <span>产值轨</span>
                      <span className="text-[10px] font-bold text-slate-500 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-md">
                        产初: {formatMoney(totalValCap)}
                      </span>
@@ -996,7 +996,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                   <div className="space-y-4">
                     <div className="space-y-1">
                       <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-widest text-amber-600">
-                        <span>收款价值流 (待/已/未/入)</span>
+                        <span>收款轨 (待/已/未/入)</span>
                         <span>{revPctText}%</span>
                       </div>
                       <div className="flex h-2 w-full bg-slate-200 rounded-full overflow-hidden">
@@ -1008,7 +1008,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                     </div>
                     <div className="space-y-1">
                       <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-widest text-emerald-600">
-                        <span>产值价值流 (待/已/未/入)</span>
+                        <span>产值轨 (待/已/未/入)</span>
                         <span>{valPctText}%</span>
                       </div>
                       <div className="flex h-2 w-full bg-slate-200 rounded-full overflow-hidden">
