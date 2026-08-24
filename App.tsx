@@ -745,8 +745,9 @@ const App: React.FC = () => {
         });
         
         await syncWorkspace(payload);
-      } catch (err) {
+      } catch (err: any) {
         console.error('数据同步失败:', err);
+        toastApiError(err, '工作区数据同步失败');
       }
     };
 
