@@ -32,7 +32,8 @@ import {
   saveMeetingSampleApi,
   toastApiError,
   setAuthToken,
-  clearAuthToken
+  clearAuthToken,
+  fetchSessionUser
 } from './src/api';
 import { useSessionMeta } from './src/hooks/useSessionMeta';
 import { buildSyncPayload, buildAppSyncPayload } from './src/app/workspaceSync';
@@ -819,6 +820,29 @@ const App: React.FC = () => {
     setMeetingSamples([]);
   };
 
+  // F5 session restoration
+  useEffect(() => {
+    const restoreSession = async () => {
+      const token = localStorage.getItem('shihe_auth_token');
+      if (!token) {
+        if (currentUser) {
+          handleLogout();
+        }
+        return;
+      }
+      try {
+        const user = await fetchSessionUser();
+        setCurrentUser(user);
+        localStorage.setItem('shihe_user', JSON.stringify(user));
+      } catch (err) {
+        console.error('Session verification failed on mount:', err);
+        handleLogout();
+        toast.error('会话已过期，请重新登录');
+      }
+    };
+    restoreSession();
+  }, []);
+
   const isAdminOrNPC = currentUser?.role === Role.Admin || currentUser?.role === Role.npcxie;
   
   const filteredUsers = useMemo(() => {
@@ -884,8 +908,8 @@ const App: React.FC = () => {
   }, [logs, miningResources, filteredUsers, currentUser, isAdminOrNPC]);
 
   const filteredDtcbLogs = useMemo(() => {
-    return filteredLogs.filter(l => l.confirmationType === '手动确权');
-  }, [filteredLogs]);
+    return auditLogs.filter(l => l.confirmationType === '手动确权');
+  }, [auditLogs]);
 
   const filteredTransactions = useMemo(() => {
     if (!currentUser) return [];
@@ -960,7 +984,7 @@ const App: React.FC = () => {
         users: filteredUsers, 
         resources: filteredResources, 
         logs: auditLogs, 
-        jzczLogs: auditLogs.filter(l => l.confirmationType !== '手动确权'),
+        jzczLogs: filteredLogs.filter(l => l.confirmationType !== '手动确权'),
         dtcbLogs: auditLogs.filter(l => l.confirmationType === '手动确权'),
         onLogSubmit: onConsumptionSubmit,
         persistWorkspaceWithOverrides
@@ -1056,15 +1080,7 @@ const App: React.FC = () => {
         currentUser, 
         transactions, 
         resources: filteredResources, 
-        onSubmitTransaction,
-        acceptanceRecords,
-        onAddAcceptanceRecord: (rec: AcceptanceRecord) => {
-          setAcceptanceRecords(prev => {
-            const next = [...prev, rec];
-            void persistWorkspaceWithOverrides({ acceptanceRecords: next });
-            return next;
-          });
-        }
+        onSubmitTransaction
       },
       account: { currentUser, logs: auditLogs, transactions, resources: filteredResources, users: filteredUsers },
       personnel: { 

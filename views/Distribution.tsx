@@ -211,6 +211,7 @@ const Distribution: React.FC<DistributionProps> = ({
         try {
           await createCdtzRecord(newRecord);
           showAlert(`已成功写入承兑台账 cdtz！对 [${bonusTarget.userName}] 的 ${bonusForm.category} 发放：${fmtAmount(bonusForm.amount)}`);
+          loadDistribution();
         } catch (err) {
           showAlert("写入承兑台账 cdtz 失败，请重试");
           return;
@@ -231,18 +232,40 @@ const Distribution: React.FC<DistributionProps> = ({
   }, [filterMonth, startDate]);
 
   const [serverDistribution, setServerDistribution] = useState<any[] | null>(null);
+  const [distributionLoading, setDistributionLoading] = useState<boolean>(false);
+  const [distributionError, setDistributionError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadDistribution = () => {
+    if (isLocalEmbedded) {
+      setServerDistribution([]);
+      setDistributionLoading(false);
+      setDistributionError(null);
+      return;
+    }
+
+    setDistributionLoading(true);
+    setDistributionError(null);
     fetchDistributionData(effectiveMonth)
       .then(res => {
         if (res && Array.isArray(res.distribution)) {
           setServerDistribution(res.distribution);
+        } else {
+          setDistributionError("获取的分配数据格式不正确");
+          toast.error("获取的分配数据格式不正确");
         }
       })
       .catch(err => {
-        console.warn("Fetch distribution API failed, using fallback:", err);
+        setDistributionError("无法加载分配数据");
+        toast.error("无法加载分配数据");
+      })
+      .finally(() => {
+        setDistributionLoading(false);
       });
-  }, [effectiveMonth]);
+  };
+
+  useEffect(() => {
+    loadDistribution();
+  }, [effectiveMonth, isLocalEmbedded]);
 
   const { isCostVisible, toggleCostVisible, maskMoney, maskText } = useCostPrivacy();
   const toggleCostVisibility = toggleCostVisible;
@@ -250,7 +273,97 @@ const Distribution: React.FC<DistributionProps> = ({
   const C_WEIGHT = TIER_COEFFICIENTS.BASE_LOSS; // 系统默认 C 对冲权重
 
   const distributionData = useMemo(() => {
-    // 1. Group ALL relevant logs by user for yearly calculations
+    if (!isLocalEmbedded) {
+      if (distributionLoading || distributionError || !serverDistribution) {
+        return [];
+      }
+      return serverDistribution.map((serverItem) => {
+        const userObj = users.find((u) => u.id === serverItem.userId);
+        const userCenter = userObj?.center || "";
+
+        let centerLevelBonus = 0;
+        if (serverItem.category === "经管员高款专" || serverItem.category === "经管员高产专") {
+          centerLevelBonus = resources
+            .filter((r) => r.assignedTo === userCenter)
+            .reduce((sum, r) => sum + (r.incentiveOutput5 || 0) + (r.incentiveCollection2 || 0), 0);
+        }
+
+        const currentSurplus = serverItem.currentSurplus ?? 0;
+        const historyDebt = serverItem.historyDebt ?? 0;
+        const nextDebt = serverItem.nextDebt ?? 0;
+        const netRedundancy = serverItem.netRedundancy ?? 0;
+        const theoreticalBonus = serverItem.theoreticalBonus ?? 0;
+        const ratioVal = serverItem.ratio ?? 0.05;
+
+        const userLogsMonthly = logs.filter(l => 
+          l.recordedCollectorId === serverItem.userId && 
+          (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved) &&
+          resolveLogBusinessMonth(l) === effectiveMonth
+        );
+
+        return {
+          userId: serverItem.userId,
+          userName: serverItem.userName,
+          category: serverItem.category || "初级专家",
+          isRevenueExpert: serverItem.isRevenueExpert ?? false,
+          isChan: serverItem.isChan ?? false,
+          historyDebt: historyDebt,
+          currentSurplus: currentSurplus,
+          netRedundancy: netRedundancy,
+          nextDebt: nextDebt,
+          theoreticalBonus: theoreticalBonus,
+          ratio: ratioVal,
+          centerLevelBonus,
+
+          historyRecordsConfirmed: serverItem.historyRecords || [],
+          historyRecordsApproved: serverItem.historyRecords || [],
+          historyDebtConfirmed: serverItem.historyDebtConfirmed ?? historyDebt,
+          historyDebtApproved: serverItem.historyDebtApproved ?? historyDebt,
+          currentSurplusConfirmed: currentSurplus,
+          currentSurplusApproved: currentSurplus,
+          netRedundancyConfirmed: netRedundancy,
+          netRedundancyApproved: netRedundancy,
+          theoreticalBonusConfirmed: serverItem.theoreticalBonusConfirmed ?? theoreticalBonus,
+          theoreticalBonusApproved: serverItem.theoreticalBonusApproved ?? theoreticalBonus,
+          yearlyBonusApproved: serverItem.yearlyBonusApproved ?? 0,
+
+          confirmedValueConfirmed: serverItem.isChan ? currentSurplus : 0,
+          bCostConfirmed: 0,
+          b2CostConfirmed: 0,
+          aCostConfirmed: 0,
+          confirmedGoldConfirmed: !serverItem.isChan ? currentSurplus : 0,
+          baseValueConfirmed: serverItem.isChan ? currentSurplus : 0,
+          netBonusConfirmed: serverItem.theoreticalBonusConfirmed ?? theoreticalBonus,
+          isBreakthroughConfirmed: currentSurplus > 0,
+          gapToBreakthroughConfirmed: currentSurplus > 0 ? 0 : Math.abs(currentSurplus),
+          paymentMatchRateConfirmed: 1,
+
+          confirmedValueApproved: serverItem.isChan ? currentSurplus : 0,
+          bCostApproved: 0,
+          b2CostApproved: 0,
+          aCostApproved: 0,
+          confirmedGoldApproved: !serverItem.isChan ? currentSurplus : 0,
+          baseValueApproved: serverItem.isChan ? currentSurplus : 0,
+          netBonusApproved: serverItem.theoreticalBonusApproved ?? theoreticalBonus,
+          isBreakthroughApproved: currentSurplus > 0,
+          gapToBreakthroughApproved: currentSurplus > 0 ? 0 : Math.abs(currentSurplus),
+          paymentMatchRateApproved: 1,
+
+          baseValuePending: 0,
+          yearlyIncomeApproved: 0,
+          yearlyIncomeConfirmed: 0,
+
+          cWeight: TIER_COEFFICIENTS.BASE_LOSS,
+          salaryPackage: userObj?.salaryPackage ?? 0,
+          details: userLogsMonthly,
+
+          personalIncentiveStatus: currentSurplus > 0 ? "已激活超额价值分享" : "入库任务进行中",
+          teamDividendStatus: currentSurplus > 0 ? "已激活超额价值分享" : "入库任务进行中",
+        };
+      });
+    }
+
+    // 本地嵌入式（isLocalEmbedded 为 true）
     const currentYear = effectiveMonth
       ? effectiveMonth.split("-")[0]
       : new Date().getFullYear().toString();
@@ -273,7 +386,6 @@ const Distribution: React.FC<DistributionProps> = ({
         ? isDateInRange(logDate, startDate, endDate)
         : logMonth === effectiveMonth;
 
-      // Monthly mapping
       if (matches) {
         if (!logsByUserMonthly.has(collectorId)) {
           logsByUserMonthly.set(collectorId, []);
@@ -281,7 +393,6 @@ const Distribution: React.FC<DistributionProps> = ({
         logsByUserMonthly.get(collectorId)!.push(log);
       }
 
-      // Yearly mapping
       if (logMonth.startsWith(currentYear)) {
         if (!logsByUserYearly.has(collectorId)) {
           logsByUserYearly.set(collectorId, []);
@@ -290,14 +401,12 @@ const Distribution: React.FC<DistributionProps> = ({
       }
     });
 
-    // 2. Map users with pre-grouped logs
     return users
       .filter((u) => {
         if (u.userStatus === "inactive") return false;
         const cat = u.category || "";
         const sRoles = u.secondaryRoles || [];
 
-        // 准入逻辑：仅保留包含“款专”、“产专”关键词或经营单元管理的活跃专家
         const isExpert =
           cat.includes("款专") || cat.includes("产专") || u.role === Role.Rank;
         const hasExpertSecondaryRole = sRoles.some(
@@ -307,16 +416,13 @@ const Distribution: React.FC<DistributionProps> = ({
         return isExpert || hasExpertSecondaryRole;
       })
       .map((user) => {
-        // 严格溯源：记录来源必须严格对应 RecordedCollectorId
         const userLogsMonthly = logsByUserMonthly.get(user.id) || [];
         const userLogsYearly = logsByUserYearly.get(user.id) || [];
 
         const salaryPackage = user.salaryPackage || 0;
 
-        const isManager = (user.category || "").includes("经管员");
         const isRevenueExpert = (user.category || "").includes("款专");
         const isChanExpert = (user.category || "").includes("产专");
-        const isTargetProdExpert = isExpertCategory(user.category || "");
         const isChan = isChanExpert || user.category === "经管员高产专";
 
         const confirmedMetrics = aggregateUserMonthMetrics(logs, user, effectiveMonth, resources, users, [AuditStatus.Confirmed]);
@@ -325,8 +431,6 @@ const Distribution: React.FC<DistributionProps> = ({
         const baseValueConfirmedStr = isChan ? confirmedMetrics.productionPackage : confirmedMetrics.revenuePackage;
         const baseValueApprovedStr = isChan ? approvedMetrics.productionPackage : approvedMetrics.revenuePackage;
 
-        // Custom metrics for pending and yearly, just mapping similarly if needed
-        // For accurate tracking, use custom aggregated metrics for yearly
         let yearlyBaseValConfirmed = 0;
         let yearlyBaseValApproved = 0;
         let pendingBaseVal = 0;
@@ -334,7 +438,6 @@ const Distribution: React.FC<DistributionProps> = ({
         const pendingMetrics = aggregateUserMonthMetrics(logs, user, effectiveMonth, resources, users, [AuditStatus.Pending]);
         pendingBaseVal = isChan ? pendingMetrics.productionPackage : pendingMetrics.revenuePackage;
 
-        // 年度成本累加：从当年 1 月到 effectiveMonth
         let yearlySalaryPackage = 0;
         if (effectiveMonth) {
           const [y, m] = effectiveMonth.split("-").map(Number);
@@ -379,91 +482,52 @@ const Distribution: React.FC<DistributionProps> = ({
         let theoreticalBonusApprovedVal = 0;
         let yearlyBonusApprovedVal = 0;
 
-        const serverItem = serverDistribution?.find(s => s.userId === user.id);
+        const allocConfirmed = calculateBonusAllocation(
+            effectiveMonth,
+            user,
+            logs,
+            resources,
+            users,
+            AuditStatus.Confirmed
+        );
 
-        if (!isLocalEmbedded) {
-          // 远程生产模式：仅依赖 serverDistribution API 数据，不做 calculateBonusAllocation 静默降级
-          if (serverItem) {
-            historyDebtConfirmed = serverItem.historyDebtConfirmed ?? 0;
-            currentSurplusConfirmed = serverItem.currentSurplusConfirmed ?? 0;
-            netRedundancyConfirmed = serverItem.netRedundancyConfirmed ?? 0;
-            nextDebtConfirmed = serverItem.nextDebtConfirmed ?? 0;
+        const allocApproved = calculateBonusAllocation(
+            effectiveMonth,
+            user,
+            logs,
+            resources,
+            users,
+            AuditStatus.Approved
+        );
 
-            historyDebtApproved = serverItem.historyDebtApproved ?? 0;
-            currentSurplusApproved = serverItem.currentSurplusApproved ?? 0;
-            netRedundancyApproved = serverItem.netRedundancyApproved ?? 0;
-            nextDebtApproved = serverItem.nextDebtApproved ?? 0;
+        if (allocConfirmed.ratio > 0 || allocApproved.ratio > 0) {
+            historyDebtConfirmed = Math.abs(allocConfirmed.history);
+            currentSurplusConfirmed = allocConfirmed.current;
+            netRedundancyConfirmed = allocConfirmed.quota;
+            nextDebtConfirmed = Math.abs(allocConfirmed.newDebt);
 
-            historyDebt = serverItem.historyDebt ?? 0;
-            currentSurplus = serverItem.currentSurplus ?? 0;
-            netRedundancy = serverItem.netRedundancy ?? 0;
-            nextDebt = serverItem.nextDebt ?? 0;
+            historyDebtApproved = Math.abs(allocApproved.history);
+            currentSurplusApproved = allocApproved.current;
+            netRedundancyApproved = allocApproved.quota;
+            nextDebtApproved = Math.abs(allocApproved.newDebt);
+            
+            historyRecordsConfirmed = allocConfirmed.historyRecords;
+            historyRecordsApproved = allocApproved.historyRecords;
 
-            theoreticalBonus = serverItem.theoreticalBonusConfirmed ?? serverItem.theoreticalBonus ?? 0;
-            netBonusConfirmedVal = serverItem.theoreticalBonusConfirmed ?? 0;
-            netBonusApprovedVal = serverItem.theoreticalBonusApproved ?? 0;
+            historyDebt = historyDebtConfirmed;
+            currentSurplus = currentSurplusConfirmed;
+            netRedundancy = netRedundancyConfirmed;
+            nextDebt = nextDebtConfirmed;
+            theoreticalBonus = allocConfirmed.theoreticalBonus;
+        }
 
-            ratioVal = serverItem.ratio ?? (currentSurplus > 0 ? 1 : 0);
-            theoreticalBonusConfirmedVal = serverItem.theoreticalBonusConfirmed ?? serverItem.theoreticalBonus ?? 0;
-            theoreticalBonusApprovedVal = serverItem.theoreticalBonusApproved ?? 0;
-            yearlyBonusApprovedVal = serverItem.yearlyBonusApproved ?? 0;
+        netBonusConfirmedVal = allocConfirmed.ratio > 0 ? allocConfirmed.theoreticalBonus : 0;
+        netBonusApprovedVal = allocApproved.ratio > 0 ? allocApproved.theoreticalBonus : 0;
 
-            if (serverItem.historyRecordsConfirmed) {
-              historyRecordsConfirmed = serverItem.historyRecordsConfirmed;
-            }
-            if (serverItem.historyRecordsApproved) {
-              historyRecordsApproved = serverItem.historyRecordsApproved;
-            }
-          }
-        } else {
-          // 本地嵌入模式：使用 calculateBonusAllocation 算力引擎
-          const allocConfirmed = calculateBonusAllocation(
-              effectiveMonth,
-              user,
-              logs,
-              resources,
-              users,
-              AuditStatus.Confirmed
-          );
-
-          const allocApproved = calculateBonusAllocation(
-              effectiveMonth,
-              user,
-              logs,
-              resources,
-              users,
-              AuditStatus.Approved
-          );
-
-          if (allocConfirmed.ratio > 0 || allocApproved.ratio > 0) {
-              historyDebtConfirmed = Math.abs(allocConfirmed.history);
-              currentSurplusConfirmed = allocConfirmed.current;
-              netRedundancyConfirmed = allocConfirmed.quota;
-              nextDebtConfirmed = Math.abs(allocConfirmed.newDebt);
-
-              historyDebtApproved = Math.abs(allocApproved.history);
-              currentSurplusApproved = allocApproved.current;
-              netRedundancyApproved = allocApproved.quota;
-              nextDebtApproved = Math.abs(allocApproved.newDebt);
-              
-              historyRecordsConfirmed = allocConfirmed.historyRecords;
-              historyRecordsApproved = allocApproved.historyRecords;
-
-              historyDebt = historyDebtConfirmed;
-              currentSurplus = currentSurplusConfirmed;
-              netRedundancy = netRedundancyConfirmed;
-              nextDebt = nextDebtConfirmed;
-              theoreticalBonus = allocConfirmed.theoreticalBonus;
-          }
-
-          netBonusConfirmedVal = allocConfirmed.ratio > 0 ? allocConfirmed.theoreticalBonus : 0;
-          netBonusApprovedVal = allocApproved.ratio > 0 ? allocApproved.theoreticalBonus : 0;
-
-          ratioVal = allocConfirmed.ratio;
-          theoreticalBonusConfirmedVal = allocConfirmed.theoreticalBonus;
-          theoreticalBonusApprovedVal = allocApproved.theoreticalBonus;
-          yearlyBonusApprovedVal = yearlyBaseValApproved * allocApproved.ratio;
-        } 
+        ratioVal = allocConfirmed.ratio;
+        theoreticalBonusConfirmedVal = allocConfirmed.theoreticalBonus;
+        theoreticalBonusApprovedVal = allocApproved.theoreticalBonus;
+        yearlyBonusApprovedVal = yearlyBaseValApproved * allocApproved.ratio;
 
         const userObj = users.find((u) => u.id === user.id);
         const userCenter = userObj?.center || "";
@@ -500,7 +564,7 @@ const Distribution: React.FC<DistributionProps> = ({
           theoreticalBonusConfirmed: theoreticalBonusConfirmedVal,
           theoreticalBonusApproved: theoreticalBonusApprovedVal,
 
-          confirmedValueConfirmed: confirmedMetrics.productionPackage, // Keeping for backward compatibility if used
+          confirmedValueConfirmed: confirmedMetrics.productionPackage,
           bCostConfirmed: confirmedMetrics.b1Cost,
           b2CostConfirmed: confirmedMetrics.b2Cost,
           aCostConfirmed: confirmedMetrics.aCost,
@@ -509,7 +573,7 @@ const Distribution: React.FC<DistributionProps> = ({
           netBonusConfirmed: netBonusConfirmedVal,
           isBreakthroughConfirmed: currentSurplus > 0,
           gapToBreakthroughConfirmed: currentSurplus > 0 ? 0 : Math.abs(currentSurplus),
-          paymentMatchRateConfirmed: 1, // Simplified
+          paymentMatchRateConfirmed: 1,
 
           confirmedValueApproved: approvedMetrics.productionPackage,
           bCostApproved: approvedMetrics.b1Cost,
@@ -524,21 +588,19 @@ const Distribution: React.FC<DistributionProps> = ({
 
           baseValuePending: pendingBaseVal,
 
-          // Yearly data
           yearlyIncomeApproved: yearlyBaseValApproved,
           yearlyIncomeConfirmed: yearlyBaseValConfirmed,
           yearlyBonusApproved: yearlyBonusApprovedVal,
 
-          cWeight: C_WEIGHT,
+          cWeight: TIER_COEFFICIENTS.BASE_LOSS,
           salaryPackage,
           details: userLogsMonthly,
 
-          // Status descriptors per user requirement
           personalIncentiveStatus: currentSurplus > 0 ? "已激活超额价值分享" : "入库任务进行中",
           teamDividendStatus: currentSurplus > 0 ? "已激活超额价值分享" : "入库任务进行中",
         };
       });
-  }, [logs, users, effectiveMonth, startDate, endDate]);
+  }, [logs, users, effectiveMonth, startDate, endDate, isLocalEmbedded, distributionLoading, distributionError, serverDistribution]);
 
   const getRedundancyValue = React.useCallback(
     (userId: string, category: string) => {

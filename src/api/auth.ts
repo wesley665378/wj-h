@@ -32,3 +32,12 @@ export const updatePasswordApi = async (userId: string, newPassword: string, old
     oldPassword
   });
 };
+
+export const fetchSessionUser = async (): Promise<User> => {
+  const data = await apiClient.get<{ user: User }>('/api/auth/me');
+  if (!data?.user) {
+    throw new Error('获取会话用户失败');
+  }
+  return data.user;
+};
+

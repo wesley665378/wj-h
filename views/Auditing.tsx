@@ -162,7 +162,7 @@ const Auditing: React.FC<AuditingProps> = ({
   const consumptionTasks = useMemo(
     () =>
       monthlyLogs.filter((log) => {
-        return log.dynamicCost > 0 && log.status === AuditStatus.Pending;
+        return (log.dynamicCost > 0 || log.confirmationType === '手动确权') && log.status === AuditStatus.Pending;
       }),
     [monthlyLogs],
   );
@@ -170,7 +170,7 @@ const Auditing: React.FC<AuditingProps> = ({
   // 2. 历史记录过滤逻辑
   const historyTasks = useMemo(() => {
     return monthlyLogs
-      .filter((log) => log.dynamicCost > 0)
+      .filter((log) => log.dynamicCost > 0 || log.confirmationType === '手动确权')
       .reverse();
   }, [monthlyLogs]);
 
@@ -1175,7 +1175,7 @@ const Auditing: React.FC<AuditingProps> = ({
                     }
                   })().map((log) => {
                     if (!log) return null;
-                    const isConsumption = log.dynamicCost > 0;
+                    const isConsumption = log.dynamicCost > 0 || log.confirmationType === '手动确权';
                     const isDeduction = log.type === RefineType.NonEffectiveHours;
 
                     const confirmedDate = log.confirmedAt

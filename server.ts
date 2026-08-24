@@ -236,9 +236,46 @@ async function startServer() {
       const responseUser = { ...user, mustChangePassword };
 
       console.log(`Login successful for user: ${user.name}`);
-      res.json({ user: responseUser, clientIp });
+      res.json({ user: responseUser, token: user.id, clientIp });
     } catch (error) {
       console.error('Login error:', error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.get("/api/auth/me", async (req, res) => {
+    try {
+      const authHeader = req.headers['authorization'];
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: "未登录或登录已过期" });
+      }
+      const token = authHeader.substring(7); // Extract token (which is userId)
+      if (!token) {
+        return res.status(401).json({ error: "未登录或登录已过期" });
+      }
+      
+      const db = await getPool();
+      let user = null;
+      if (db) {
+        try {
+          const [rows]: any = await db.execute('SELECT * FROM users WHERE id = ? OR userId = ?', [token, token]);
+          user = rows[0];
+        } catch (dbErr) {
+          console.warn('Database query failed in /api/auth/me:', (dbErr as any).message);
+        }
+      }
+      if (!user) {
+        user = MOCK_USERS_DB.find(u => u.id === token || u.userId === token);
+      }
+      if (!user) {
+        return res.status(401).json({ error: "账号不存在" });
+      }
+      if (user.userStatus === 'inactive') {
+        return res.status(403).json({ error: "该账号已离职停用，请联系管理员" });
+      }
+      res.json({ user });
+    } catch (error) {
+      console.error('Session recovery error:', error);
       res.status(500).json({ error: "Internal Server Error" });
     }
   });

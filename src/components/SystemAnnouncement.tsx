@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, Role, Announcement } from '../../types';
 import { Megaphone, Plus, Trash2, Pin, Bell, CheckCircle2, AlertTriangle, AlertCircle, X, Check, CheckCheck, Inbox, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
+import { useCityGuardianModal, CityGuardianModal } from './CityGuardianModal';
 
 interface SystemAnnouncementProps {
   currentUser: User;
@@ -32,6 +33,7 @@ const DEFAULT_ANNOUNCEMENTS: Announcement[] = [
 ];
 
 export const SystemAnnouncement: React.FC<SystemAnnouncementProps> = ({ currentUser, onSystemLog }) => {
+  const { modalState, showConfirm, closeModal } = useCityGuardianModal();
   const [announcements, setAnnouncements] = useState<Announcement[]>(() => {
     try {
       const saved = localStorage.getItem('shihe_announcements');
@@ -176,15 +178,15 @@ export const SystemAnnouncement: React.FC<SystemAnnouncementProps> = ({ currentU
 
   const handleDelete = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm('确定要删除此条站内信息吗？')) return;
-
-    const target = announcements.find(a => a.id === id);
-    setAnnouncements(prev => prev.filter(a => a.id !== id));
-    setReadIds(prev => prev.filter(rId => rId !== id));
-    toast.success('信息已删除');
-    if (onSystemLog && target) {
-      onSystemLog('删除站内信息', `标题: ${target.title}`);
-    }
+    showConfirm('确定要删除此条站内信息吗？', () => {
+      const target = announcements.find(a => a.id === id);
+      setAnnouncements(prev => prev.filter(a => a.id !== id));
+      setReadIds(prev => prev.filter(rId => rId !== id));
+      toast.success('信息已删除');
+      if (onSystemLog && target) {
+        onSystemLog('删除站内信息', `标题: ${target.title}`);
+      }
+    });
   };
 
   const handleTogglePin = (id: string, e: React.MouseEvent) => {
@@ -552,6 +554,7 @@ export const SystemAnnouncement: React.FC<SystemAnnouncementProps> = ({ currentU
           </div>
         </div>
       )}
+      <CityGuardianModal state={modalState} onClose={closeModal} />
     </div>
   );
 };

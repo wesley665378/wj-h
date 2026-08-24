@@ -104,39 +104,56 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
 
   // ===== 分配 API 降级控制 =====
   const [serverDistributionItem, setServerDistributionItem] = useState<any | null>(null);
+  const [loadingDistribution, setLoadingDistribution] = useState(false);
+  const [errorDistribution, setErrorDistribution] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
     if (import.meta.env.VITE_USE_LOCAL_AUTH !== 'true') {
+      setLoadingDistribution(true);
+      setErrorDistribution(null);
       fetchDistributionData(effectiveMonth)
         .then(res => {
-          if (isMounted && res && Array.isArray(res.distribution)) {
-            const item = res.distribution.find((d: any) => d.userId === currentUser.id);
-            setServerDistributionItem(item || null);
+          if (isMounted) {
+            if (res && Array.isArray(res.distribution)) {
+              const item = res.distribution.find((d: any) => d.userId === currentUser.id);
+              setServerDistributionItem(item || null);
+            } else {
+              setErrorDistribution("数据格式错误");
+              toast.error("获取的分配数据格式不正确");
+            }
           }
         })
         .catch(err => {
-          console.warn("MyAccount: fetchDistributionData API 降级使用本地核算:", err);
-          if (isMounted) setServerDistributionItem(null);
+          console.error("MyAccount: fetchDistributionData API error:", err);
+          if (isMounted) {
+            setErrorDistribution("加载失败");
+            toast.error("无法加载分配数据");
+          }
+        })
+        .finally(() => {
+          if (isMounted) setLoadingDistribution(false);
         });
     } else {
       setServerDistributionItem(null);
+      setLoadingDistribution(false);
+      setErrorDistribution(null);
     }
     return () => { isMounted = false; };
   }, [effectiveMonth, currentUser.id]);
 
-  // 权威分配 API 返回值优先，API 异常/无数据时降级至本地计算
-  const currentBalance = serverDistributionItem
-    ? (serverDistributionItem.currentSurplusConfirmed ?? serverDistributionItem.currentSurplus ?? localBalance)
-    : localBalance;
+  // 权威分配 API 返回值优先，API 异常/无数据时：如果是远程模式，禁止静默降级至本地计算
+  const currentBalance = import.meta.env.VITE_USE_LOCAL_AUTH === 'true'
+    ? localBalance
+    : (serverDistributionItem ? (serverDistributionItem.currentSurplusConfirmed ?? serverDistributionItem.currentSurplus ?? 0) : null);
 
-  const bonusQuota = serverDistributionItem
-    ? (serverDistributionItem.theoreticalBonusConfirmed ?? serverDistributionItem.theoreticalBonus ?? localBonusQuota)
-    : localBonusQuota;
+  const bonusQuota = import.meta.env.VITE_USE_LOCAL_AUTH === 'true'
+    ? localBonusQuota
+    : (serverDistributionItem ? (serverDistributionItem.theoreticalBonusConfirmed ?? serverDistributionItem.theoreticalBonus ?? 0) : null);
 
-  const historicalDebt = serverDistributionItem
-    ? (serverDistributionItem.nextDebtConfirmed ?? serverDistributionItem.nextDebt ?? serverDistributionItem.historyDebt ?? localDebt)
-    : localDebt;
+  const historicalDebt = import.meta.env.VITE_USE_LOCAL_AUTH === 'true'
+    ? localDebt
+    : (serverDistributionItem ? (serverDistributionItem.nextDebtConfirmed ?? serverDistributionItem.nextDebt ?? serverDistributionItem.historyDebt ?? 0) : null);
 
   // 明细列表过滤（按当前维度过滤后的 activeLogs 进行搜索与筛选）
   const filteredDetailLogs = useMemo(() => {
@@ -316,8 +333,18 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
         <div className="bg-gradient-to-br from-amber-50 to-orange-50/50 p-5 rounded-3xl border border-amber-100/80 shadow-2xs flex flex-col justify-between">
           <div>
             <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest block mb-1">当月结余 ({effectiveMonth})</span>
-            <h3 className={`text-2xl font-black font-mono ${currentBalance >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
-              {isCostVisible ? formatAmount(currentBalance) : '****'}
+            <h3 className={`text-2xl font-black font-mono ${currentBalance === null ? 'text-slate-500' : currentBalance >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
+              {loadingDistribution ? (
+                <span className="text-sm font-bold text-slate-400">加载中...</span>
+              ) : errorDistribution ? (
+                <span className="text-sm font-bold text-rose-500">无法加载分配数据</span>
+              ) : !isCostVisible ? (
+                '****'
+              ) : currentBalance !== null ? (
+                formatAmount(currentBalance)
+              ) : (
+                '--'
+              )}
             </h3>
           </div>
         </div>
@@ -327,7 +354,17 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
           <div>
             <span className="text-[10px] font-black text-sky-600 uppercase tracking-widest block mb-1">奖金额度 ({effectiveMonth})</span>
             <h3 className="text-2xl font-black text-slate-900 font-mono">
-              {isCostVisible ? formatAmount(bonusQuota) : '****'}
+              {loadingDistribution ? (
+                <span className="text-sm font-bold text-slate-400">加载中...</span>
+              ) : errorDistribution ? (
+                <span className="text-sm font-bold text-rose-500">无法加载分配数据</span>
+              ) : !isCostVisible ? (
+                '****'
+              ) : bonusQuota !== null ? (
+                formatAmount(bonusQuota)
+              ) : (
+                '--'
+              )}
             </h3>
           </div>
         </div>
@@ -337,7 +374,17 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
           <div>
             <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest block mb-1">历史欠产 ({effectiveMonth})</span>
             <h3 className="text-2xl font-black text-rose-600 font-mono">
-              {isCostVisible ? formatAmount(historicalDebt) : '****'}
+              {loadingDistribution ? (
+                <span className="text-sm font-bold text-slate-400">加载中...</span>
+              ) : errorDistribution ? (
+                <span className="text-sm font-bold text-rose-500">无法加载分配数据</span>
+              ) : !isCostVisible ? (
+                '****'
+              ) : historicalDebt !== null ? (
+                formatAmount(historicalDebt)
+              ) : (
+                '--'
+              )}
             </h3>
           </div>
         </div>
