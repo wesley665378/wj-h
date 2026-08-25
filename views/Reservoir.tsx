@@ -31,6 +31,8 @@ import {
   EyeOff
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
+import { CostPrivacyToggle } from '../src/components/CostPrivacyToggle';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCostPrivacy, formatCostDisplay } from '../src/hooks/useCostPrivacy';
 
@@ -519,14 +521,14 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "统筹明细");
-    XLSX.writeFile(wb, `统筹水库明细_${startDate && endDate ? `${startDate}_${endDate}` : effectiveMonth}.xlsx`);
+    exportWorkbook(wb, buildExcelFilename("统筹水库明细", startDate && endDate ? `${startDate}_${endDate}` : effectiveMonth));
   };
 
   const finalSupplementValue = fhctzRecord ? fhctzRecord.amount : totalSupplement;
   const coverageRatio = finalSupplementValue > 0 ? (platformCoordinationInflow / finalSupplementValue) * 100 : 100;
 
   return (
-    <div className="p-4 md:p-6 lg:p-8 space-y-6 md:space-y-8 bg-slate-50/50 min-h-screen">
+    <div className="space-y-6 md:space-y-8">
       {/* 顶部主横幅与筛选操作区 */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white p-6 md:p-8 rounded-2xl border border-slate-200/80 shadow-sm">
         <div className="space-y-1.5">
@@ -565,19 +567,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
               setEndDate('');
             }}
           />
-          <button
-            type="button"
-            onClick={toggleCostVisible}
-            className={`px-3 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center shadow-sm cursor-pointer border ${
-              isCostVisible 
-                ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100' 
-                : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
-            }`}
-            title={isCostVisible ? "点击隐藏成本薪资数据" : "点击显示明文成本薪资数据"}
-          >
-            {isCostVisible ? <EyeOff className="w-4 h-4 mr-1.5" /> : <Eye className="w-4 h-4 mr-1.5 text-slate-400" />}
-            <span>{isCostVisible ? "隐藏薪资" : "显示薪资"}</span>
-          </button>
+          <CostPrivacyToggle />
           <button 
             type="button"
             onClick={handleExport}

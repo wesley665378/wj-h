@@ -4,10 +4,13 @@
  * 禁止强行提升为 App 顶级路由，禁止在此处单独发起绕过 JWT 鉴权的 fetch 请求。
  */
 
+import { UI_TOKENS } from '../src/constants/uiTokens';
 import React, { useMemo } from 'react';
 import { InternalTransaction, MiningResource, User, TransactionStatus, TransactionType, ValueCreationLog, RefineCategory, AuditStatus } from '../types';
 import { ProgressBar } from '../src/components/UI';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
+import { formatMoney } from '../src/utils/formatMoney';
+import { UI_LABELS } from '../src/constants/uiLabels';
 
 interface TradingTabProps {
   selectedMineId: string;
@@ -62,7 +65,7 @@ const TradingTab: React.FC<TradingTabProps> = ({
     <div className="w-full space-y-8 animate-in slide-in-from-bottom-4">
       {/* Verification Form for Selected Transaction */}
       {selectedTx && (
-        <div className="bg-white p-8 rounded-[2.5rem] border-2 border-indigo-100 shadow-2xl space-y-8 animate-in zoom-in-95 duration-300">
+        <div className={`bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} border-2 border-indigo-100 shadow-2xl space-y-8 animate-in zoom-in-95 duration-300`}>
           <div className="flex justify-between items-center">
             <h4 className="text-2xl font-black text-slate-800 tracking-tighter uppercase">待验证指令详情</h4>
             <button onClick={() => setSelectedTx(null)} className="text-slate-400 hover:text-slate-600">
@@ -99,7 +102,7 @@ const TradingTab: React.FC<TradingTabProps> = ({
                       className="w-full bg-white border-2 border-amber-200 rounded-xl px-4 py-2 font-black text-amber-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
                     />
                   ) : (
-                    <p className="text-2xl font-black text-amber-700 font-mono">{(selectedTx.revenueAmount || 0).toLocaleString()}</p>
+                    <p className="text-2xl font-black text-amber-700 font-mono">{formatMoney(selectedTx.revenueAmount || 0)}</p>
                   )}
                 </div>
                 <div className="bg-emerald-50 p-6 rounded-3xl border border-emerald-100">
@@ -112,7 +115,7 @@ const TradingTab: React.FC<TradingTabProps> = ({
                       className="w-full bg-white border-2 border-emerald-200 rounded-xl px-4 py-2 font-black text-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   ) : (
-                    <p className="text-2xl font-black text-emerald-700 font-mono">{(selectedTx.valueAmount || 0).toLocaleString()}</p>
+                    <p className="text-2xl font-black text-emerald-700 font-mono">{formatMoney(selectedTx.valueAmount || 0)}</p>
                   )}
                 </div>
               </div>
@@ -226,7 +229,7 @@ const TradingTab: React.FC<TradingTabProps> = ({
         return (
           <>
             {/* Mining Asset Confirmation Status Monitoring */}
-            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm space-y-8">
+            <div className={`bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-sm space-y-8`}>
               <h4 className="text-xl font-black text-slate-800 tracking-tighter uppercase">矿山资源资产确权状态监控</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <ProgressBar 
@@ -247,7 +250,7 @@ const TradingTab: React.FC<TradingTabProps> = ({
             </div>
 
             {/* Shared Mining Allocation (Multi-department) */}
-            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+            <div className={`bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-sm`}>
               <h4 className="text-xl font-black text-slate-800 tracking-tighter uppercase mb-8">共享提炼分配 (多部门)</h4>
               <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200/60">
                 <div className="flex items-center justify-between mb-6 border-b border-slate-200 pb-4">
@@ -286,8 +289,8 @@ const TradingTab: React.FC<TradingTabProps> = ({
       })()}
 
       {/* Business Unit Dashboard */}
-      <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm space-y-8">
-        <h4 className="text-xl font-black text-slate-800 tracking-tighter uppercase">接收经营价值流</h4>
+      <div className={`bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-sm space-y-8`}>
+        <h4 className="text-xl font-black text-slate-800 tracking-tighter uppercase">接收经营{UI_LABELS.VALUE_FLOW}</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {Array.from(new Set(users.map(u => u.center).filter(Boolean))).map(center => {
             // Calculate unverified value for this center

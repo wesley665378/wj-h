@@ -1,3 +1,4 @@
+import { UI_TOKENS } from '../src/constants/uiTokens';
 import React from 'react';
 import { Card } from '../src/components/UI';
 import { 
@@ -53,7 +54,7 @@ const SystemInstructions: React.FC = () => {
   return (
     <div className="space-y-8 max-w-6xl mx-auto pb-12 animate-fadeIn" id="system-instructions-view">
       {/* 头部展示区 */}
-      <div className="relative rounded-[2.5rem] bg-gradient-to-br from-slate-900 to-indigo-950 p-8 md:p-12 overflow-hidden shadow-2xl border border-slate-800">
+      <div className={`relative ${UI_TOKENS.RADIUS_PANEL} bg-gradient-to-br from-slate-900 to-indigo-950 p-8 md:p-12 overflow-hidden shadow-2xl border border-slate-800`}>
         <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl -mr-20 -mt-20"></div>
         <div className="absolute bottom-0 left-0 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl -ml-20 -mb-20"></div>
         
@@ -72,7 +73,7 @@ const SystemInstructions: React.FC = () => {
       </div>
 
       {/* 规范业务术语词典 */}
-      <Card className="rounded-[2.5rem] bg-white border border-slate-100 shadow-xl overflow-hidden">
+      <Card className={`${UI_TOKENS.RADIUS_PANEL} bg-white border border-slate-100 shadow-xl overflow-hidden`}>
         <div className="p-6 md:p-8 border-b border-slate-100 bg-slate-50/50">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 bg-blue-600 text-white rounded-xl flex items-center justify-center shadow-md">
@@ -207,7 +208,7 @@ const SystemInstructions: React.FC = () => {
       </div>
 
       {/* 水库盈利排名榜双行口径说明 */}
-      <Card className="rounded-[2.5rem] bg-white border border-slate-100 shadow-xl overflow-hidden">
+      <Card className={`${UI_TOKENS.RADIUS_PANEL} bg-white border border-slate-100 shadow-xl overflow-hidden`}>
         <div className="p-6 md:p-8 border-b border-slate-100 bg-slate-50/50">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 bg-amber-500 text-white rounded-xl flex items-center justify-center shadow-md">
@@ -283,7 +284,7 @@ const SystemInstructions: React.FC = () => {
       </Card>
 
       {/* 2% 与 5% 专项包挂载说明 */}
-      <Card className="rounded-[2.5rem] bg-white border border-slate-100 shadow-xl overflow-hidden">
+      <Card className={`${UI_TOKENS.RADIUS_PANEL} bg-white border border-slate-100 shadow-xl overflow-hidden`}>
         <div className="p-6 md:p-8 border-b border-slate-100 bg-slate-50/50">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 bg-indigo-500 text-white rounded-xl flex items-center justify-center shadow-md">

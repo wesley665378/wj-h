@@ -1,3 +1,4 @@
+import { UI_TOKENS } from '../src/constants/uiTokens';
 import React, { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import StandardModal from "../src/components/StandardModal";
@@ -11,6 +12,7 @@ import { getUserSalaryByMonth } from "../src/utils/business";
 import { resolveLogBusinessMonth, getLocalMonthString, getLocalDateString, resolveLogBusinessDate, isDateInRange } from "../src/utils/dateUtils";
 import { formatAmount, formatRatio, formatPercent } from "../src/utils/formatters";
 import { InfoTip } from "../src/components/InfoTip";
+import { CostPrivacyToggle } from "../src/components/CostPrivacyToggle";
 import { BusinessDateFilter } from "../src/components/BusinessDateFilter";
 import { fetchDistributionData } from "../src/api/distribution";
 import { createCdtzRecord } from "../src/api/cdtz";
@@ -28,6 +30,7 @@ import {
   AcceptanceRecord,
 } from "../types";
 import * as XLSX from "xlsx";
+import { exportWorkbook, buildExcelFilename } from "../src/utils/excelIo";
 import { toast } from "sonner";
 import { CityGuardianModal, useCityGuardianModal } from "../src/components/CityGuardianModal";
 import { useCostPrivacy } from "../src/hooks/useCostPrivacy";
@@ -778,9 +781,9 @@ const Distribution: React.FC<DistributionProps> = ({
     const ws = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, ws, "价值分配表");
-    XLSX.writeFile(
+    exportWorkbook(
       workbook,
-      `价值分配_${effectiveMonth || "全部"}_${new Date().toLocaleDateString()}.xlsx`,
+      buildExcelFilename("价值分配", effectiveMonth || "全部")
     );
     showAlert("导出成功");
   };
@@ -798,9 +801,9 @@ const Distribution: React.FC<DistributionProps> = ({
 
   if (distributionData.length === 0) {
     return (
-      <div className="w-full space-y-8 animate-in fade-in duration-700 pb-20 font-sans">
+      <div className="w-full space-y-8 animate-in fade-in duration-700 pb-6 font-sans">
         {/* Header */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
+        <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} shadow-sm border border-slate-100`}>
           <div>
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white shadow-2xl">
@@ -818,7 +821,7 @@ const Distribution: React.FC<DistributionProps> = ({
           </div>
         </div>
 
-        <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-sm overflow-hidden`}>
           <div className="p-6 md:p-8 border-b border-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest flex items-center">
               <Calculator size={16} className="mr-3 text-blue-600" />
@@ -869,9 +872,9 @@ const Distribution: React.FC<DistributionProps> = ({
   }
 
   return (
-    <div className="w-full space-y-8 animate-in fade-in duration-700 pb-20 font-sans">
+    <div className="w-full space-y-8 animate-in fade-in duration-700 pb-6 font-sans">
       {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
+      <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} shadow-sm border border-slate-100`}>
         <div>
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white shadow-2xl">
@@ -892,7 +895,7 @@ const Distribution: React.FC<DistributionProps> = ({
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-1 gap-6">
 
-        <div className="bg-white rounded-[3rem] p-8 border border-slate-100 shadow-sm group hover:shadow-xl transition-all">
+        <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} p-8 border border-slate-100 shadow-sm group hover:shadow-xl transition-all`}>
           <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-2">
             平均产值含金量
           </p>
@@ -933,7 +936,7 @@ const Distribution: React.FC<DistributionProps> = ({
         </div>
       </div>
 
-      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+      <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-sm overflow-hidden`}>
         <div className="p-6 md:p-8 border-b border-slate-50 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest flex items-center">
@@ -993,13 +996,7 @@ const Distribution: React.FC<DistributionProps> = ({
                 <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[180px]">
                   <div className="flex items-center justify-center gap-1.5">
                     <span>总成本对冲</span>
-                    <button 
-                      onClick={toggleCostVisibility}
-                      className="p-1 hover:bg-slate-200 rounded-md transition-colors cursor-pointer"
-                      title={isCostVisible ? "点击隐藏成本数值" : "点击显示成本数值"}
-                    >
-                      {isCostVisible ? <Eye size={14} className="text-slate-400" /> : <EyeOff size={14} className="text-slate-400" />}
-                    </button>
+                    <CostPrivacyToggle size="sm" showLabel={false} />
                     <InfoTip title="总成本对冲口径" content="款专工资+A类，产专工资+B1类，不含 B2/C 动态对冲。" />
                   </div>
                 </th>
@@ -1092,7 +1089,6 @@ const Distribution: React.FC<DistributionProps> = ({
                           )}
                         </div>
                       </td>
-
                       {/* Column 2: 产兑包/收款包 */}
                       <td className="p-0 border border-slate-200">
                         <div className="flex flex-col divide-y divide-slate-200 h-full w-full">
@@ -1123,26 +1119,9 @@ const Distribution: React.FC<DistributionProps> = ({
                               已确权
                             </div>
                             <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-bold text-slate-700 whitespace-nowrap relative group">
-                              <div 
-                                className="flex items-center gap-1.5 cursor-pointer transition-all hover:text-blue-600 px-2 py-0.5 rounded hover:bg-blue-50" 
-                                title={isCostVisible ? `刚性工资包(${formatAmount(data.salaryPackage)}) + 浮动成本(${formatAmount(data.isRevenueExpert ? (data.aCostConfirmed || 0) : (data.bCostConfirmed || 0))})` : "点击查看数值"}
-                                onClick={toggleCostVisibility}
-                              >
-                                <span>
-                                  {isCostVisible ? (
-                                    <>
-                                      {formatAmount(data.salaryPackage + (data.isRevenueExpert ? (data.aCostConfirmed || 0) : (data.bCostConfirmed || 0)))}
-                                    </>
-                                  ) : (
-                                    <span className="text-slate-300">********</span>
-                                  )}
-                                </span>
-                                {isCostVisible ? (
-                                  <Eye size={12} className="text-slate-300 invisible group-hover:visible" />
-                                ) : (
-                                  <EyeOff size={12} className="text-slate-300 invisible group-hover:visible" />
-                                )}
-                              </div>
+                              <span title={`刚性工资包(${formatAmount(data.salaryPackage)}) + 浮动成本(${formatAmount(data.isRevenueExpert ? (data.aCostConfirmed || 0) : (data.bCostConfirmed || 0))})`}>
+                                {maskMoney(data.salaryPackage + (data.isRevenueExpert ? (data.aCostConfirmed || 0) : (data.bCostConfirmed || 0)), fmtAmount)}
+                              </span>
                             </div>
                           </div>
                           <div className="flex items-stretch flex-1 min-h-[38px] group/cost">
@@ -1150,26 +1129,9 @@ const Distribution: React.FC<DistributionProps> = ({
                               入库
                             </div>
                             <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-bold text-slate-700 whitespace-nowrap relative group">
-                              <div 
-                                className="flex items-center gap-1.5 cursor-pointer transition-all hover:text-blue-600 px-2 py-0.5 rounded hover:bg-blue-50" 
-                                title={isCostVisible ? `刚性工资包(${formatAmount(data.salaryPackage)}) + 浮动成本(${formatAmount(data.isRevenueExpert ? (data.aCostApproved || 0) : (data.bCostApproved || 0))})` : "点击查看数值"}
-                                onClick={toggleCostVisibility}
-                              >
-                                <span>
-                                  {isCostVisible ? (
-                                    <>
-                                      {fmtAmount(data.salaryPackage + (data.isRevenueExpert ? (data.aCostApproved || 0) : (data.bCostApproved || 0)))}
-                                    </>
-                                  ) : (
-                                    <span className="text-slate-300">********</span>
-                                  )}
-                                </span>
-                                {isCostVisible ? (
-                                  <Eye size={12} className="text-slate-300 invisible group-hover:visible" />
-                                ) : (
-                                  <EyeOff size={12} className="text-slate-300 invisible group-hover:visible" />
-                                )}
-                              </div>
+                              <span title={`刚性工资包(${formatAmount(data.salaryPackage)}) + 浮动成本(${formatAmount(data.isRevenueExpert ? (data.aCostApproved || 0) : (data.bCostApproved || 0))})`}>
+                                {maskMoney(data.salaryPackage + (data.isRevenueExpert ? (data.aCostApproved || 0) : (data.bCostApproved || 0)), fmtAmount)}
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -1340,7 +1302,7 @@ const Distribution: React.FC<DistributionProps> = ({
                           className="bg-slate-50/80 border-b border-slate-100"
                         >
                           <td colSpan={12} className="p-8">
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 bg-white rounded-[3rem] p-10 shadow-inner border border-slate-100">
+                            <div className={`grid grid-cols-1 lg:grid-cols-2 gap-12 bg-white ${UI_TOKENS.RADIUS_PANEL} p-10 shadow-inner border border-slate-100`}>
                               {/* Waterfall Steps */}
                               <div className="space-y-6">
                                 <h5 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] flex items-center">
@@ -1546,7 +1508,7 @@ const Distribution: React.FC<DistributionProps> = ({
                                   />
                                   关联确权记录明细
                                 </h5>
-                                <div className="max-h-[400px] overflow-y-auto pr-2 space-y-3 custom-scrollbar">
+                                <div className="space-y-3">
                                   {data.details.map((log) => (
                                     <div
                                       key={log.id}
@@ -1843,7 +1805,7 @@ const Distribution: React.FC<DistributionProps> = ({
       </div>
 
       {/* Footer Info */}
-      <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex items-center justify-between">
+      <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} p-8 border border-slate-100 shadow-sm flex items-center justify-between`}>
         <div className="flex items-center gap-3">
           <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl">
             <ShieldCheck size={18} />

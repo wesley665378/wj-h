@@ -2,9 +2,10 @@ import React, { useState, useMemo } from 'react';
 import { User, ValueCreationLog, MiningResource, InternalTransaction } from '../../types';
 import { computeBusinessUnitProfitRanking, UnitRankingRow } from '../utils/businessUnitProfitRanking';
 import { useCostPrivacy } from '../hooks/useCostPrivacy';
+import { CostPrivacyToggle } from './CostPrivacyToggle';
 import { formatMoney } from '../utils/formatMoney';
 import { Card } from './UI';
-import { Trophy, ChevronDown, ChevronUp, Eye, EyeOff, Info } from 'lucide-react';
+import { Trophy, ChevronDown, ChevronUp, Info } from 'lucide-react';
 import { UI_LABELS } from '../constants/uiLabels';
 
 interface BusinessUnitProfitRankingTableProps {
@@ -100,14 +101,7 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
         </div>
 
         <div className="flex items-center space-x-3" onClick={(e) => e.stopPropagation()}>
-          <button
-            onClick={toggleCostVisible}
-            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-black transition-colors flex items-center space-x-1.5 shadow-sm"
-            title={isCostVisible ? '点击隐藏成本' : '点击显示成本'}
-          >
-            {isCostVisible ? <Eye size={14} /> : <EyeOff size={14} />}
-            <span>{isCostVisible ? '隐藏成本' : '显示成本'}</span>
-          </button>
+          <CostPrivacyToggle size="sm" />
 
           <button
             onClick={() => setIsExpanded(prev => !prev)}

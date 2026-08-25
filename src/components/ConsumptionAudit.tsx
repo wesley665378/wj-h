@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Check, X, AlertTriangle, ShieldCheck, Landmark, Coins, HelpCircle, RefreshCw, Eye, EyeOff } from 'lucide-react';
+import { Check, X, AlertTriangle, ShieldCheck, Landmark, Coins, HelpCircle, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatMoney } from '../utils/formatMoney';
 import { useCostPrivacy } from '../hooks/useCostPrivacy';
+import StandardModal from './StandardModal';
 
 /**
  * Backend/API Raw Data Model representation
@@ -132,45 +133,15 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
   };
 
   return (
-    <AnimatePresence>
-      <div id="consumption-audit-container" className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-        <motion.div
-          id="consumption-audit-modal"
-          initial={{ opacity: 0, scale: 0.95, y: 15 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 15 }}
-          transition={{ duration: 0.25, ease: 'easeOut' }}
-          className="bg-white w-full max-w-2xl rounded-3xl shadow-xl overflow-hidden border border-slate-200/80 flex flex-col"
-        >
-          {/* Header */}
-          <div className="px-6 py-5 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-            <div className="flex items-center space-x-3.5">
-              <div className="w-10 h-10 bg-slate-900 rounded-2xl flex items-center justify-center text-white shadow-md">
-                <Landmark className="w-5 h-5 text-slate-100" />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold text-slate-800 tracking-tight flex items-center gap-2">
-                  消耗确权对账稽核
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 font-mono tracking-normal uppercase">
-                    系统版本 v2
-                  </span>
-                </h3>
-                <p className="text-[10px] font-bold text-slate-400 tracking-widest uppercase mt-0.5">
-                  消耗确权审计对账
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              id="close-audit-btn"
-              onClick={onClose}
-              className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-5 max-h-[80vh]">
+    <StandardModal 
+      isOpen={isOpen} 
+      onClose={onClose} 
+      maxWidthClassName="max-w-2xl"
+      title="城市守护者"
+      subtitle="消耗确权对账稽核 (系统版本 v2)"
+      icon={<Landmark className="w-5 h-5 text-slate-100" />}
+    >
+      <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-5 max-h-[80vh]">
             
             {/* 1. Metadata Grid Layout - Requirement: grid-cols-2 */}
             <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 space-y-4">
@@ -520,8 +491,6 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
             </div>
 
           </form>
-        </motion.div>
-      </div>
-    </AnimatePresence>
+    </StandardModal>
   );
 };

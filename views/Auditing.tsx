@@ -22,10 +22,14 @@ import {
   CartesianGrid,
 } from "recharts";
 import { Card, StatItem, Badge, ProjectStatusBadge } from "../src/components/UI";
-import { Eye, EyeOff } from "lucide-react";
+import { UI_TOKENS } from "../src/constants/uiTokens";
+import { CostPrivacyToggle } from "../src/components/CostPrivacyToggle";
 import { useCostPrivacy } from "../src/hooks/useCostPrivacy";
 import { PieChartCard } from "../src/components/PieChartCard";
 import * as XLSX from "xlsx";
+import { exportWorkbook, buildExcelFilename } from "../src/utils/excelIo";
+import { formatMoney } from "../src/utils/formatMoney";
+import { TERMINOLOGY } from "../src/constants/terminology";
 import { UI_LABELS } from "../src/constants/uiLabels";
 import { isSystemAdmin } from "../src/utils/accessControl";
 import { ConsumptionAudit, AuditApiData } from "../src/components/ConsumptionAudit";
@@ -452,9 +456,9 @@ const Auditing: React.FC<AuditingProps> = ({
       worksheet,
       sheetName,
     );
-    XLSX.writeFile(
+    exportWorkbook(
       workbook,
-      `${sheetName}_${selectedMonth}_${new Date().toLocaleDateString()}.xlsx`,
+      buildExcelFilename(sheetName, selectedMonth)
     );
   };
 
@@ -471,7 +475,7 @@ const Auditing: React.FC<AuditingProps> = ({
   };
 
   return (
-    <div className="w-full space-y-4 md:space-y-6 lg:space-y-8 animate-in fade-in duration-500 pb-20">
+    <div className="w-full space-y-4 md:space-y-6 lg:space-y-8 animate-in fade-in duration-500 pb-6">
       <ConsumptionAudit 
         isOpen={!!confirmingLog}
         onClose={() => setConfirmingLog(null)}
@@ -480,76 +484,41 @@ const Auditing: React.FC<AuditingProps> = ({
           onAudit(id, AuditStatus.Confirmed, finalConfirmedValue, auditNotes);
         }}
       />
-      {/* 确权规则说明 */}
-      <div className="bg-blue-600 rounded-[2rem] p-6 md:p-8 text-white shadow-2xl shadow-blue-900/20 relative overflow-hidden">
-        <div className="absolute -right-10 -top-10 w-40 h-40 bg-white/10 rounded-full blur-3xl"></div>
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="flex items-start space-x-6">
-            <div className="w-12 h-12 md:w-16 md:h-16 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-2xl md:text-3xl">
-              📜
-            </div>
-            <div>
-              <h4 className="text-xl md:text-2xl font-black tracking-tighter uppercase mb-1">
-                收款确权流转规则
-              </h4>
-              <p className="text-blue-100 text-xs font-bold leading-relaxed max-w-2xl">
-                已确权收款：在{" "}
-                <span className="text-white underline underline-offset-4">
-                  价值确权
-                </span>{" "}
-                组件中，由{" "}
-                <span className="text-white font-black">npcxie</span>{" "}
-                手动点击“确认确权”后，
-                <span className="bg-white/20 px-2 py-0.5 rounded mx-1">
-                  待确权收款
-                </span>{" "}
-                将正式转为{" "}
-                <span className="bg-emerald-500 px-2 py-0.5 rounded mx-1 text-white">
-                  已确权收款
-                </span>
-                。自动入库：当已确权收款 = 已确权产值 = 款初 = 产初，在满90天的储期后将自动更新至入库状态。
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-col items-start lg:items-end">
-            <span className="text-[10px] font-black text-blue-200 uppercase tracking-[0.2em] mb-2">
-              当前采集主体
-            </span>
-            <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/20 flex items-center space-x-3">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span className="text-sm font-black tracking-tight">
-                {user.name}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 顶部状态与导航 */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-white p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] shadow-sm border border-slate-100">
-        <div className="flex items-center">
-          <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-600 rounded-xl md:rounded-2xl flex items-center justify-center text-white mr-4 md:mr-5 shadow-lg">
+      {/* 单层统一工具条（合并确权规则与标题导航） */}
+      <div className="bg-white p-4 md:p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-md">
             🛡️
           </div>
           <div>
-            <h3 className="text-xl md:text-2xl font-black text-slate-800 tracking-tighter uppercase">
-              价值确权与月度结算
-            </h3>
-            <p className="hidden text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-1">
-              角色：{user.name} ({user.role}) · 依据 7.1 分配律实时校验确权
+            <div className="flex items-center space-x-2">
+              <h3 className="text-lg md:text-xl font-black text-slate-800 tracking-tight uppercase">
+                价值确权与月度结算
+              </h3>
+              <InfoTip 
+                title="收款确权流转规则" 
+                content="已确权收款：在价值确权中由 npcxie 手动确认后转为已确权收款。自动入库：已确权收款 = 已确权产值 = 款初 = 产初，满90天储期后自动入库。" 
+              />
+            </div>
+            <p className="text-[10px] font-bold text-slate-400 mt-0.5">
+              采集主体：{user.name} ({user.role}) · 依据 7.1 分配律实时校验
             </p>
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+        <div className="flex items-center space-x-3">
+          <div className="bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100 flex items-center space-x-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="text-xs font-black text-slate-700">{user.name}</span>
+          </div>
           <button
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className={`p-3 bg-white border border-slate-200 rounded-2xl shadow-sm text-slate-600 hover:bg-slate-50 transition-all active:scale-95 ${isRefreshing ? "opacity-50 cursor-not-allowed" : ""}`}
+            className={`p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-100 transition-all active:scale-95 ${isRefreshing ? "opacity-50 cursor-not-allowed" : ""}`}
             title="刷新数据"
           >
             <svg
-              className={`w-5 h-5 ${isRefreshing ? "animate-spin" : ""}`}
+              className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`}
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -563,8 +532,12 @@ const Auditing: React.FC<AuditingProps> = ({
               />
             </svg>
           </button>
+        </div>
+      </div>
 
-          <div className="flex flex-wrap bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-inner gap-1">
+      {/* 标签切换栏 */}
+      <div className="bg-white p-3 rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-between">
+        <div className="flex flex-wrap bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-inner gap-1">
             <button
               onClick={() => setActiveTab("pending")}
               title="查看待处理的价值确权任务"
@@ -627,26 +600,18 @@ const Auditing: React.FC<AuditingProps> = ({
             >
               <span>成本审计记录</span>
             </button>
-            <button
-              onClick={toggleCostVisible}
-              title={isCostVisible ? "点击隐藏成本" : "点击显示成本"}
-              className="px-3 py-2.5 rounded-xl text-[10px] font-black text-slate-400 hover:text-slate-600 hover:bg-white/50 transition-all flex items-center space-x-1"
-            >
-              {isCostVisible ? <Eye size={14} /> : <EyeOff size={14} />}
-              <span>{isCostVisible ? "隐藏成本" : "显示成本"}</span>
-            </button>
+            <CostPrivacyToggle size="sm" />
           </div>
         </div>
-      </div>
 
       {activeTab === "summary" && (
         <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
           {/* 价值动态流 */}
-          <div className="p-6 bg-slate-50/50 border border-slate-200 rounded-[2.5rem]">
+          <div className={`p-6 bg-slate-50/50 border border-slate-200 ${UI_TOKENS.RADIUS_PANEL}`}>
             {/* 价值分配 - 重新分配双行显示 */}
             <div className="grid grid-cols-1 gap-6 mb-8">
               {/* 第一行：产值 */}
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {['产值分配', '产值对冲进度', '历史滚动产值欠产', '产值年度累计'].map((title, i) => (
                   <div key={i} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
                     <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">{title}</h3>
@@ -659,7 +624,7 @@ const Auditing: React.FC<AuditingProps> = ({
               </div>
               
               {/* 第二行：收款 */}
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {['收款分配', '收款对冲进度', '历史滚动收款欠产', '收款年度累计'].map((title, i) => (
                   <div key={i} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
                     <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">{title}</h3>
@@ -681,22 +646,22 @@ const Auditing: React.FC<AuditingProps> = ({
                     {UI_LABELS.VALUE}
                   </span>
                 </div>
-                <div className="grid grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                     <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.PENDING}</p>
-                    <p className="text-xs font-black text-amber-600 font-mono">{Math.round(quadrants.value.pending).toLocaleString()}</p>
+                    <p className="text-xs font-black text-amber-600 font-mono">{formatMoney(quadrants.value.pending)}</p>
                   </div>
                   <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                     <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.CONFIRMED}</p>
-                    <p className="text-xs font-black text-emerald-600 font-mono">{Math.round(quadrants.value.confirmed).toLocaleString()}</p>
+                    <p className="text-xs font-black text-emerald-600 font-mono">{formatMoney(quadrants.value.confirmed)}</p>
                   </div>
                   <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                     <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.UNCONFIRMED}</p>
-                    <p className="text-xs font-black text-rose-600 font-mono">{Math.round(quadrants.value.unconfirmed).toLocaleString()}</p>
+                    <p className="text-xs font-black text-rose-600 font-mono">{formatMoney(quadrants.value.unconfirmed)}</p>
                   </div>
                   <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                     <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.MINED}</p>
-                    <p className="text-xs font-black text-blue-600 font-mono">{Math.round(quadrants.value.approved).toLocaleString()}</p>
+                    <p className="text-xs font-black text-blue-600 font-mono">{formatMoney(quadrants.value.approved)}</p>
                   </div>
                 </div>
               </div>
@@ -709,22 +674,22 @@ const Auditing: React.FC<AuditingProps> = ({
                     {UI_LABELS.REVENUE}
                   </span>
                 </div>
-                <div className="grid grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                     <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.PENDING}</p>
-                    <p className="text-xs font-black text-amber-600 font-mono">{Math.round(quadrants.revenue.pending).toLocaleString()}</p>
+                    <p className="text-xs font-black text-amber-600 font-mono">{formatMoney(quadrants.revenue.pending)}</p>
                   </div>
                   <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                     <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.CONFIRMED}</p>
-                    <p className="text-xs font-black text-emerald-600 font-mono">{Math.round(quadrants.revenue.confirmed).toLocaleString()}</p>
+                    <p className="text-xs font-black text-emerald-600 font-mono">{formatMoney(quadrants.revenue.confirmed)}</p>
                   </div>
                   <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                     <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.UNCONFIRMED}</p>
-                    <p className="text-xs font-black text-rose-600 font-mono">{Math.round(quadrants.revenue.unconfirmed).toLocaleString()}</p>
+                    <p className="text-xs font-black text-rose-600 font-mono">{formatMoney(quadrants.revenue.unconfirmed)}</p>
                   </div>
                   <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                     <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.MINED}</p>
-                    <p className="text-xs font-black text-blue-600 font-mono">{Math.round(quadrants.revenue.approved).toLocaleString()}</p>
+                    <p className="text-xs font-black text-blue-600 font-mono">{formatMoney(quadrants.revenue.approved)}</p>
                   </div>
                 </div>
               </div>
@@ -732,17 +697,17 @@ const Auditing: React.FC<AuditingProps> = ({
           </div>
           {/* KPI 对冲看板 */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <Card className="p-8 rounded-[2.5rem] group">
+            <Card className={`p-8 ${UI_TOKENS.RADIUS_CARD} group`}>
               <div className="absolute top-0 right-0 p-6 opacity-10 text-4xl group-hover:scale-110 transition-transform">
                 📈
               </div>
               <StatItem
                 label="周期毛产出总值"
-                value={`${summaryData.grossValue.toLocaleString()}`}
+                value={`${formatMoney(summaryData.grossValue)}`}
                 subValue="基于 A/B/C 系数前置计算"
               />
             </Card>
-            <Card className="p-8 rounded-[2.5rem] group">
+            <Card className={`p-8 ${UI_TOKENS.RADIUS_CARD} group`}>
               <div className="absolute top-0 right-0 p-6 opacity-10 text-4xl group-hover:scale-110 transition-transform text-rose-500">
                 📉
               </div>
@@ -759,7 +724,7 @@ const Auditing: React.FC<AuditingProps> = ({
                 ))}
               </div>
             </Card>
-            <Card className="p-8 rounded-[2.5rem] border-rose-200 bg-rose-50/30 group">
+            <Card className={`p-8 ${UI_TOKENS.RADIUS_CARD} border-rose-200 bg-rose-50/30 group`}>
               <div className="absolute top-0 right-0 p-6 opacity-10 text-4xl group-hover:scale-110 transition-transform text-rose-600">
                 ✂️
               </div>
@@ -772,7 +737,7 @@ const Auditing: React.FC<AuditingProps> = ({
                 冲抵采集主体刚性工资包
               </p>
             </Card>
-            <Card className="p-8 rounded-[2.5rem] bg-slate-900 text-white shadow-2xl group">
+            <Card className={`p-8 ${UI_TOKENS.RADIUS_CARD} bg-slate-900 text-white shadow-2xl group`}>
               <div className="absolute top-0 right-0 p-6 opacity-20 text-4xl group-hover:scale-110 transition-transform text-emerald-400">
                 ✨
               </div>
@@ -780,7 +745,7 @@ const Auditing: React.FC<AuditingProps> = ({
                 周期确权净入库
               </p>
               <h4 className="text-4xl font-black font-mono tracking-tighter">
-                {summaryData.netValue.toLocaleString()}
+                {formatMoney(summaryData.netValue)}
               </h4>
               <div className="mt-4 flex items-center space-x-2">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -807,7 +772,7 @@ const Auditing: React.FC<AuditingProps> = ({
               data={summaryData.roleStats}
               paddingAngle={5}
             />
-            <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-xl">
+            <div className={`bg-white p-10 ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-xl`}>
               <h4 className="text-xs font-black text-slate-900 uppercase tracking-[0.2em] mb-10 flex items-center">
                 <span className="w-8 h-8 bg-rose-50 rounded-lg flex items-center justify-center text-rose-600 mr-3">
                   📉
@@ -875,7 +840,7 @@ const Auditing: React.FC<AuditingProps> = ({
                     : "成本审计记录"
           }
           noPadding
-          className="rounded-[2rem] md:rounded-[3rem] overflow-hidden"
+          className={`rounded-[2rem] md:${UI_TOKENS.RADIUS_PANEL} overflow-hidden`}
           headerAction={
             <div className="flex flex-wrap items-center justify-end gap-3">
               <BusinessDateFilter
@@ -987,8 +952,8 @@ const Auditing: React.FC<AuditingProps> = ({
                     <th className="px-4 py-6">业务日期</th>
                     <th className="px-4 py-6">提报日期</th>
                     <th className="px-4 py-6">提炼类型</th>
-                    <th className="px-4 py-6 text-center">经营单元</th>
-                    <th className="px-4 py-6 font-bold text-slate-800">采集主体</th>
+                    <th className="px-4 py-6 text-center">{TERMINOLOGY.BUSINESS_UNIT}</th>
+                    <th className="px-4 py-6 font-bold text-slate-800">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
                     <th className="px-3 py-6 text-right text-blue-600">A</th>
                     <th className="px-3 py-6 text-right text-amber-600">C积分</th>
                     <th className="px-4 py-6 text-right text-amber-700 font-extrabold bg-amber-50/20">C权</th>
@@ -1101,11 +1066,11 @@ const Auditing: React.FC<AuditingProps> = ({
                 <thead>
                   <tr className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] border-b border-slate-100">
                     <th className="px-4 md:px-10 py-6">标识符/日期</th>
-                    <th className="px-4 md:px-6 py-6">经营单元</th>
+                    <th className="px-4 md:px-6 py-6">{TERMINOLOGY.BUSINESS_UNIT}</th>
                     <th className="hidden lg:table-cell px-6 py-6">
                       经理/水库
                     </th>
-                    <th className="hidden md:table-cell px-6 py-6">采集主体</th>
+                    <th className="hidden md:table-cell px-6 py-6">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
                     <th className="px-4 md:px-6 py-6 text-right">注入积分</th>
                     {(activeTab === "linked" ||
                       activeTab === "confirmed") && (
@@ -1214,7 +1179,7 @@ const Auditing: React.FC<AuditingProps> = ({
                             <span
                               className={`font-mono font-black text-sm ${isConsumption ? "text-slate-400 line-through" : "text-slate-900"}`}
                             >
-                              {log.amount.toLocaleString()}
+                              {formatMoney(log.amount)}
                             </span>
                           </td>
                           {(activeTab === "linked" ||
@@ -1238,7 +1203,7 @@ const Auditing: React.FC<AuditingProps> = ({
                               className={`font-mono font-black text-sm ${log.netValue < 0 ? "text-rose-500" : "text-blue-600"}`}
                             >
                               {log.netValue > 0 ? "+" : ""}
-                              {Math.round(log.netValue).toLocaleString()}
+                              {formatMoney(log.netValue)}
                             </span>
                           </td>
                           <td className="px-4 md:px-10 py-6 text-right">
@@ -1339,22 +1304,22 @@ const Auditing: React.FC<AuditingProps> = ({
                                     <span className="text-blue-600 flex items-center">
                                       <span className="w-1.5 h-1.5 rounded-full bg-blue-500 mr-1.5"></span>
                                       入库收款:{" "}
-                                      {stats.minedRevenue.toLocaleString()}
+                                      {formatMoney(stats.minedRevenue)}
                                     </span>
                                     <span className="text-emerald-600 flex items-center">
                                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>
                                       已确权收款:{" "}
-                                      {stats.approvedRevenue.toLocaleString()}
+                                      {formatMoney(stats.approvedRevenue)}
                                     </span>
                                     <span className="text-amber-500 flex items-center">
                                       <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5"></span>
                                       待确权收款:{" "}
-                                      {stats.pendingRevenue.toLocaleString()}
+                                      {formatMoney(stats.pendingRevenue)}
                                     </span>
                                     <span className="text-slate-400 flex items-center">
                                       <span className="w-1.5 h-1.5 rounded-full bg-slate-400 mr-1.5"></span>
                                       未确权收款:{" "}
-                                      {stats.unconfirmedRevenue.toLocaleString()}
+                                      {formatMoney(stats.unconfirmedRevenue)}
                                     </span>
                                   </div>
                                 </div>
@@ -1366,22 +1331,22 @@ const Auditing: React.FC<AuditingProps> = ({
                                     <span className="text-blue-600 flex items-center">
                                       <span className="w-1.5 h-1.5 rounded-full bg-blue-500 mr-1.5"></span>
                                       入库产值:{" "}
-                                      {stats.minedValue.toLocaleString()}
+                                      {formatMoney(stats.minedValue)}
                                     </span>
                                     <span className="text-emerald-600 flex items-center">
                                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>
                                       已确权产值:{" "}
-                                      {stats.approvedValue.toLocaleString()}
+                                      {formatMoney(stats.approvedValue)}
                                     </span>
                                     <span className="text-amber-500 flex items-center">
                                       <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5"></span>
                                       待确权产值:{" "}
-                                      {stats.pendingValue.toLocaleString()}
+                                      {formatMoney(stats.pendingValue)}
                                     </span>
                                     <span className="text-slate-400 flex items-center">
                                       <span className="w-1.5 h-1.5 rounded-full bg-slate-400 mr-1.5"></span>
                                       未确权产值:{" "}
-                                      {stats.unconfirmedValue.toLocaleString()}
+                                      {formatMoney(stats.unconfirmedValue)}
                                     </span>
                                   </div>
                                 </div>

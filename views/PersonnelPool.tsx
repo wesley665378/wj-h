@@ -1,3 +1,4 @@
+import { UI_TOKENS } from '../src/constants/uiTokens';
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { User, Role, ValueCreationLog } from '../types';
 import * as XLSX from 'xlsx';
@@ -25,7 +26,10 @@ import {
 } from '../src/utils/employmentStatus';
 import { getLocalDateString } from '../src/utils/dateUtils';
 import { formatMoney } from '../src/utils/formatMoney';
+import { EXCEL_IMPORT_MAX_BYTES, EXCEL_IMPORT_MAX_ROWS } from '../src/utils/excelIo';
 import { isSystemAdmin } from '../src/utils/accessControl';
+import { TERMINOLOGY } from '../src/constants/terminology';
+import { UI_LABELS } from '../src/constants/uiLabels';
 
 interface PersonnelPoolProps {
   user: User;
@@ -511,6 +515,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       return;
     }
 
+    if (file.size > EXCEL_IMPORT_MAX_BYTES) {
+      showAlert('文件过大，最大支持 5MB');
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const bstr = event.target?.result;
@@ -518,6 +527,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       const wsname = wb.SheetNames[0];
       const ws = wb.Sheets[wsname];
       const data = XLSX.utils.sheet_to_json(ws) as any[];
+
+      if (data.length > EXCEL_IMPORT_MAX_ROWS) {
+        showAlert('导入数据超过 5000 行，请拆分后导入');
+        return;
+      }
 
       const newUsers: User[] = data.map((row: any) => {
         const rowKeys = Object.keys(row);
@@ -864,7 +878,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
   return (
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-in slide-in-from-bottom-4">
         <div className="lg:col-span-4 space-y-8">
-          <Card title="新增 采集主体" className="p-6 rounded-[2.5rem] border-2 border-blue-50 bg-blue-50/20 shadow-sm">
+          <Card title="新增 采集主体" className={`p-6 ${UI_TOKENS.RADIUS_PANEL} border-2 border-blue-50 bg-blue-50/20 shadow-sm`}>
             <div className="flex justify-end mb-4">
               <button 
                 onClick={() => fileInputRef.current?.click()}
@@ -941,7 +955,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
 
         <div className="lg:col-span-8 space-y-8">
           {showForm && (
-            <Card className="p-8 rounded-[2.5rem] border-2 border-blue-100 shadow-xl bg-white animate-in zoom-in-95 duration-200">
+            <Card className={`p-8 ${UI_TOKENS.RADIUS_PANEL} border-2 border-blue-100 shadow-xl bg-white animate-in zoom-in-95 duration-200`}>
               <form onSubmit={handleSubmit} className="space-y-6">
                  <h4 className="font-black text-slate-800 text-sm">采集主体参数</h4>
                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1062,10 +1076,10 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                           <table className="w-full text-center border-collapse">
                             <thead>
                               <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                                <th className="py-2.5 px-4 text-center whitespace-nowrap">工号</th>
+                                <th className="py-2.5 px-4 text-center whitespace-nowrap">{TERMINOLOGY.LOGIN_ID}</th>
                                 <th className="py-2.5 px-4 text-center whitespace-nowrap">姓名</th>
-                                <th className="py-2.5 px-4 text-center whitespace-nowrap">经营单元</th>
-                                <th className="py-2.5 px-4 text-center whitespace-nowrap">分类/职级</th>
+                                <th className="py-2.5 px-4 text-center whitespace-nowrap">{TERMINOLOGY.BUSINESS_UNIT}</th>
+                                <th className="py-2.5 px-4 text-center whitespace-nowrap">{TERMINOLOGY.USER_RANK}</th>
                                 <th className="py-2.5 px-4 text-center whitespace-nowrap">月刚性工资包</th>
                                 <th className="py-2.5 px-4 text-center whitespace-nowrap">在职状态</th>
                                 <th className="py-2.5 px-4 text-center whitespace-nowrap">管理操作</th>
@@ -1074,7 +1088,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                             <tbody className="divide-y divide-slate-100 text-xs">
                               {centerUsers.length === 0 ? (
                                 <tr>
-                                  <td colSpan={7} className="py-6 text-slate-400 text-center font-bold">暂无成员数据</td>
+                                  <td colSpan={7} className="py-6 text-slate-400 text-center font-bold">{UI_LABELS.EMPTY_MEMBERS}</td>
                                 </tr>
                               ) : (
                                 centerUsers.map((u) => {
@@ -1136,7 +1150,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
         </div>
 
         <div className="lg:col-span-12 space-y-8 mt-12 pb-12">
-          <Card title="经营单元经理" className="p-8 rounded-[3rem] border-2 border-slate-100 shadow-sm">
+          <Card title="经营单元经理" className={`p-8 ${UI_TOKENS.RADIUS_PANEL} border-2 border-slate-100 shadow-sm`}>
             <div className="space-y-6">
               <div className="flex flex-wrap items-center gap-3 max-w-2xl">
                 <input 
@@ -1240,7 +1254,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
 
           <Card 
             title="账号管理 (权限账户概览)" 
-            className="p-8 rounded-[3rem] border border-slate-100 shadow-sm"
+            className={`p-8 ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-sm`}
             headerAction={
               <button 
                 onClick={() => setShowAddAccountForm(!showAddAccountForm)}
@@ -1252,7 +1266,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
           >
              <div className="space-y-6">
                {showAddAccountForm && (
-                 <div className="p-8 bg-slate-50 rounded-[2.5rem] border border-slate-100 space-y-6 animate-in slide-in-from-top-4">
+                 <div className={`p-8 bg-slate-50 ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 space-y-6 animate-in slide-in-from-top-4`}>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-1">
                         <p className="text-[10px] font-black text-slate-400 tracking-widest ml-1">登录名</p>
@@ -1307,10 +1321,10 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                    <table className="w-full text-left">
                      <thead>
                        <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 tracking-widest leading-none">
-                         <th className="py-6 px-3 whitespace-nowrap">登录账号</th>
+                         <th className="py-6 px-3 whitespace-nowrap">{TERMINOLOGY.LOGIN_ID}</th>
                          <th className="py-6 px-3 whitespace-nowrap">工号</th>
                          <th className="py-6 px-3 whitespace-nowrap">姓名</th>
-                         <th className="py-6 px-3 whitespace-nowrap">职级</th>
+                         <th className="py-6 px-3 whitespace-nowrap">{TERMINOLOGY.USER_RANK}</th>
                          <th className="py-6 px-3 whitespace-nowrap">账号机制/初始密码</th>
                          <th className="py-6 px-3 text-right whitespace-nowrap">管理操作</th>
                        </tr>
@@ -1363,7 +1377,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
 
         {/* Permissions */}
         <div className="lg:col-span-12 mt-8">
-           <Card title="组件访问权限矩阵 (RBAC 控制中心)" className="p-8 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
+           <Card title="组件访问权限矩阵 (RBAC 控制中心)" className={`p-8 ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-sm overflow-hidden`}>
              <div className="space-y-6">
                {/* 说明与搜索过滤工具栏 */}
                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">

@@ -64,8 +64,8 @@ const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab, onUpda
                   user.id.slice(0, 2).toUpperCase()
                 )}
               </div>
-              <div className="min-w-0">
-                <h4 className="text-xs font-bold text-white truncate w-28" title={user.name}>{user.name}</h4>
+              <div className="min-w-0 flex-1">
+                <h4 className="text-xs font-bold text-white truncate" title={user.name}>{user.name}</h4>
                 <p className="text-[9px] text-slate-400 font-medium truncate" title={user.category || '—'}>{user.category || '—'}</p>
               </div>
            </div>

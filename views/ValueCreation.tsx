@@ -20,11 +20,16 @@ import {
 import { Card, ProgressBar, Badge, ProjectStatusBadge } from '../src/components/UI';
 import StandardModal from '../src/components/StandardModal';
 import { UI_LABELS } from '../src/constants/uiLabels';
+import { TERMINOLOGY } from '../src/constants/terminology';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
 import * as XLSX from 'xlsx';
+import { exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
 import { calculateHistoricalNetValue, calculateDualTrackCoreMatrices, calculateT1PlusValue, calculateT1PlusRevenue } from '../src/utils/business';
 import { calculateHedgeCapacitiesAndWeights } from '../src/utils/consumptionHedge';
 import { deriveProjectStatus, isProjectWritable } from '../src/utils/projectStatus';
+import { isAdminOrNpc } from '../src/utils/accessControl';
+import { userCenterMatchesBusinessUnit } from '../src/utils/businessUnitName';
+import { labelBusinessUnit } from '../src/utils/statusDisplay';
 import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { Info, AlertCircle, CheckCircle2, X } from 'lucide-react';
@@ -693,6 +698,15 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       showAlert('请确保“采集主体”及“关联矿产”已选择。');
       return;
     }
+
+    if (!isAdminOrNpc(user) && selectedResource) {
+      const allowedStr = selectedCategory === RefineCategory.Revenue ? selectedResource.assignedToRevenue : selectedResource.assignedToValue;
+      const allowedCenters = (allowedStr || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (!allowedCenters.some(c => userCenterMatchesBusinessUnit(user.center, c))) {
+        showAlert(`权限不足：矿山 [${selectedResource.id}] 的${selectedCategory === RefineCategory.Revenue ? '收款' : '产值'}权限未指派给您所在的单元 [${user.center}]。`);
+        return;
+      }
+    }
     
     // 自动联动填充校验逻辑
     const totalAmount = selectedCollectors.reduce((sum, c) => sum + c.amount, 0);
@@ -1022,7 +1036,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         '编号': log.id,
         '业务日期': resolveLogBusinessDate(log),
         '提交日期': formatSubmissionDate(log.timestamp),
-        '经营单元': operator?.center || log.rankId,
+        '经营单元': labelBusinessUnit(operator?.center),
         '采集主体': `${collector?.name || log.recordedCollectorId} (${collector?.category || '未定义'})`,
         '确权类型': log.confirmationType || '手动确权',
         '注入积分': displayInjection,
@@ -1038,12 +1052,12 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "入库记录");
-    XLSX.writeFile(workbook, `价值确权入库记录_${new Date().toLocaleDateString()}.xlsx`);
+    exportWorkbook(workbook, buildExcelFilename("价值确权入库记录"));
   };
 
   if (!user || !resources || !logs) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="py-20 flex justify-center items-center">
         <div className="text-center space-y-4">
           <div className="w-8 h-8 border-4 border-slate-900 border-t-transparent rounded-full animate-spin mx-auto"></div>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">加载价值提炼仪表盘...</p>
@@ -1053,7 +1067,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   }
 
   return (
-    <div className="w-full space-y-4 md:space-y-6 lg:space-y-8 animate-in fade-in duration-500 pb-20">
+    <div className="w-full space-y-4 md:space-y-6 lg:space-y-8 animate-in fade-in duration-500 pb-6">
       <AuditModal isOpen={isAuditOpen} onClose={() => setIsAuditOpen(false)} onConfirm={confirmSubmit} data={auditData} />
       <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-200 pb-3 gap-4">
         <div className="flex flex-col sm:flex-row sm:items-center gap-4 md:gap-6">
@@ -1082,7 +1096,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       {/* 申报区 */}
       <Card title="提交提炼价值确权" noPadding>
         <form onSubmit={handleSubmit} className="p-4 md:p-6 space-y-4 md:space-y-6">
-          <div className="grid grid-cols-4 gap-4 md:gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
             {/* Row 1 - Left Column: 采集主体 */}
             <div className="flex flex-col space-y-1.5 col-span-2">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
@@ -1546,7 +1560,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     </p>
                   </div>
                   
-                  <div className="grid grid-cols-4 gap-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                     <div className="bg-white p-2 rounded border border-emerald-100">
                       <p className="text-[8px] text-emerald-500 font-bold uppercase mb-1">当前已确权</p>
                       <p className="text-sm font-black text-emerald-700 font-mono">{formatMoney(currentConfirmed)}</p>
@@ -1716,7 +1730,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 </span>
                 <span className="text-[10px] font-bold text-slate-400">{UI_LABELS.REVENUE}当限: {formatMoney(quadrantData.revenue.capacity)}</span>
               </div>
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                   <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.PENDING}</p>
                   <p className="text-xs font-black text-amber-600 font-mono">{formatMoney(quadrantData.revenue.pending)}</p>
@@ -1745,7 +1759,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 </span>
                 <span className="text-[10px] font-bold text-slate-400">{UI_LABELS.VALUE}当限: {formatMoney(quadrantData.value.capacity)}</span>
               </div>
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
                   <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.PENDING}</p>
                   <p className="text-xs font-black text-amber-600 font-mono">{formatMoney(quadrantData.value.pending)}</p>
@@ -1846,24 +1860,24 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           </div>
         )}
 
-        <div className="overflow-x-auto overflow-y-auto max-h-[600px] border-b border-slate-100 pb-2 custom-scrollbar">
+        <div className="overflow-x-auto border-b border-slate-100 pb-2 custom-scrollbar">
           <table className="w-full text-left whitespace-nowrap min-w-max">
-            <thead className="sticky top-0 bg-white z-10 shadow-sm">
+            <thead className="bg-white z-10 shadow-sm">
               <tr className="bg-slate-50/90 text-[9px] font-bold text-slate-400 uppercase border-b border-slate-200">
                 <th className="px-2 py-4">矿山编号</th>
                 <th className="px-2 py-4">类别</th>
                 <th className="px-2 py-4">编号</th>
-                <th className="px-2 py-4">业务日期</th>
-                <th className="px-2 py-4">提交日期</th>
-                <th className="px-2 py-4">经营单元</th>
-                <th className="px-2 py-4">采集主体</th>
+                <th className="px-2 py-4 hidden md:table-cell">业务日期</th>
+                <th className="px-2 py-4 hidden md:table-cell">提交日期</th>
+                <th className="px-2 py-4">{TERMINOLOGY.BUSINESS_UNIT}</th>
+                <th className="px-2 py-4">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
                 <th className="px-2 py-4">确权类型</th>
                 <th className="px-2 py-4 text-right">注入积分</th>
                 <th className="px-2 py-4 text-right">C权</th>
                 <th className="px-2 py-4 text-right">B2权</th>
                 <th className="px-2 py-4 text-right">产兑包</th>
                 <th className="px-2 py-4 text-right">收款包</th>
-                <th className="px-2 py-4">确权日期</th>
+                <th className="px-2 py-4 hidden md:table-cell">确权日期</th>
                 <th className="px-2 py-4">状态</th>
               </tr>
             </thead>
@@ -1918,9 +1932,9 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                       </Badge>
                     </td>
                     <td className="px-2 py-4 font-mono text-slate-400">{log.id}</td>
-                    <td className="px-2 py-4 text-slate-500 font-bold">{resolveLogBusinessDate(log)}</td>
-                    <td className="px-2 py-4 text-slate-400">{formatSubmissionDate(log.timestamp)}</td>
-                    <td className="px-2 py-4 text-slate-600">{operator?.center || log.rankId}</td>
+                    <td className="px-2 py-4 text-slate-500 font-bold hidden md:table-cell">{resolveLogBusinessDate(log)}</td>
+                    <td className="px-2 py-4 text-slate-400 hidden md:table-cell">{formatSubmissionDate(log.timestamp)}</td>
+                    <td className="px-2 py-4 text-slate-600">{labelBusinessUnit(operator?.center)}</td>
                     <td className="px-2 py-4">
                       <div className="flex flex-col">
                         <span className="font-bold text-slate-700">{collector?.name || log.recordedCollectorId}</span>
@@ -1953,7 +1967,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                           : formatMoney(revPostHedge)
                       ) : '—'}
                     </td>
-                    <td className="px-2 py-4 text-slate-500 font-mono">
+                    <td className="px-2 py-4 text-slate-500 font-mono hidden md:table-cell">
                       {log.confirmedAt ? new Date(log.confirmedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
                     </td>
                     <td className="px-2 py-4">

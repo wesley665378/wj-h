@@ -1,7 +1,8 @@
 
 import React, { useMemo, useState } from 'react';
-import { Eye, EyeOff, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { useCostPrivacy } from '../src/hooks/useCostPrivacy';
+import { CostPrivacyToggle } from '../src/components/CostPrivacyToggle';
 import { User, ValueCreationLog, MiningResource, AuditStatus, Role } from '../types';
 import { computeAllEvaluations } from '../src/utils/valueEvaluation';
 import { formatAmount, formatRatio } from '../src/utils/formatters';
@@ -54,7 +55,7 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
   }, [evaluations, searchQuery, selectedTier, selectedCategory]);
 
   return (
-    <div className="w-full space-y-4 md:space-y-6 animate-in fade-in duration-500 pb-20">
+    <div className="w-full space-y-4 md:space-y-6 animate-in fade-in duration-500 pb-6">
       {/* 顶部标题 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-200 pb-3 gap-4">
         <div className="flex flex-col sm:flex-row sm:items-center gap-4 md:gap-6">
@@ -197,14 +198,7 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                   <div className="flex items-center justify-center space-x-1">
                     <span>成本包</span>
                     <InfoTip title="成本包口径" content="刚性工资包 + 对应职级消耗成本（款专：工资+A；产专：工资+B1）。" />
-                    <button 
-                      type="button"
-                      onClick={toggleCostVisible}
-                      className="p-1 hover:bg-slate-200 rounded transition-colors ml-1 cursor-pointer"
-                      title={isCostVisible ? "点击隐藏成本" : "点击显示成本"}
-                    >
-                      {isCostVisible ? <Eye size={12} className="text-slate-400" /> : <EyeOff size={12} className="text-slate-400" />}
-                    </button>
+                    <CostPrivacyToggle size="sm" showLabel={false} className="ml-1" />
                   </div>
                 </th>
                 <th className="py-2.5 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center whitespace-nowrap">

@@ -31,3 +31,8 @@ export const isAdminOrNpc = (user: User | null | undefined): boolean => {
   return user.role === Role.Admin || user.role === Role.npcxie;
 };
 
+/**
+ * 兼容别名：读全盘范围判定
+ */
+export const isGlobalScope = isGlobalReader;
+

@@ -1,11 +1,15 @@
 
+import { UI_TOKENS } from '../src/constants/uiTokens';
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, MiningResource, ValueCreationLog, RefineCategory, AuditStatus, Role, RefineType, ProjectStatus } from '../types';
 import { Card, Badge, ProjectStatusBadge } from '../src/components/UI';
-import { Eye, EyeOff } from 'lucide-react';
+// (Eye/EyeOff removed)
+import { CostPrivacyToggle } from '../src/components/CostPrivacyToggle';
 import { useCostPrivacy } from '../src/hooks/useCostPrivacy';
 import * as XLSX from 'xlsx';
+import { exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
 import { UI_LABELS } from '../src/constants/uiLabels';
+import { TERMINOLOGY } from '../src/constants/terminology';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
 import { isProjectWritable, deriveProjectStatus } from '../src/utils/projectStatus';
 import { toast } from 'sonner';
@@ -475,7 +479,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "消耗审计记录");
-    XLSX.writeFile(workbook, `成本审计记录_${new Date().toLocaleDateString()}.xlsx`);
+    exportWorkbook(workbook, buildExcelFilename("成本审计记录"));
   };
 
   const consumptionLogs = useMemo(() => {
@@ -489,7 +493,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
   }, [dtcbLogsToUse, selectedOperatorId, user, filterStartDate, filterEndDate, filterMonth]);
 
   return (
-    <div className="w-full space-y-6 md:space-y-10 animate-in fade-in duration-500 pb-20 text-sm md:text-base">
+    <div className="w-full space-y-6 md:space-y-10 animate-in fade-in duration-500 pb-6 text-sm md:text-base">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center space-x-4">
           <div className="w-2 h-8 bg-rose-600 rounded-full"></div>
@@ -499,7 +503,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
         <div className="lg:col-span-12 space-y-8">
-          <div className="bg-white rounded-2xl md:rounded-[3rem] shadow-xl border border-slate-100 overflow-hidden">
+          <div className={`bg-white rounded-2xl md:${UI_TOKENS.RADIUS_PANEL} shadow-xl border border-slate-100 overflow-hidden`}>
           <div className="bg-slate-900 p-4 md:p-8 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <h4 className="text-lg md:text-xl font-black flex items-center tracking-tighter uppercase">
               <span className="w-10 h-10 bg-rose-600 rounded-xl flex items-center justify-center mr-4 shadow-lg">🧾</span>
@@ -670,7 +674,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
             {/* 价值动态流 */}
             {selectedResource && selectedResourceQuadrants && (
-              <div className="space-y-6 bg-slate-50 p-4 md:p-8 rounded-2xl md:rounded-[2.5rem] border border-slate-100 animate-in slide-in-from-bottom-4 duration-500">
+              <div className={`space-y-6 bg-slate-50 p-4 md:p-8 rounded-2xl md:${UI_TOKENS.RADIUS_PANEL} border border-slate-100 animate-in slide-in-from-bottom-4 duration-500`}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   {/* 产值 */}
                   <div className="space-y-4">
@@ -827,7 +831,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
       {/* 非有效工时对冲快捷通道 - 独立行布局 */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         <div className="lg:col-span-12">
-          <div className="bg-white rounded-2xl md:rounded-[3rem] shadow-xl border border-rose-100 overflow-hidden bg-rose-50/5 h-full">
+          <div className={`bg-white rounded-2xl md:${UI_TOKENS.RADIUS_PANEL} shadow-xl border border-rose-100 overflow-hidden bg-rose-50/5 h-full`}>
             <div className="bg-rose-600 p-4 md:p-6 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <h4 className="text-lg font-black flex items-center tracking-tighter uppercase">
                 <span className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center mr-3">✂️</span>
@@ -903,18 +907,11 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl md:rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
+      <div className={`bg-white rounded-2xl md:${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-sm overflow-hidden`}>
         <div className="p-4 md:p-8 border-b border-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center space-x-3">
             <h4 id="cost-audit-records-title" className="text-sm font-black text-slate-900 uppercase tracking-widest">成本审计记录</h4>
-            <button
-              onClick={toggleCostVisible}
-              title={isCostVisible ? "点击隐藏成本" : "点击显示成本"}
-              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[10px] font-black transition-all flex items-center space-x-1"
-            >
-              {isCostVisible ? <Eye size={12} /> : <EyeOff size={12} />}
-              <span>{isCostVisible ? "隐藏" : "显示"}</span>
-            </button>
+            <CostPrivacyToggle size="sm" />
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <BusinessDateFilter
@@ -954,9 +951,9 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
               <tr>
                 <th className="px-4 py-4 md:py-6">申报编号</th>
                 <th className="px-3 py-6 text-center">业务日期</th>
-                <th className="px-4 py-6 text-center">经营单元</th>
-                <th className="px-4 py-6 text-center">矿山编号</th>
-                <th className="px-4 py-6 font-bold text-slate-800">采集主体</th>
+                <th className="px-4 py-6 text-center">{TERMINOLOGY.BUSINESS_UNIT}</th>
+                <th className="px-4 py-6 text-center">{TERMINOLOGY.MINING_RESOURCE_ID}</th>
+                <th className="px-4 py-6 font-bold text-slate-800">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
                 <th className="px-3 py-6 text-right text-blue-600">A</th>
                 <th className="px-3 py-6 text-right text-amber-600">C积分</th>
                 <th className="px-4 py-6 text-right text-amber-700">C权</th>

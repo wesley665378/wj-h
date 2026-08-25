@@ -12,6 +12,7 @@ import {
 import { buildValueEfficiencySnapshots } from '../utils/valueEfficiencySnapshots';
 import { buildJzfpSnapshot } from '../utils/jzfpSnapshot';
 import { pickUserForWorkspaceSync } from '../utils/userSyncPayload';
+import { isSystemAdmin } from '../utils/accessControl';
 
 export interface BuildSyncPayloadInput {
   managedUsers?: User[];
@@ -90,7 +91,7 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
   const snapshots = buildValueEfficiencySnapshots(cleanedUsers, nextLogs, nextRes, input.filterMonth);
   const jzfpSnapshots = buildJzfpSnapshot(cleanedUsers, nextLogs, input.filterMonth);
 
-  const canSendBusinessUnits = input.currentUser?.role === Role.Admin && nextUnits && nextUnits.length > 0;
+  const canSendBusinessUnits = isSystemAdmin(input.currentUser) && nextUnits && nextUnits.length > 0;
 
   const isInitialUsersPlaceholder = 
     cleanedUsers.length === 0 || 

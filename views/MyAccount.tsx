@@ -1,3 +1,4 @@
+import { UI_TOKENS } from '../src/constants/uiTokens';
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, ValueCreationLog, InternalTransaction, MiningResource, AuditStatus, TransactionStatus, RefineCategory } from '../types';
 import { Card, Badge } from '../src/components/UI';
@@ -6,12 +7,14 @@ import { calculateHistoricalNetValue, getUserSalaryByMonth } from '../src/utils/
 import { aggregateUserMonthMetrics, calculateBonusAllocation } from '../src/utils/bonusAllocation';
 import { fetchDistributionData } from '../src/api/distribution';
 import { useCostPrivacy } from '../src/hooks/useCostPrivacy';
+import { CostPrivacyToggle } from '../src/components/CostPrivacyToggle';
 import { formatAmount } from '../src/utils/formatters';
 import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
 import { InfoTip } from '../src/components/InfoTip';
 import * as XLSX from 'xlsx';
+import { exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
 import { toast } from 'sonner';
-import { Wallet, TrendingUp, ShieldCheck, ArrowRight, Eye, EyeOff, FileSpreadsheet, Search, Filter, Calendar, RefreshCw } from 'lucide-react';
+import { Wallet, TrendingUp, ShieldCheck, ArrowRight, FileSpreadsheet, Search, Filter, Calendar, RefreshCw } from 'lucide-react';
 
 interface MyAccountProps {
   currentUser: User;
@@ -270,15 +273,14 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
     XLSX.utils.book_append_sheet(workbook, summarySheet, '汇总报告');
 
     const modeStr = startDate && endDate ? `${startDate}_至_${endDate}` : (selectedMonth || effectiveMonth);
-    const todayStr = getLocalDateString();
-    XLSX.writeFile(workbook, `我的账户流水明细_${currentUser.name}_${modeStr}_导出${todayStr}.xlsx`);
+    exportWorkbook(workbook, buildExcelFilename(`我的账户流水明细_${currentUser.name}`, modeStr));
     toast.success('已导出流水报告（含汇总页签）');
   };
 
   return (
     <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-8">
       {/* 顶部标题区 */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
+      <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-6 ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-sm`}>
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-black text-slate-900 tracking-tight">我的账户</h1>
@@ -290,13 +292,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
 
         {/* 月度固定成本隐私开关 */}
         <div className="flex items-center gap-2.5">
-          <button
-            onClick={toggleCostVisible}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all"
-          >
-            {isCostVisible ? <EyeOff className="w-4 h-4 text-slate-500" /> : <Eye className="w-4 h-4 text-slate-500" />}
-            <span>{isCostVisible ? "隐藏成本" : "显示成本"}</span>
-          </button>
+          <CostPrivacyToggle />
         </div>
       </div>
 
@@ -396,7 +392,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
       {/* 2. 流水明细区 */}
       <Card
         title="本人流水明细"
-        className="p-8 rounded-[2.5rem] bg-white shadow-sm border border-slate-100 overflow-hidden"
+        className={`p-8 ${UI_TOKENS.RADIUS_PANEL} bg-white shadow-sm border border-slate-100 overflow-hidden`}
       >
         {/* 高级筛选工具栏 - 银行式布局 */}
         <div className="space-y-4 mb-8">

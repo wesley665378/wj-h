@@ -4,13 +4,17 @@ import { User, MiningResource, RefineType, Role, ResourceStatus, ValueCreationLo
 import { isSystemAdmin } from '../src/utils/accessControl';
 import { Card, ProgressBar, Badge, ProjectStatusBadge } from '../src/components/UI';
 import * as XLSX from 'xlsx';
+import { exportWorkbook, buildExcelFilename, EXCEL_IMPORT_MAX_BYTES, EXCEL_IMPORT_MAX_ROWS } from '../src/utils/excelIo';
 import { deriveProjectStatus } from '../src/utils/projectStatus';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
 import { roundMoney, formatMoney } from '../src/utils/formatMoney';
 import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { MiningResourceQueryView, normalizeMiningId } from '../src/components/MiningResourceQueryView';
-import { formatProjectStatusLabel } from '../src/utils/statusDisplay';
+import { formatProjectStatusLabel, formatRefineTypeLabel } from '../src/utils/statusDisplay';
+import { TERMINOLOGY } from '../src/constants/terminology';
+import { UI_LABELS } from '../src/constants/uiLabels';
+import { UI_TOKENS } from '../src/constants/uiTokens';
 
 interface ResourceManagementProps {
   user: User;
@@ -272,7 +276,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "矿山资源分配记录");
-    XLSX.writeFile(workbook, `矿山资源分配记录_${new Date().toLocaleDateString()}.xlsx`);
+    exportWorkbook(workbook, buildExcelFilename("矿山资源分配记录"));
   };
 
   const queriedResource = useMemo(() => {
@@ -298,10 +302,10 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
   };
 
   return (
-    <div className="w-full space-y-4 md:space-y-6 lg:space-y-8 animate-in fade-in duration-500 pb-20">
+    <div className="w-full space-y-4 md:space-y-6 lg:space-y-8 animate-in fade-in duration-500 pb-6">
       {/* 权限受控：仅系统管理员（Admin）与 npcxie 显示查询入口 */}
       {canQuery && (
-        <Card className="rounded-[2rem] md:rounded-[2.5rem] p-6 md:p-8 bg-gradient-to-br from-slate-900 via-slate-850 to-slate-900 border border-slate-700 shadow-xl text-white space-y-4">
+        <Card className={`${UI_TOKENS.RADIUS_PANEL} p-6 md:p-8 bg-gradient-to-br from-slate-900 via-slate-850 to-slate-900 border border-slate-700 shadow-xl text-white space-y-4`}>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <span className="w-11 h-11 rounded-2xl bg-blue-600/30 border border-blue-400/40 flex items-center justify-center text-blue-400 text-xl font-black shrink-0">
@@ -389,7 +393,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
         const valProgressStr = (((val.confirmed + val.pending + val.mined) / valDenom) * 100).toFixed(1);
 
         return (
-          <Card className="rounded-[2rem] md:rounded-[2.5rem] p-6 md:p-8 bg-white border border-slate-100 shadow-md space-y-6">
+          <Card className={`${UI_TOKENS.RADIUS_PANEL} p-6 md:p-8 bg-white border border-slate-100 shadow-md space-y-6`}>
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <h3 className="text-base font-black text-slate-900 tracking-tight flex items-center gap-2 uppercase">
                 <span className="p-2 bg-blue-50 text-blue-600 rounded-xl">🌐</span>
@@ -419,15 +423,15 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
               </span>
             </div>
 
-            {/* 行 2: 全盘价值流 */}
+            {/* 行 2: 全盘价值动态流 */}
             <div className="space-y-4 pt-4 border-t border-slate-100">
               <div className="flex items-center justify-between text-[11px] font-black uppercase tracking-wider text-slate-500 mb-2">
-                <span>全盘价值流</span>
+                <span>全盘{UI_LABELS.VALUE_FLOW}</span>
                 <div className="flex items-center gap-3 text-[10px] text-slate-400 font-bold">
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-amber-400"></span>待确权</span>
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-emerald-500"></span>已确权</span>
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-slate-300"></span>未确权</span>
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-blue-500"></span>入库</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-amber-400"></span>{UI_LABELS.PENDING}</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-emerald-500"></span>{UI_LABELS.CONFIRMED}</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-slate-300"></span>{UI_LABELS.UNCONFIRMED}</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-blue-500"></span>{UI_LABELS.MINED}</span>
                 </div>
               </div>
 
@@ -446,7 +450,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                    <div style={{ width: `${revPendingPct}%` }} className="bg-amber-400 h-full transition-all" title={`待确权: ${formatMoney(rev.pending)}`} />
                    <div style={{ width: `${revConfirmedPct}%` }} className="bg-emerald-500 h-full transition-all" title={`已确权: ${formatMoney(rev.confirmed)}`} />
                    <div style={{ width: `${revUnconfirmedPct}%` }} className="bg-slate-300 h-full transition-all" title={`未确权: ${formatMoney(rev.unconfirmed)}`} />
-                   <div style={{ width: `${revMinedPct}%` }} className="bg-blue-500 h-full transition-all" title={`入库: ${formatMoney(rev.mined)}`} />
+                   <div style={{ width: `${revMinedPct}%` }} className="bg-blue-500 h-full transition-all" title={`${UI_LABELS.MINED}: ${formatMoney(rev.mined)}`} />
                  </div>
                  <div className="flex justify-between text-[10px] text-slate-400 font-bold px-1">
                    <span>待: {formatMoney(rev.pending)}</span>
@@ -471,7 +475,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                    <div style={{ width: `${valPendingPct}%` }} className="bg-amber-400 h-full transition-all" title={`待确权: ${formatMoney(val.pending)}`} />
                    <div style={{ width: `${valConfirmedPct}%` }} className="bg-emerald-500 h-full transition-all" title={`已确权: ${formatMoney(val.confirmed)}`} />
                    <div style={{ width: `${valUnconfirmedPct}%` }} className="bg-slate-300 h-full transition-all" title={`未确权: ${formatMoney(val.unconfirmed)}`} />
-                   <div style={{ width: `${valMinedPct}%` }} className="bg-blue-500 h-full transition-all" title={`入库: ${formatMoney(val.mined)}`} />
+                   <div style={{ width: `${valMinedPct}%` }} className="bg-blue-500 h-full transition-all" title={`${UI_LABELS.MINED}: ${formatMoney(val.mined)}`} />
                  </div>
                  <div className="flex justify-between text-[10px] text-slate-400 font-bold px-1">
                    <span>待: {formatMoney(val.pending)}</span>
@@ -486,7 +490,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       })()}
 
       {/* 资源分配表单 */}
-      <Card className="rounded-[2rem] md:rounded-[3rem] p-6 md:p-12 relative overflow-hidden">
+      <Card className={`${UI_TOKENS.RADIUS_PANEL} p-6 md:p-12 relative overflow-hidden`}>
         <div className="absolute top-0 right-0 p-6 md:p-12 opacity-[0.03] pointer-events-none">
            <span className="text-[8rem] md:text-[12rem]">🗺️</span>
         </div>
@@ -536,6 +540,11 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
+                      if (file.size > EXCEL_IMPORT_MAX_BYTES) {
+                        showAlert('文件过大，最大支持 5MB');
+                        if (e.target) e.target.value = '';
+                        return;
+                      }
                       const reader = new FileReader();
                       reader.onload = async (event) => {
                         const data = event.target?.result;
@@ -543,6 +552,12 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                         const sheetName = workbook.SheetNames[0];
                         const sheet = workbook.Sheets[sheetName];
                         const jsonData = XLSX.utils.sheet_to_json(sheet) as any[];
+
+                        if (jsonData.length > EXCEL_IMPORT_MAX_ROWS) {
+                          showAlert('导入数据超过 5000 行，请拆分后导入');
+                          if (e.target) e.target.value = '';
+                          return;
+                        }
                         
                         let importCount = 0;
                         const newResourcesList: MiningResource[] = [];
@@ -895,7 +910,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       </Card>
 
       {/* 实时监控面板与汇总图表 */}
-      <Card className="rounded-[3.5rem] p-12">
+      <Card className={`${UI_TOKENS.RADIUS_PANEL} p-12`}>
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8 mb-12">
            <div className="flex items-center space-x-4">
              <h3 className="text-2xl font-black text-slate-900 tracking-tighter uppercase">矿山资源监控实时面板</h3>
@@ -973,7 +988,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
               const valPctText = (((val.confirmed + val.pending + val.mined) / valTotalCap) * 100).toFixed(1);
 
               return (
-                <div key={res.id} className={`bg-slate-50 border border-slate-100 rounded-[2rem] md:rounded-[2.5rem] p-6 md:p-8 hover:bg-white hover:shadow-2xl transition-all group relative ${res.isPaused ? 'opacity-75 grayscale-[0.5]' : ''}`}>
+                <div key={res.id} className={`bg-slate-50 border border-slate-100 rounded-[2rem] md:${UI_TOKENS.RADIUS_PANEL} p-6 md:p-8 hover:bg-white hover:shadow-2xl transition-all group relative ${res.isPaused ? 'opacity-75 grayscale-[0.5]' : ''}`}>
                   {res.isPaused && (
                     <div className="absolute top-4 left-4 z-10">
                       <Badge variant="error" className="animate-pulse shadow-lg">暂停提炼 (熔断)</Badge>
@@ -985,12 +1000,12 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                   </div>
                   <div className="mb-4">
                     <div className="flex justify-between items-start mb-1">
-                      <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest block">编号：{res.id}</span>
+                      <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest block">{TERMINOLOGY.MINING_RESOURCE_ID}：{res.id}</span>
                       <ProjectStatusBadge resource={res} />
                     </div>
                     <div className="flex flex-wrap gap-1">
                       {res.types.map(t => (
-                        <Badge key={t} variant="info">{t}</Badge>
+                        <Badge key={t} variant="info">{formatRefineTypeLabel(t)}</Badge>
                       ))}
                     </div>
                   </div>
@@ -1004,7 +1019,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                         <div style={{ width: `${revPendingPct}%` }} className="bg-amber-400 h-full" title={`待确权: ${rev.pending}`} />
                         <div style={{ width: `${revConfirmedPct}%` }} className="bg-emerald-500 h-full" title={`已确权: ${rev.confirmed}`} />
                         <div style={{ width: `${revUnconfirmedPct}%` }} className="bg-slate-300 h-full" title={`未确权: ${rev.unconfirmed}`} />
-                        <div style={{ width: `${revMinedPct}%` }} className="bg-blue-500 h-full" title={`入库: ${rev.mined}`} />
+                        <div style={{ width: `${revMinedPct}%` }} className="bg-blue-500 h-full" title={`${UI_LABELS.MINED}: ${rev.mined}`} />
                       </div>
                     </div>
                     <div className="space-y-1">
@@ -1016,7 +1031,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                         <div style={{ width: `${valPendingPct}%` }} className="bg-amber-400 h-full" title={`待确权: ${val.pending}`} />
                         <div style={{ width: `${valConfirmedPct}%` }} className="bg-emerald-500 h-full" title={`已确权: ${val.confirmed}`} />
                         <div style={{ width: `${valUnconfirmedPct}%` }} className="bg-slate-300 h-full" title={`未确权: ${val.unconfirmed}`} />
-                        <div style={{ width: `${valMinedPct}%` }} className="bg-blue-500 h-full" title={`入库: ${val.mined}`} />
+                        <div style={{ width: `${valMinedPct}%` }} className="bg-blue-500 h-full" title={`${UI_LABELS.MINED}: ${val.mined}`} />
                       </div>
                     </div>
                   </div>
@@ -1057,10 +1072,10 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50">
-                  <th className="p-4 rounded-l-2xl">矿山编号 / 状态</th>
-                  <th className="p-4">提炼类型</th>
-                  <th className="p-4">收款流进度</th>
-                  <th className="p-4">产值流进度</th>
+                  <th className="p-4 rounded-l-2xl">{TERMINOLOGY.MINING_RESOURCE_ID} / 状态</th>
+                  <th className="p-4">{UI_LABELS.REFINING_TYPE}</th>
+                  <th className="p-4">{UI_LABELS.REVENUE_RAIL}进度</th>
+                  <th className="p-4">{UI_LABELS.VALUE_RAIL}进度</th>
                   <th className="p-4">指派归属</th>
                   <th className="p-4 rounded-r-2xl text-right">操作</th>
                 </tr>
@@ -1087,14 +1102,14 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                       <td className="p-4">
                         <div className="flex flex-wrap gap-1">
                           {res.types.map(t => (
-                            <Badge key={t} variant="info">{t}</Badge>
+                            <Badge key={t} variant="info">{formatRefineTypeLabel(t)}</Badge>
                           ))}
                         </div>
                       </td>
                       <td className="p-4">
                         <div className="w-36 space-y-1">
                           <div className="flex justify-between text-[9px] font-mono font-bold text-amber-600">
-                            <span>收款</span>
+                            <span>{UI_LABELS.REVENUE}</span>
                             <span>{revPctText}%</span>
                           </div>
                           <div className="flex h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
@@ -1107,7 +1122,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                       <td className="p-4">
                         <div className="w-36 space-y-1">
                           <div className="flex justify-between text-[9px] font-mono font-bold text-emerald-600">
-                            <span>产值</span>
+                            <span>{UI_LABELS.VALUE}</span>
                             <span>{valPctText}%</span>
                           </div>
                           <div className="flex h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">

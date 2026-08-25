@@ -1,4 +1,5 @@
 
+import { UI_TOKENS } from '../src/constants/uiTokens';
 import React, { useState, useMemo, useEffect } from 'react';
 import { User, Role, MiningResource, InternalTransaction, TransactionType, TransactionStatus, CircuitBreaker, TransactionFailure, RefineCategory, RefineType, AuditStatus, ValueCreationLog } from '../types';
 import { 
@@ -7,6 +8,8 @@ import {
 } from 'recharts';
 import { Card, ProgressBar } from '../src/components/UI';
 import * as XLSX from 'xlsx';
+import { exportWorkbook } from '../src/utils/excelIo';
+import { formatMoney } from '../src/utils/formatMoney';
 import { UI_LABELS } from '../src/constants/uiLabels';
 import { isSystemAdmin } from '../src/utils/accessControl';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
@@ -38,12 +41,9 @@ import TradingTab from './TradingTab';
 interface InternalTransactionsProps {
   currentUser: User;
   users: User[];
-  allUsers?: User[];
   resources: MiningResource[];
-  allResources?: MiningResource[];
   logs: ValueCreationLog[];
   transactions: InternalTransaction[];
-  allTransactions?: InternalTransaction[];
   onSubmitTransaction: (tx: InternalTransaction | InternalTransaction[], updatedResources?: MiningResource[]) => void;
   onAuditTransaction: (txId: string | string[], status: TransactionStatus, updatedResource?: MiningResource | MiningResource[]) => void;
   onUpdateResource: (res: MiningResource) => void;
@@ -62,12 +62,9 @@ const WINDOW_MS = 60 * 1000;
 const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   currentUser,
   users,
-  allUsers = [],
   resources,
-  allResources = [],
   logs,
   transactions,
-  allTransactions = [],
   onSubmitTransaction,
   onAuditTransaction,
   onUpdateResource,
@@ -195,8 +192,8 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   };
 
   const userList = useMemo(() => {
-    return allUsers.length > 0 ? allUsers : users;
-  }, [allUsers, users]);
+    return users;
+  }, [users]);
 
   // SSOT: 以 businessUnits 为唯一清单基准构建经营单元列表与主责经管员
   const unitSelectionList = useMemo(() => {
@@ -540,7 +537,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
         
         // 当接收方确认时，执行矿山指派写入逻辑（矿山编号不变）
         if (tx.miningId) {
-          const globalResources = (allResources && allResources.length > 0) ? allResources : resources;
+          const globalResources = resources;
           const resource = globalResources.find(r => r.id === tx.miningId);
           if (!resource) {
             showAlert(`确认失败：未在全量资源库中找到矿山编号 [${tx.miningId}]。操作已中止，交易状态未变更。`);
@@ -663,7 +660,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "交易记录");
-    XLSX.writeFile(workbook, fileName);
+    exportWorkbook(workbook, fileName);
   };
 
   const transactionStats = useMemo(() => {
@@ -703,10 +700,10 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   }
 
   return (
-    <div className="w-full space-y-8 animate-in fade-in duration-500 pb-20 text-[14px]">
+    <div className="w-full space-y-8 animate-in fade-in duration-500 pb-6 text-[14px]">
       {/* 交易统计看板 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        <Card title="交易类型分布" className="bg-white p-8 rounded-[2.5rem] shadow-xl">
+        <Card title="交易类型分布" className={`bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} shadow-xl`}>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -729,7 +726,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
           </div>
         </Card>
 
-        <Card title="交易状态透视" className="lg:col-span-2 bg-white p-8 rounded-[2.5rem] shadow-xl">
+        <Card title="交易状态透视" className={`lg:col-span-2 bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} shadow-xl`}>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={transactionStats.statusData}>
@@ -749,7 +746,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       </div>
 
       {/* 顶部控制栏 */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
+      <div className={`flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} shadow-sm border border-slate-100`}>
         <div>
           <h3 className="text-2xl font-black text-slate-800 tracking-tighter uppercase flex items-center">
             <span className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white mr-4 shadow-lg">🤝</span>
@@ -804,7 +801,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
 
       {activeTab === 'apply' && (
         <div className="w-full">
-           <div className="bg-white rounded-[3rem] shadow-xl border border-slate-100 overflow-hidden">
+           <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} shadow-xl border border-slate-100 overflow-hidden`}>
              <div className="bg-slate-900 p-8 text-white flex justify-between items-center">
                 <h4 className="text-xl font-black flex items-center tracking-tighter uppercase">
                   <span className="w-10 h-10 bg-indigo-500 rounded-xl flex items-center justify-center mr-4 shadow-lg">⚡</span>
@@ -868,7 +865,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                               className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20"
                             />
                           </div>
-                          <div className="max-h-64 overflow-y-auto p-2 divide-y divide-slate-50">
+                          <div className="p-2 divide-y divide-slate-50">
                             {filteredDisplayUnits.map(item => {
                               const isChecked = item.hasManager && receiverIds.includes(item.manager!.id);
                               return (
@@ -945,7 +942,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                 </div>
 
                 {selectedResource && (
-                  <div className="space-y-6 bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm animate-in slide-in-from-left-2 duration-300">
+                  <div className={`space-y-6 bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-sm animate-in slide-in-from-left-2 duration-300`}>
                     <div className="flex justify-between items-start">
                       <div>
                         <h4 className="text-xl font-black text-slate-800 tracking-tighter">{selectedResource.id}</h4>
@@ -973,7 +970,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                           t.miningId === selectedResource.id
                         );
                         pendingTxs.forEach(t => {
-                          const receiver = allUsers.find(u => u.id === t.receiverId);
+                          const receiver = users.find(u => u.id === t.receiverId);
                           const receiverName = receiver?.center || receiver?.name || '未知';
                           const shortName = receiverName.replace('中心', '');
                           unconfirmedValueByReceiver[shortName] = (unconfirmedValueByReceiver[shortName] || 0) + (t.valueAmount || 0);
@@ -986,7 +983,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                           l.status === AuditStatus.Pending
                         );
                         pendingLogs.forEach(l => {
-                          const collector = allUsers.find(u => u.id === l.recordedCollectorId);
+                          const collector = users.find(u => u.id === l.recordedCollectorId);
                           const centerName = collector?.center || collector?.name || '未知';
                           const shortName = centerName.replace('中心', '');
                           unconfirmedValueByReceiver[shortName] = (unconfirmedValueByReceiver[shortName] || 0) + (l.amount || 0);
@@ -1020,7 +1017,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                               </h5>
                               <span className="text-[10px] font-bold text-slate-400">产初: {getInitialValueCapacity(selectedResource).toLocaleString()} | 产当: {getCurrentValueCapacity(selectedResource, logs).toLocaleString()}</span>
                             </div>
-                            <div className="grid grid-cols-4 gap-3">
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                               {[
                                 { label: UI_LABELS.PENDING, value: q.value.pending, color: 'text-amber-500' },
                                 { label: UI_LABELS.CONFIRMED, value: q.value.confirmed, color: 'text-emerald-500' },
@@ -1042,7 +1039,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                               </h5>
                               <span className="text-[10px] font-bold text-slate-400">款初: {getInitialRevenueCapacity(selectedResource).toLocaleString()} | 款当: {getCurrentRevenueCapacity(selectedResource, logs).toLocaleString()}</span>
                             </div>
-                            <div className="grid grid-cols-4 gap-3">
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                               {[
                                 { label: UI_LABELS.PENDING, value: q.revenue.pending, color: 'text-amber-500' },
                                 { label: UI_LABELS.CONFIRMED, value: q.revenue.confirmed, color: 'text-emerald-500' },
@@ -1242,7 +1239,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
 
       {activeTab === 'breakers' && (
         <div className="space-y-8 animate-in slide-in-from-bottom-4">
-           <div className="bg-white rounded-[3rem] p-10 shadow-xl border border-slate-100">
+           <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} p-10 shadow-xl border border-slate-100`}>
               <div className="flex items-center justify-between mb-10">
                  <h4 className="text-xl font-black text-slate-800 tracking-tighter uppercase">熔断保护监控中心</h4>
                  <div className="flex items-center space-x-2">
@@ -1332,7 +1329,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       )}
 
       {activeTab === 'exchange' && (
-        <div className="bg-white rounded-[3rem] border border-slate-100 shadow-xl overflow-hidden animate-in slide-in-from-bottom-4">
+        <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-xl overflow-hidden animate-in slide-in-from-bottom-4`}>
            <div className="p-8 border-b border-slate-50 flex flex-wrap items-center justify-between gap-4">
               <h4 className="text-xs font-black text-slate-900 uppercase tracking-[0.3em]">内部资源实时交易</h4>
               <BusinessDateFilter
@@ -1397,7 +1394,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       )}
 
       {activeTab === 'history' && (
-        <div className="bg-white rounded-[3rem] border border-slate-100 shadow-xl overflow-hidden animate-in slide-in-from-bottom-4">
+        <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-xl overflow-hidden animate-in slide-in-from-bottom-4`}>
            <div className="p-8 border-b border-slate-50 flex flex-wrap items-center justify-between gap-4">
               <h4 className="text-xs font-black text-slate-900 uppercase tracking-[0.3em]">全量流转审计记录</h4>
               <div className="flex flex-wrap items-center gap-3">

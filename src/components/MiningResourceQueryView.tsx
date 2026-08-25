@@ -15,6 +15,7 @@ import { calculateHistoricalNetValue } from '../utils/business';
 import { calculateHedgeCapacitiesAndWeights } from '../utils/consumptionHedge';
 import { InfoTip } from './InfoTip';
 import * as XLSX from 'xlsx';
+import { exportWorkbook, buildExcelFilename } from '../utils/excelIo';
 import { BusinessDateFilter } from './BusinessDateFilter';
 import { isLogInFilter, getLocalMonthString } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatMoney';
@@ -266,7 +267,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
     const wsNbjy = XLSX.utils.json_to_sheet(nbjyExportData);
     XLSX.utils.book_append_sheet(wb, wsNbjy, '4_内部交易_nbjy');
 
-    XLSX.writeFile(wb, `矿山全景台账_${resource.id}_${new Date().toLocaleDateString()}.xlsx`);
+    exportWorkbook(wb, buildExcelFilename(`矿山全景台账_${resource.id}`));
   };
 
   return (
@@ -478,7 +479,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
                 <span>收款轨四格进度</span>
                 <span className="font-mono text-[11px] text-amber-700">容量上限：{formatMoney(quadrants.revenue.capacity)}</span>
               </div>
-              <div className="grid grid-cols-4 gap-2 text-center text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-center text-xs">
                 <div className="p-2 bg-white rounded-xl border border-amber-200 shadow-2xs">
                   <span className="text-[10px] text-amber-600 block font-bold">待确权</span>
                   <span className="font-mono font-black text-amber-900">{formatMoney(quadrants.revenue.pending)}</span>
@@ -504,7 +505,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
                 <span>产值轨四格进度</span>
                 <span className="font-mono text-[11px] text-emerald-700">容量上限：{formatMoney(quadrants.value.capacity)}</span>
               </div>
-              <div className="grid grid-cols-4 gap-2 text-center text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-center text-xs">
                 <div className="p-2 bg-white rounded-xl border border-amber-200 shadow-2xs">
                   <span className="text-[10px] text-amber-600 block font-bold">待确权</span>
                   <span className="font-mono font-black text-amber-900">{formatMoney(quadrants.value.pending)}</span>

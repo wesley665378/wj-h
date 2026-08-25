@@ -8,10 +8,13 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend
 } from 'recharts';
 import { InfoTip } from '../src/components/InfoTip';
-import { RefreshCw, Info, LayoutGrid, List, AlertTriangle, Wallet, Eye, EyeOff, FileSpreadsheet, Sparkles, Lock, CheckCircle2 } from 'lucide-react';
+import { CostPrivacyToggle } from '../src/components/CostPrivacyToggle';
+import { UI_TOKENS } from '../src/constants/uiTokens';
+import { RefreshCw, Info, LayoutGrid, List, AlertTriangle, Wallet, FileSpreadsheet, Sparkles, Lock, CheckCircle2 } from 'lucide-react';
 import { useCostPrivacy } from '../src/hooks/useCostPrivacy';
 import { useCityGuardianModal, CityGuardianModal } from '../src/components/CityGuardianModal';
 import * as XLSX from 'xlsx';
+import { exportWorkbook } from '../src/utils/excelIo';
 import { Card, StatItem, ProgressBar } from '../src/components/UI';
 import { UI_LABELS } from '../src/constants/uiLabels';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
@@ -26,7 +29,7 @@ import {
 import { getLocalMonthString, resolveLogBusinessMonth, getLocalDateString } from '../src/utils/dateUtils';
 import { formatMoney, roundMoney } from '../src/utils/formatMoney';
 import { deriveProjectStatus } from '../src/utils/projectStatus';
-import { formatProjectStatusLabel } from '../src/utils/statusDisplay';
+import { formatProjectStatusLabel, formatRefineTypeLabel } from '../src/utils/statusDisplay';
 
 const getProjectStatusBadgeClass = (status: string) => {
   switch (status) {
@@ -85,7 +88,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
   const [filterType, setFilterType] = useState<string | null>(null);
   const [filterPurity, setFilterPurity] = useState<string | null>(null);
 
-  const isAdminOrNPC = useMemo(() => currentUser ? isGlobalReader(currentUser) : false, [currentUser]);
+  const isAdminOrNPC = useMemo(() => currentUser ? isAdminOrNpc(currentUser) : false, [currentUser]);
 
   const isManager = useMemo(() => 
     currentUser?.category === '经管员高款专' || currentUser?.category === '经管员高产专',
@@ -780,7 +783,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       ? `${currentPeriodLabel}_会务留样报告_${frozenDateStr}.xlsx`
       : `${currentPeriodLabel}_未留样-即时数据报告_${todayStr}.xlsx`;
 
-    XLSX.writeFile(wb, filename);
+    exportWorkbook(wb, filename);
 
     showAlert(`报告已成功导出！\n\n文件名：${filename}\n口径：${isFrozen ? '已冻结会务留样' : '未留样 · 即时数据'}`);
   };
@@ -839,55 +842,33 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
   ];
 
   return (
-    <div className="w-full max-w-7xl mx-auto space-y-4 md:space-y-6 lg:space-y-8 animate-in fade-in duration-700 pb-20 px-4 md:px-6">
+    <div className="w-full max-w-7xl mx-auto space-y-4 md:space-y-6 lg:space-y-8 animate-in fade-in duration-700">
       {/* Custom Banner Header - Moved to Top */}
-      <div className="bg-[#0f2b46] text-white px-6 md:px-8 py-5 md:py-6 flex flex-col items-center justify-center gap-2 md:gap-4 relative overflow-hidden rounded-[2rem] md:rounded-[3rem] shadow-xl">
+      <div className={`bg-[#0f2b46] text-white px-6 md:px-8 py-5 md:py-6 flex flex-col items-center justify-center gap-2 md:gap-4 relative overflow-hidden ${UI_TOKENS.RADIUS_PANEL} shadow-xl`}>
         <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent pointer-events-none"></div>
         
         {/* Title Area */}
         <div className="flex flex-col items-center text-center z-10 w-full">
           <div className="flex flex-col items-center gap-2 mb-2 md:mb-4">
             <div className="flex items-center gap-2">
-              <h2 className="text-2xl md:text-4xl lg:text-5xl font-black tracking-widest drop-shadow-lg">六元价值循环经营模型</h2>
+              <h2 className="text-xl md:text-2xl lg:text-3xl font-black tracking-widest drop-shadow-lg">六元价值循环经营模型</h2>
               <button onClick={() => setShowDefinition(true)} className="text-blue-200 hover:text-white transition-colors">
-                <Info size={24} />
+                <Info size={20} />
               </button>
-              <button onClick={toggleCostVisible} className="text-blue-200 hover:text-white transition-colors ml-1" title={isCostVisible ? "点击隐藏成本" : "点击显示成本"}>
-                {isCostVisible ? <Eye size={24} /> : <EyeOff size={24} />}
-              </button>
+              <CostPrivacyToggle className="ml-2 bg-white/10 text-white border-white/20 hover:bg-white/20" />
             </div>
           </div>
-          <div className="flex items-center justify-center gap-4 w-full px-4 md:px-8 mt-2">
-            <p className="text-sm md:text-lg lg:text-xl font-medium tracking-[0.1em] md:tracking-[0.2em] text-blue-50 drop-shadow">核心理念：资源循环·动态平衡·可持续发展</p>
+          <div className="flex items-center justify-center gap-4 w-full px-4 md:px-8 mt-1">
+            <p className="text-xs md:text-sm lg:text-base font-medium tracking-[0.05em] md:tracking-[0.1em] text-blue-50 drop-shadow">核心理念：资源循环·动态平衡·可持续发展</p>
           </div>
         </div>
       </div>
 
       {/* Optimized Header Layout */}
-      <div className="bg-white p-4 md:p-5 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          {/* Left: Main Stats */}
-          <div className="flex items-center gap-6 md:gap-10">
-            <div className="flex flex-col">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">当前统计周期</span>
-              <span className="text-xl md:text-2xl font-black text-slate-900 tracking-tight">{currentPeriodLabel}</span>
-            </div>
-            <div className="w-px h-10 bg-slate-100 hidden sm:block"></div>
-            <div className="flex flex-col">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">全盘加权含金量</span>
-              <span className={`text-xl md:text-2xl font-black tracking-tight ${globalWeightedPurityState.color500}`}>
-                {globalWeightedPurity.toFixed(1)}%
-              </span>
-            </div>
-          </div>
-
-          {/* Center: Countdown (Integrated) */}
-          <div className="hidden xl:flex items-center gap-4 px-6 py-3 bg-slate-50 rounded-2xl border border-slate-100">
-            <div className="w-2.5 h-2.5 bg-blue-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.5)]"></div>
-            <div className="flex flex-col">
-              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">刚性核减倒计时</span>
-              <span className="text-xs font-black text-slate-700 font-mono tracking-tight">每月2日 00:00</span>
-            </div>
+      <div className="bg-white p-3 md:p-4 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-black text-slate-800 tracking-wider">经营看板控制台</span>
           </div>
 
           {/* Right: Period Type Selector */}
@@ -906,22 +887,38 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
           </div>
         </div>
 
-        {/* Bottom: Period Value Selector & Meeting Sample Controls & System Time */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-4 border-t border-slate-50">
-          <div className="flex items-center gap-3 flex-wrap">
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">时段切换</span>
-            <div className="flex flex-wrap bg-slate-50 p-1 rounded-xl border border-slate-100">
-               {periodOptions.map((opt) => (
-                 <button
-                   key={opt.value}
-                   onClick={() => setPeriodValue(opt.value)}
-                   className={`px-3 md:px-4 py-1.5 rounded-lg text-[10px] font-black whitespace-nowrap transition-all ${
-                     periodValue === opt.value ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-200'
-                   }`}
-                 >
-                   {opt.label}
-                 </button>
-               ))}
+        {/* Bottom: Period Value Selector & Countdown & Meeting Sample Controls */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-3 border-t border-slate-100">
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">时段切换</span>
+              <div className="flex flex-wrap bg-slate-50 p-1 rounded-xl border border-slate-100">
+                 {periodOptions.map((opt) => (
+                   <button
+                     key={opt.value}
+                     onClick={() => setPeriodValue(opt.value)}
+                     className={`px-3 md:px-4 py-1.5 rounded-lg text-[10px] font-black whitespace-nowrap transition-all ${
+                       periodValue === opt.value ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-200'
+                     }`}
+                   >
+                     {opt.label}
+                   </button>
+                 ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-100">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">当前统计周期</span>
+              <span className="text-xs font-black text-slate-900">{currentPeriodLabel}</span>
+            </div>
+
+            {/* Countdown (Moved below next to period selector) */}
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-100">
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0"></div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">刚性核减倒计时</span>
+                <span className="text-[10px] font-black text-slate-700 font-mono tracking-tight">每月2日 00:00</span>
+              </div>
             </div>
           </div>
 
@@ -935,7 +932,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                     title={`冻结时间: ${new Date(currentMeetingSample.frozenAt).toLocaleString()} | 经办人: ${currentMeetingSample.frozenByName} (${currentMeetingSample.frozenByUserId})`}
                   >
                     <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse shrink-0"></span>
-                    <span className="truncate max-w-[260px]">已留样 · 冻结于 {new Date(currentMeetingSample.frozenAt).toLocaleDateString()} {new Date(currentMeetingSample.frozenAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {currentMeetingSample.frozenByName}</span>
+                    <span className="truncate max-w-full sm:max-w-xs">已留样 · 冻结于 {new Date(currentMeetingSample.frozenAt).toLocaleDateString()} {new Date(currentMeetingSample.frozenAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {currentMeetingSample.frozenByName}</span>
                   </div>
                 ) : (
                   <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black bg-blue-50 text-blue-700 border border-blue-200 shadow-xs">
@@ -1078,7 +1075,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6 lg:gap-8">
         <div className="lg:col-span-12">
-          <div className="bg-white border border-slate-200 rounded-[2rem] md:rounded-[3rem] shadow-sm overflow-hidden">
+          <div className={`bg-white border border-slate-200 ${UI_TOKENS.RADIUS_PANEL} shadow-sm overflow-hidden`}>
             {/* Banner was here, moved to top */}
 
             {/* Definition Drawer */}
@@ -1392,14 +1389,14 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
               </svg>
 
               {/* 统筹池 (Center-Left) */}
-              <div className="water-pool text-white shadow-lg w-[24%] h-32" style={{ background: 'linear-gradient(135deg, #a855f7, #7e22ce)', left: '44%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-1s' }}>
+              <div className="water-pool text-white shadow-lg w-[24%] aspect-square" style={{ background: 'linear-gradient(135deg, #a855f7, #7e22ce)', left: '44%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-1s' }}>
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none whitespace-nowrap">统筹池</h4>
                 <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{formatMoney(displayPlatformCoordinationPool)}</div>
               </div>
 
               {/* 1. 收产包 (Top Left) */}
-              <div className="water-pool text-white shadow-lg w-[24%] h-36" style={{ background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', left: '18%', top: '25%', transform: 'translate(-50%, -50%)', animationDelay: '0s' }}>
+              <div className="water-pool text-white shadow-lg w-[24%] aspect-square" style={{ background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', left: '18%', top: '25%', transform: 'translate(-50%, -50%)', animationDelay: '0s' }}>
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-0.5 relative z-10 drop-shadow-md leading-none">收产包</h4>
                 <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md border-b border-blue-400/50 pb-0.5 mb-1 w-[95%] leading-none text-center">{formatMoney(displayIncomeWaterPool)}</div>
@@ -1421,7 +1418,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                 const totalRigid = displayTotalRigidExpenses + operatingLoss;
                 return (
                   <div 
-                    className="water-pool text-white shadow-lg w-[28%] h-36 cursor-pointer group" 
+                    className="water-pool text-white shadow-lg w-[28%] aspect-square cursor-pointer group" 
                     style={{ background: 'linear-gradient(135deg, #f43f5e, #be123c)', left: '82%', top: '25%', transform: 'translate(-50%, -50%)', animationDelay: '-2s' }}
                     onClick={() => onSwitchTab?.('consumption')}
                   >
@@ -1454,21 +1451,21 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
               })()}
 
               {/* 3. 奖金池 (Middle Right) */}
-              <div className="water-pool text-white shadow-lg w-[24%] h-32" style={{ background: 'linear-gradient(135deg, #10b981, #047857)', left: '82%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-3s' }}>
+              <div className="water-pool text-white shadow-lg w-[24%] aspect-square" style={{ background: 'linear-gradient(135deg, #10b981, #047857)', left: '82%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-3s' }}>
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none">奖金池</h4>
                 <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{formatMoney(displayTotalBonusPool)}</div>
               </div>
 
               {/* 4. 承兑池 (Bottom Right) */}
-              <div className="water-pool text-white shadow-lg w-[24%] h-32" style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)', left: '82%', top: '85%', transform: 'translate(-50%, -50%)', animationDelay: '-4s' }}>
+              <div className="water-pool text-white shadow-lg w-[24%] aspect-square" style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)', left: '82%', top: '85%', transform: 'translate(-50%, -50%)', animationDelay: '-4s' }}>
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none">承兑池</h4>
                 <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{formatMoney(displayTotalBonusPool)}</div>
               </div>
 
               {/* 5. 分红池 (Bottom Left) */}
-              <div className="water-pool text-white shadow-lg w-[24%] h-32" style={{ background: 'linear-gradient(135deg, #a855f7, #7e22ce)', left: '18%', top: '85%', transform: 'translate(-50%, -50%)', animationDelay: '-6s' }}>
+              <div className="water-pool text-white shadow-lg w-[24%] aspect-square" style={{ background: 'linear-gradient(135deg, #a855f7, #7e22ce)', left: '18%', top: '85%', transform: 'translate(-50%, -50%)', animationDelay: '-6s' }}>
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none">分红池</h4>
                 <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md border-b border-white/20 pb-0.5 mb-1 w-[90%] leading-none text-center">
@@ -1574,7 +1571,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
         </div>
       </div>
 
-      <Card className="lg:col-span-12 rounded-[2rem] md:rounded-[3.5rem] p-4 md:p-6 overflow-hidden relative border-none shadow-2xl bg-white">
+      <Card className={`lg:col-span-12 rounded-[2rem] md:${UI_TOKENS.RADIUS_PANEL} p-4 md:p-6 overflow-hidden relative border-none shadow-2xl bg-white`}>
         {/* Background decoration */}
         <div className="absolute -right-20 -top-20 w-80 h-80 bg-blue-50 rounded-full blur-3xl opacity-50"></div>
         <div className="absolute -left-20 -bottom-20 w-80 h-80 bg-rose-50 rounded-full blur-3xl opacity-50"></div>
@@ -1650,7 +1647,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
               {/* 资产状态监控 (价值动态流) */}
       <div className="lg:col-span-12">
-        <div className="bg-white rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-xl p-4 md:p-6">
+        <div className={`bg-white rounded-[2rem] md:${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-xl p-4 md:p-6`}>
           <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 md:mb-10 gap-6">
             <div className="flex flex-col md:flex-row md:items-center gap-4">
               <h3 className="text-xl md:text-2xl font-black text-slate-900 tracking-tighter flex items-center">
@@ -1773,7 +1770,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                 const projectStatusLabel = formatProjectStatusLabel(projectStatusInfo.status);
 
                 return (
-                  <div key={resource.id} className="bg-slate-50 rounded-[2.5rem] p-5 border border-slate-100 hover:shadow-2xl transition-all duration-500 group relative overflow-hidden">
+                  <div key={resource.id} className={`bg-slate-50 ${UI_TOKENS.RADIUS_PANEL} p-5 border border-slate-100 hover:shadow-2xl transition-all duration-500 group relative overflow-hidden`}>
                     <div className="flex justify-between items-start mb-6">
                       <div>
                         <div className="flex items-center space-x-2">
@@ -1783,7 +1780,9 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                             <span>{purityInfo.label}</span>
                           </div>
                         </div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">{resource.types.join(' / ')}</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                          {resource.types.map(t => formatRefineTypeLabel(t)).join(' / ')}
+                        </p>
                         <p className="text-[9px] font-medium text-slate-400 mt-0.5">资源状态：{resource.status}</p>
                       </div>
                       <span className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${getProjectStatusBadgeClass(projectStatusInfo.status)}`}>
@@ -1807,10 +1806,10 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                     </div>
 
                     <div className="space-y-6 mt-6 pt-6 border-t border-slate-200/60">
-                      {/* 收款 */}
+                      {/* 收款轨 */}
                       <div>
                         <div className="flex items-center justify-between mb-3">
-                          <span className="text-[10px] font-black text-yellow-700 uppercase tracking-widest"> {UI_LABELS.REVENUE}</span>
+                          <span className="text-[10px] font-black text-yellow-700 uppercase tracking-widest"> {UI_LABELS.REVENUE_RAIL}</span>
                           <span className="text-[9px] font-bold text-slate-400">款当: {formatMoney(q.revenue.capacity)}</span>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
@@ -1842,10 +1841,10 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                         </span>
                       </div>
 
-                      {/* 产值 */}
+                      {/* 产值轨 */}
                       <div>
                         <div className="flex items-center justify-between mb-3">
-                          <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest"> {UI_LABELS.VALUE}</span>
+                          <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest"> {UI_LABELS.VALUE_RAIL}</span>
                           <span className="text-[9px] font-bold text-slate-400">产当: {formatMoney(q.value.capacity)}</span>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
@@ -1879,8 +1878,8 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                   <tr className="border-b border-slate-200">
                     <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">矿山</th>
                     <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">经营成色</th>
-                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">{UI_LABELS.VALUE}流 (待/已/未/入)</th>
-                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">{UI_LABELS.REVENUE}流 (待/已/未/入)</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">{UI_LABELS.VALUE_RAIL} (待/已/未/入)</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">{UI_LABELS.REVENUE_RAIL} (待/已/未/入)</th>
                     <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">转化缺口</th>
                     <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">状态</th>
                   </tr>
@@ -1898,7 +1897,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                         <td className="px-6 py-4">
                           <div className="flex flex-col">
                             <span className="text-sm font-black text-slate-900">{resource.id}</span>
-                            <span className="text-[9px] font-bold text-slate-400">{resource.types[0]}</span>
+                            <span className="text-[9px] font-bold text-slate-400">{formatRefineTypeLabel(resource.types[0])}</span>
                             <span className="text-[8px] font-medium text-slate-400 mt-0.5">资源状态：{resource.status}</span>
                           </div>
                         </td>

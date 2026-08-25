@@ -1,6 +1,10 @@
 
+import { safeSetItem, safeGetItem } from './src/utils/safeLocalStorage';
 import React, { useState, useEffect, useMemo } from 'react';
-import { isAdminOrNpc, isGlobalReader } from './src/utils/accessControl';
+import { isAdminOrNpc, isGlobalReader, isSystemAdmin } from './src/utils/accessControl';
+import { filterUsersByCenter, filterResourcesByCenter, filterLogsByCenter, filterTransactionsByCenter, isResourceAssignedToCenter } from './src/utils/centerScope';
+import { TERM_FILTERED_LOGS, TERM_AUDIT_LOGS } from './src/constants/terminology';
+import { useCityGuardianModal, CityGuardianModal } from './src/components/CityGuardianModal';
 import { User, Role, MiningResource, ValueCreationLog, AuditStatus, RefineCategory, RefineType, InternalTransaction, TransactionStatus, SystemOperationLog, CircuitBreaker, ResourceStatus, QuotaSnapshot, AcceptanceRecord, MeetingSample } from './types';
 import { canonicalizeBusinessUnitLabel, resolveBusinessUnitName } from './src/utils/businessUnitName';
 import Dashboard from './views/Dashboard';
@@ -110,6 +114,7 @@ const App: React.FC = () => {
 
   // Unified session sync hook (IP, time, operation logs, clear state)
   const { clientIp, currentTime, systemLogs, addSystemLog, clearSessionState } = useSessionMeta(currentUser);
+  const { modalState, showConfirm, closeModal } = useCityGuardianModal();
 
   const handleOpenLegal = (tab: 'agreement' | 'privacy') => {
     setLegalTab(tab);
@@ -200,7 +205,7 @@ const App: React.FC = () => {
             setCircuitBreakers(data.circuitBreakers);
             if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
               try {
-                localStorage.setItem('shihe_circuit_breakers', JSON.stringify(data.circuitBreakers));
+                safeSetItem('shihe_circuit_breakers', JSON.stringify(data.circuitBreakers));
               } catch (e) {
                 console.warn(e);
               }
@@ -209,7 +214,7 @@ const App: React.FC = () => {
             setCircuitBreakers(data.rdq);
             if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
               try {
-                localStorage.setItem('shihe_circuit_breakers', JSON.stringify(data.rdq));
+                safeSetItem('shihe_circuit_breakers', JSON.stringify(data.rdq));
               } catch (e) {
                 console.warn(e);
               }
@@ -245,7 +250,7 @@ const App: React.FC = () => {
           const toRemove = ['经营单元-001', '经营单元-002', '统筹池'];
           if (units.some((t: string) => toRemove.includes(t))) {
             units = units.filter((t: string) => !toRemove.includes(t));
-            localStorage.setItem('shihe_business_units', JSON.stringify(units));
+            safeSetItem('shihe_business_units', JSON.stringify(units));
             setBusinessUnits(units);
           }
         } catch (e) {
@@ -599,7 +604,7 @@ const App: React.FC = () => {
       const next = exists ? prev.map(item => item.id === cb.id ? cb : item) : [...prev, cb];
       if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
         try {
-          localStorage.setItem('shihe_circuit_breakers', JSON.stringify(next));
+          safeSetItem('shihe_circuit_breakers', JSON.stringify(next));
         } catch (e) {
           console.warn(e);
         }
@@ -615,7 +620,7 @@ const App: React.FC = () => {
       const next = prev.map(cb => cb.id === id ? { ...cb, status: 'recovered' as const } : cb);
       if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
         try {
-          localStorage.setItem('shihe_circuit_breakers', JSON.stringify(next));
+          safeSetItem('shihe_circuit_breakers', JSON.stringify(next));
         } catch (e) {
           console.warn(e);
         }
@@ -653,11 +658,12 @@ const App: React.FC = () => {
   }, [addSystemLog]);
 
   const onDeleteLog = React.useCallback((logId: string) => {
-    const nowStr = new Date().toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    setLogs(prev => prev.map(l => l.id === logId ? { ...l, deleted: true, deletedAt: nowStr } : l));
-    toast.success("审计记录 #" + logId + " 已删除");
-    addSystemLog("删除审计记录", "删除编号 #" + logId + "，时间: " + nowStr);
-  }, [addSystemLog]);
+    showConfirm(`确定要删除审计记录 #${logId} 吗？此操作不可逆！`, () => {
+      const nowStr = new Date().toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setLogs(prev => prev.map(l => l.id === logId ? { ...l, deleted: true, deletedAt: nowStr } : l));
+      addSystemLog("删除审计记录", "删除编号 #" + logId + "，时间: " + nowStr);
+    });
+  }, [addSystemLog, showConfirm]);
 
   const onUpdateUsers = React.useCallback((newUsers: User[]) => {
     setManagedUsers(newUsers);
@@ -685,7 +691,6 @@ const App: React.FC = () => {
     try {
       const res = await changePasswordApi(userId, newPassword, oldPassword);
       if (res && res.success) {
-        toast.success(res.message || '密码修改成功');
         addSystemLog('安全设置', `用户 ${userId} 成功修改了密码`);
         return true;
       } else {
@@ -720,7 +725,7 @@ const App: React.FC = () => {
     setMiningResources(INITIAL_MINING_RESOURCES);
     setManagedUsers(INITIAL_USERS);
     setTransactions([]);
-    localStorage.setItem('cleared_test_data_v2', 'true');
+    safeSetItem('cleared_test_data_v2', 'true');
     addSystemLog('系统维护', '清空了所有测试数据并重置资源状态');
   }, [addSystemLog]);
 
@@ -798,10 +803,11 @@ const App: React.FC = () => {
       const timer = setTimeout(syncData, 2000); // 2 秒防抖
       
       if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
-        localStorage.setItem('shihe_managed_users', JSON.stringify(managedUsers));
-        localStorage.setItem('shihe_logs', JSON.stringify(logs));
-        localStorage.setItem('shihe_transactions', JSON.stringify(transactions));
-        localStorage.setItem('shihe_business_units', JSON.stringify(businessUnits));
+        // E′-6 规则澄清: shihe_* 本地缓存仅作为客户端前端暂存与开发环境保底，非权威主账本；服务端 API 接口及工作区同步 payload 为权威源。
+        safeSetItem('shihe_managed_users', JSON.stringify(managedUsers));
+        safeSetItem('shihe_logs', JSON.stringify(logs));
+        safeSetItem('shihe_transactions', JSON.stringify(transactions));
+        safeSetItem('shihe_business_units', JSON.stringify(businessUnits));
       }
 
       return () => clearTimeout(timer);
@@ -811,9 +817,9 @@ const App: React.FC = () => {
   useEffect(() => {
     if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
       try {
-        localStorage.setItem('shihe_resources', JSON.stringify(miningResources));
-        localStorage.setItem('shihe_circuit_breakers', JSON.stringify(circuitBreakers));
-        localStorage.setItem('shihe_user', JSON.stringify(currentUser));
+        safeSetItem('shihe_resources', JSON.stringify(miningResources));
+        safeSetItem('shihe_circuit_breakers', JSON.stringify(circuitBreakers));
+        safeSetItem('shihe_user', JSON.stringify(currentUser));
       } catch (e) {
         console.warn('Failed to save state to localStorage', e);
       }
@@ -882,7 +888,7 @@ const App: React.FC = () => {
         setCurrentUser(user);
         if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
           try {
-            localStorage.setItem('shihe_user', JSON.stringify(user));
+            safeSetItem('shihe_user', JSON.stringify(user));
           } catch (e) {
             console.warn('Failed to save shihe_user to localStorage:', e);
           }
@@ -901,41 +907,19 @@ const App: React.FC = () => {
   const isGlobal = currentUser ? isGlobalReader(currentUser) : false;
   
   const filteredUsers = useMemo(() => {
-    if (!currentUser) return [];
-    if (isGlobal) return managedUsers;
-    return managedUsers.filter(u => u.center === currentUser.center || u.role === Role.Admin || u.role === Role.npcxie);
-  }, [managedUsers, currentUser, isGlobal]);
+    return filterUsersByCenter(managedUsers, currentUser);
+  }, [managedUsers, currentUser]);
 
   const filteredResources = useMemo(() => {
-    if (!currentUser) return [];
-    if (isGlobal) return miningResources;
-    return miningResources.filter(r => {
-      const isAssigned = (assigned: string | undefined, center: string) => {
-        if (!assigned) return false;
-        return assigned.split(',').map(c => c.trim()).includes(center);
-      };
-      return isAssigned(r.assignedTo, currentUser.center) || 
-             isAssigned(r.assignedToRevenue, currentUser.center) || 
-             isAssigned(r.assignedToValue, currentUser.center);
-    });
-  }, [miningResources, currentUser, isGlobal]);
+    return filterResourcesByCenter(miningResources, currentUser);
+  }, [miningResources, currentUser]);
 
+  // 日志网关 1：${TERM_FILTERED_LOGS} (仅 jzcz 价值创造，供价值动态流 / 收款轨与产值轨展示)
   const filteredLogs = useMemo(() => {
-    if (!currentUser) return [];
-    if (isGlobal) return logs;
-    return logs.filter(l => {
-      const resource = miningResources.find(r => r.id === l.miningId);
-      if (!resource) return false;
-      const isAssigned = (assigned: string | undefined, center: string) => {
-        if (!assigned) return false;
-        return assigned.split(',').map(c => c.trim()).includes(center);
-      };
-      return isAssigned(resource.assignedTo, currentUser.center) || 
-             isAssigned(resource.assignedToRevenue, currentUser.center) || 
-             isAssigned(resource.assignedToValue, currentUser.center);
-    });
-  }, [logs, miningResources, currentUser, isGlobal]);
+    return filterLogsByCenter(logs, miningResources, currentUser);
+  }, [logs, miningResources, currentUser]);
 
+  // 日志网关 2：${TERM_AUDIT_LOGS} (jzcz ∪ dtcb 动态消耗，供成本确权待办与审计)
   const auditLogs = useMemo(() => {
     if (!currentUser) return [];
     if (isGlobal) return logs;
@@ -950,30 +934,15 @@ const App: React.FC = () => {
       if (l.miningId) {
         const resource = miningResources.find(r => r.id === l.miningId);
         if (!resource) return false;
-        const isAssigned = (assigned: string | undefined, center: string) => {
-          if (!assigned) return false;
-          return assigned.split(',').map(c => c.trim()).includes(center);
-        };
-        return isAssigned(resource.assignedTo, currentUser.center) || 
-               isAssigned(resource.assignedToRevenue, currentUser.center) || 
-               isAssigned(resource.assignedToValue, currentUser.center);
+        return isResourceAssignedToCenter(resource, currentUser.center);
       }
       return false;
     });
   }, [logs, miningResources, filteredUsers, currentUser, isGlobal]);
 
-  const filteredDtcbLogs = useMemo(() => {
-    return auditLogs.filter(l => l.confirmationType === '手动确权');
-  }, [auditLogs]);
-
   const filteredTransactions = useMemo(() => {
-    if (!currentUser) return [];
-    if (isGlobal) return transactions;
-    const centerUserIds = new Set(filteredUsers.map(u => u.id));
-    return transactions.filter(tx => 
-      centerUserIds.has(tx.senderId) || centerUserIds.has(tx.receiverId)
-    );
-  }, [transactions, filteredUsers, currentUser, isGlobal]);
+    return filterTransactionsByCenter(transactions, currentUser, managedUsers);
+  }, [transactions, currentUser, managedUsers]);
 
   const filteredCircuitBreakers = useMemo(() => {
     if (!currentUser) return [];
@@ -1083,11 +1052,8 @@ const App: React.FC = () => {
       transactions: { 
         currentUser, 
         users: filteredUsers, 
-        allUsers: managedUsers,
-        resources: isAdminOrNPC ? miningResources : filteredResources, 
-        allResources: miningResources,
+        resources: filteredResources, 
         transactions: filteredTransactions, 
-        allTransactions: transactions,
         logs: auditLogs,
         onSubmitTransaction,
         onAuditTransaction,
@@ -1102,11 +1068,11 @@ const App: React.FC = () => {
       },
       resources: { 
         user: currentUser, 
-        resources: isAdminOrNPC ? miningResources : filteredResources,
-        logs: isAdminOrNPC ? logs : auditLogs,
-        dtcbLogs: (isAdminOrNPC ? logs : auditLogs).filter(l => l.confirmationType === '手动确权' || !!l.costCategory || !!(l as any).consumptionType),
-        transactions: isAdminOrNPC ? transactions : filteredTransactions,
-        managedUsers: isAdminOrNPC ? managedUsers : filteredUsers,
+        resources: filteredResources,
+        logs: auditLogs,
+        dtcbLogs: auditLogs.filter(l => l.confirmationType === '手动确权' || !!l.costCategory || !!(l as any).consumptionType),
+        transactions: filteredTransactions,
+        managedUsers: filteredUsers,
         onAddResource,
         onUpdateResource,
         onDeleteResource,
@@ -1115,9 +1081,9 @@ const App: React.FC = () => {
       reservoir: { 
         logs: filteredLogs,
         auditLogs: auditLogs,
-        resources: isAdminOrNPC ? miningResources : filteredResources,
-        users: isAdminOrNPC ? managedUsers : filteredUsers,
-        transactions: isAdminOrNPC ? transactions : filteredTransactions,
+        resources: filteredResources,
+        users: filteredUsers,
+        transactions: filteredTransactions,
         businessUnits,
         currentUser
       },
@@ -1147,7 +1113,7 @@ const App: React.FC = () => {
         businessUnits: businessUnits,
         onUpdateBusinessUnits: setBusinessUnits,
         persist: persistWorkspaceWithOverrides,
-        allLogs: logs,
+        allLogs: isSystemAdmin(currentUser) ? logs : [],
         onAppendLog: (log: ValueCreationLog) => {
           setLogs(prev => [...prev, log]);
         }
@@ -1230,7 +1196,7 @@ const App: React.FC = () => {
       <main className="flex-1 flex flex-col overflow-hidden bg-slate-50 text-slate-900 relative">
         {/* 背景水印 */}
         <div className="absolute inset-0 pointer-events-none z-0 overflow-hidden select-none">
-          <div className="flex flex-wrap justify-around content-around p-10 opacity-[0.1]" style={{ gap: '250px', minHeight: '100%' }}>
+          <div className="flex flex-wrap justify-around content-around p-10 opacity-[0.03]" style={{ gap: '250px', minHeight: '100%' }}>
             {Array.from({ length: 16 }).map((_, i) => (
               <div 
                 key={i} 
@@ -1303,6 +1269,7 @@ const App: React.FC = () => {
         onClose={() => setIsLegalOpen(false)}
         defaultTab={legalTab}
       />
+      <CityGuardianModal state={modalState} onClose={closeModal} />
     </div>
   );
 };
