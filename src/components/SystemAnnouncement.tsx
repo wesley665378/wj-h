@@ -3,6 +3,7 @@ import { User, Role, Announcement } from '../../types';
 import { Megaphone, Plus, Trash2, Pin, Bell, CheckCircle2, AlertTriangle, AlertCircle, X, Check, CheckCheck, Inbox, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCityGuardianModal, CityGuardianModal } from './CityGuardianModal';
+import { isSystemAdmin } from '../utils/accessControl';
 
 interface SystemAnnouncementProps {
   currentUser: User;
@@ -73,7 +74,7 @@ export const SystemAnnouncement: React.FC<SystemAnnouncementProps> = ({ currentU
   const [isPinned, setIsPinned] = useState(false);
 
   const popoverRef = useRef<HTMLDivElement>(null);
-  const isAdmin = currentUser.role === Role.Admin || currentUser.category === '系统管理员';
+  const isAdmin = isSystemAdmin(currentUser);
 
   // Save announcements to localStorage
   useEffect(() => {

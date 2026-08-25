@@ -70,7 +70,7 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
       {/* KPI 卡片组：四格小白块 */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: '卓越级', count: evaluations.filter(e => e.tier === 'S').length, color: 'text-amber-600', desc: '效率 > 2.5 · 合伙人权益' },
+          { label: '卓越级', count: evaluations.filter(e => e.tier === 'S').length, color: 'text-amber-600', desc: '效率 > 2.5 · 核心激励权益' },
           { label: '进取级', count: evaluations.filter(e => e.tier === 'A').length, color: 'text-blue-600', desc: '效率 1.5-2.5 · 核心骨干' },
           { label: '稳健级', count: evaluations.filter(e => e.tier === 'B').length, color: 'text-emerald-600', desc: '效率 1.2-1.5 · 平衡实体' },
           { label: '改进级', count: evaluations.filter(e => e.tier === 'C').length, color: 'text-rose-600', desc: '效率 < 1.2 · 负熵逻辑' },
@@ -298,7 +298,7 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                     <td className="py-2.5 px-4 text-center whitespace-nowrap">
                       <div className="flex flex-col items-center space-y-0.5">
                         {e.tier === 'S' && <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-bold rounded-xs uppercase tracking-wider">核心资产/重点保护</span>}
-                        {e.tier === 'A' && <span className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 text-[9px] font-bold rounded-xs uppercase tracking-wider">合伙人权杖晋升</span>}
+                        {e.tier === 'A' && <span className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 text-[9px] font-bold rounded-xs uppercase tracking-wider">核心晋升储备</span>}
                         {e.tier === 'B' && <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] font-bold rounded-xs uppercase tracking-wider">标准评价/持续激励</span>}
                         {e.tier === 'C' && <span className="px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 text-[9px] font-bold rounded-xs uppercase tracking-wider">负向资产/熔断淘汰</span>}
                         

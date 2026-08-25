@@ -183,10 +183,6 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         setSelectedTier('C');
         setSelectedSubCategory('安全评价');
         setSelectedRefineType(RefineType.SafetyEval);
-      } else if (prefix === 'D') {
-        setSelectedTier('D');
-        setSelectedSubCategory('职业卫生/电气检测');
-        setSelectedRefineType(RefineType.OccHealthElectric);
       } else if (resource.types && resource.types.length > 0) {
         setSelectedRefineType(resource.types[0]);
       }
@@ -202,8 +198,8 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       [RefineType.Enterprise]: { tier: 'A', subCategory: '企业项目' },
       [RefineType.Bidding]: { tier: 'B', subCategory: '招标采购项目' },
       [RefineType.SafetyEval]: { tier: 'C', subCategory: '安全评价' },
-      [RefineType.OccHealthElectric]: { tier: 'D', subCategory: '职业卫生/电气检测' },
-      [RefineType.OccHealth]: { tier: 'D', subCategory: '职业卫生' },
+      [RefineType.OccHealthElectric]: { tier: 'C', subCategory: '职业卫生/电气检测' },
+      [RefineType.OccHealth]: { tier: 'C', subCategory: '职业卫生' },
       [RefineType.Outsourced]: { tier: 'A', subCategory: '战略性外派' },
       [RefineType.EmergencyG]: { tier: 'A', subCategory: '应急演练（G)' },
       [RefineType.TrainingG]: { tier: 'A', subCategory: '培训（G）' },
@@ -267,7 +263,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   ), [managedUsers, user.role]);
 
   useEffect(() => {
-    // 自动匹配当前智能体帐号所属经营单元
+    // 自动匹配当前智能体账号所属经营单元
     if (user.center) {
       // Search within businessUnitManagers to ensure we only pick valid ones
       const businessUnitRep = businessUnitManagers.find(u => u.center === user.center && u.role === Role.Rank);
@@ -534,7 +530,6 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       if (selectedTier === 'A') return vCoeffs.Enterprise;
       if (selectedTier === 'B') return vCoeffs.Bidding;
       if (selectedTier === 'C') return vCoeffs.SafetyEval;
-      if (selectedTier === 'D') return vCoeffs.OccHealth;
       return vCoeffs.OccHealth;
     }
 
@@ -567,7 +562,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     const factor = getFactorForCollector(collectorId);
     const weights = getHedgeWeight(collectorId, amount);
     
-    // 统一公式：总预测收入包 = 注入积分 * 0.933 * [复合对冲权重] * 提炼因子
+    // 统一公式：总预测收款包 = 注入积分 * 0.933 * [复合对冲权重] * 提炼因子
     // 特殊逻辑：产专角色提报款项时，需通过 C 和 B2 双重对冲
     return amount * weights.combined * factor;
   }, [getFactorForCollector, getHedgeWeight]);
@@ -975,7 +970,6 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       if (tier === 'A') return coeffs.Enterprise;
       if (tier === 'B') return coeffs.Bidding;
       if (tier === 'C') return coeffs.SafetyEval;
-      if (tier === 'D') return coeffs.OccHealth;
       return coeffs.SafetyEval;
     } else {
       const coeffs = isHighRevenueExpert ? TIER_COEFFICIENTS.REVENUE_HIGH : isRevenueSpecialist ? TIER_COEFFICIENTS.REVENUE_MID_INITIAL : TIER_COEFFICIENTS.REVENUE_HIGH;
@@ -1968,7 +1962,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                         log.status === AuditStatus.Rejected ? 'error' : 
                         log.status === AuditStatus.Confirmed ? 'info' : 'warning'
                       }>
-                        {log.status === AuditStatus.Approved ? '已入库' : log.status}
+                        {log.status === AuditStatus.Approved ? '入库' : log.status}
                       </Badge>
                     </td>
                   </tr>
@@ -1976,7 +1970,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
               })}
               {filteredLogs.length === 0 && (
                 <tr>
-                  <td colSpan={15} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">暂无确权数据记录</td>
+                  <td colSpan={15} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
                 </tr>
               )}
             </tbody>

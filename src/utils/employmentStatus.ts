@@ -73,6 +73,10 @@ export function getResignHedgeFormulaDesc(user: User, resignDate: string): strin
   return `计算公式：月薪 ${salary} / 当月天数 ${daysInMonth} × 剩余天数 ${remainingDays} (月末 ${daysInMonth} - 离职日 ${d})`;
 }
 
+export function isNonEffectiveHoursEffective(log: ValueCreationLog): boolean {
+  return log.type === RefineType.NonEffectiveHours && (log.status === AuditStatus.Confirmed || log.status === AuditStatus.Approved);
+}
+
 /**
  * 构造离职自动生成的非有效工时对冲日志
  */

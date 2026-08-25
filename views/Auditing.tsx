@@ -27,8 +27,12 @@ import { useCostPrivacy } from "../src/hooks/useCostPrivacy";
 import { PieChartCard } from "../src/components/PieChartCard";
 import * as XLSX from "xlsx";
 import { UI_LABELS } from "../src/constants/uiLabels";
+import { isSystemAdmin } from "../src/utils/accessControl";
 import { ConsumptionAudit, AuditApiData } from "../src/components/ConsumptionAudit";
 import { isProjectWritable } from "../src/utils/projectStatus";
+import { isNonEffectiveHoursEffective } from "../src/utils/employmentStatus";
+import { formatCollectorDisplay } from "../src/utils/collector";
+import { formatAuditStatusLabel } from "../src/utils/statusDisplay";
 import {
   getLocalDateString,
   getLocalMonthString,
@@ -112,7 +116,7 @@ const Auditing: React.FC<AuditingProps> = ({
   const [endDate, setEndDate] = useState<string>('');
 
   const isNpcxie = user.role === Role.npcxie;
-  const isAdmin = user.role === Role.Admin;
+  const isAdmin = isSystemAdmin(user);
 
   // 根据选择的月份或业务日区间过滤日志
   const monthlyLogs = useMemo(() => {
@@ -197,9 +201,9 @@ const Auditing: React.FC<AuditingProps> = ({
     const netValue = approved.reduce((acc, curr) => acc + curr.netValue, 0);
 
     // 非有效工时对冲总额
-    const rigidDeduction = approved
+    const rigidDeduction = monthlyLogs
       .filter((l) => {
-        if (l.type !== RefineType.NonEffectiveHours) return false;
+        if (!isNonEffectiveHoursEffective(l)) return false;
         const collector = users.find((u) => u.id === l.recordedCollectorId);
         return collector?.category !== "VP";
       })
@@ -253,13 +257,6 @@ const Auditing: React.FC<AuditingProps> = ({
         value: approved
           .filter((l) => l.costCategory === "C")
           .reduce((acc, curr) => acc + Math.abs(curr.netValue), 0),
-        color: "#FECDD3",
-      },
-      {
-        name: "D类消耗",
-        value: approved
-          .filter((l) => l.costCategory === "D")
-          .reduce((acc, curr) => acc + curr.dynamicCost, 0),
         color: "#FECDD3",
       },
       {
@@ -405,7 +402,7 @@ const Auditing: React.FC<AuditingProps> = ({
           'B2权': b2WeightValue,
           '产初/产当 ': valLimitB2Str,
           '确权日期': log.confirmedAt ? new Date(log.confirmedAt).toLocaleString() : '-',
-          '确权状态': log.status === AuditStatus.Approved ? '已入库' : log.status
+          '确权状态': log.status === AuditStatus.Approved ? '入库' : log.status
         };
       } else {
         return {
@@ -433,7 +430,7 @@ const Auditing: React.FC<AuditingProps> = ({
               : 0,
           消耗分类: log.costCategory || "N/A",
           [activeTab === "pending" ? "收款包" : (activeTab === "linked" ? "产兑包" : "收款包/产兑包")]: log.netValue,
-          状态: log.status === AuditStatus.Approved ? '已入库' : log.status,
+          状态: log.status === AuditStatus.Approved ? '入库' : log.status,
         };
       }
     });
@@ -989,7 +986,7 @@ const Auditing: React.FC<AuditingProps> = ({
                     <th className="px-4 py-6">申报编号</th>
                     <th className="px-4 py-6">业务日期</th>
                     <th className="px-4 py-6">提报日期</th>
-                    <th className="px-4 py-6">探照灯类型</th>
+                    <th className="px-4 py-6">提炼类型</th>
                     <th className="px-4 py-6 text-center">经营单元</th>
                     <th className="px-4 py-6 font-bold text-slate-800">采集主体</th>
                     <th className="px-3 py-6 text-right text-blue-600">A</th>
@@ -1011,7 +1008,7 @@ const Auditing: React.FC<AuditingProps> = ({
                     if (!log) return null;
                     const { cWeightValue, b2WeightValue, revLimitStr, valLimitCStr, valLimitB2Str } = calculateConsumptionMirrorFields(log, resources, logs);
                     
-                    const collectorDisplay = log.costCategory === 'C' ? 'sys_C' : (log.costCategory === 'B' && log.valueConsumptionMode === 'B2' ? 'sys_B2' : (users.find(u => u.id === log.recordedCollectorId)?.name || log.recordedCollectorId));
+                    const collectorDisplay = formatCollectorDisplay(log.recordedCollectorId, users);
 
                     return (
                       <tr key={log.id} className="hover:bg-rose-50/30 transition-colors group">
@@ -1064,7 +1061,7 @@ const Auditing: React.FC<AuditingProps> = ({
                             log.status === AuditStatus.Approved ? 'bg-emerald-100 text-emerald-700' : 
                             log.status === AuditStatus.Rejected ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'
                           }`}>
-                            {log.status === AuditStatus.Confirmed ? '已确权' : log.status === AuditStatus.Approved ? '已入库' : log.status === AuditStatus.Pending ? '待确权' : '已驳回'}
+                            {formatAuditStatusLabel(log.status)}
                           </span>
                         </td>
                         {activeTab === "consumption" && (
@@ -1072,14 +1069,14 @@ const Auditing: React.FC<AuditingProps> = ({
                             <div className="flex items-center justify-end space-x-2">
                                 <button
                                     onClick={() => handleAction(log, "reject")}
-                                    disabled={processingLogIds.has(log.id) || !isProjectWritable(resources.find(r => r.id === log.miningId))}
+                                    disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
                                     className="px-3 py-1 border border-rose-100 text-rose-500 text-[9px] font-black uppercase rounded hover:bg-rose-500 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     驳回
                                 </button>
                                 <button
                                     onClick={() => setConfirmingLog(log)}
-                                    disabled={processingLogIds.has(log.id) || !isProjectWritable(resources.find(r => r.id === log.miningId))}
+                                    disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
                                     className="px-3 py-1 bg-slate-900 text-white text-[9px] font-black uppercase rounded hover:bg-blue-600 shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     确权审核
@@ -1258,7 +1255,7 @@ const Auditing: React.FC<AuditingProps> = ({
                                         onClick={() =>
                                           handleAction(log, "reject")
                                         }
-                                        disabled={processingLogIds.has(log.id) || !isProjectWritable(resources.find(r => r.id === log.miningId))}
+                                        disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
                                         title="驳回该笔申请"
                                         className="px-4 py-1.5 border border-rose-100 text-rose-500 text-[9px] font-black uppercase rounded-lg hover:bg-rose-500 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                       >
@@ -1277,7 +1274,7 @@ const Auditing: React.FC<AuditingProps> = ({
                                     <div className="flex items-center space-x-2">
                                       <button
                                         onClick={() => handleAction(log, "reject")}
-                                        disabled={processingLogIds.has(log.id) || !isProjectWritable(resources.find(r => r.id === log.miningId))}
+                                        disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
                                         title="驳回该笔申请，记录将标记为已驳回"
                                         className="px-4 py-1.5 border border-rose-100 text-rose-500 text-[9px] font-black uppercase rounded-lg hover:bg-rose-500 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                       >
@@ -1286,7 +1283,7 @@ const Auditing: React.FC<AuditingProps> = ({
                                       {isNpcxie && log.dynamicCost > 0 ? (
                                         <button
                                           onClick={() => setConfirmingLog(log)}
-                                          disabled={processingLogIds.has(log.id) || !isProjectWritable(resources.find(r => r.id === log.miningId))}
+                                          disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
                                           className="px-4 py-1.5 bg-rose-600 text-white text-[9px] font-black uppercase rounded-lg hover:bg-rose-700 shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                           消耗确权
@@ -1294,7 +1291,7 @@ const Auditing: React.FC<AuditingProps> = ({
                                       ) : (
                                         <button
                                           onClick={() => handleAction(log, "approve")}
-                                          disabled={processingLogIds.has(log.id) || !isProjectWritable(resources.find(r => r.id === log.miningId))}
+                                          disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
                                           title={
                                             log.dynamicCost > 0
                                               ? "确认审核该笔消耗申报"
@@ -1319,7 +1316,7 @@ const Auditing: React.FC<AuditingProps> = ({
                                         : "error"
                                   }
                                 >
-                                  {log.status === AuditStatus.Approved ? '已入库' : log.status}
+                                  {log.status === AuditStatus.Approved ? '入库' : log.status}
                                 </Badge>
                                 {log.status === AuditStatus.Confirmed && (
                                   <span className="text-[8px] font-black text-slate-400 uppercase mt-1 tracking-tighter">

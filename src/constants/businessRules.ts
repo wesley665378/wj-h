@@ -1,3 +1,5 @@
+export { SYS_C, SYS_B2, LEGACY_SYSTEM_B2 } from './systemCollectors';
+
 export const LINKED_CONFIRMATION_RULES = {
   title: "联动确权规则",
   autoConversion: {

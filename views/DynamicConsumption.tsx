@@ -11,6 +11,9 @@ import { isProjectWritable, deriveProjectStatus } from '../src/utils/projectStat
 import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { calculateConsumptionMirrorFields } from '../src/utils/business';
+import { formatCollectorDisplay } from '../src/utils/collector';
+import { formatAuditStatusLabel } from '../src/utils/statusDisplay';
+import { resolveSystemCollectorIdForWrite } from '../src/utils/collector';
 import {
   getInitialRevenueCapacity,
   getInitialValueCapacity,
@@ -175,7 +178,6 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
       if (prefix === 'A') setSelectedType(RefineType.Enterprise);
       else if (prefix === 'B') setSelectedType(RefineType.Bidding);
       else if (prefix === 'C') setSelectedType(RefineType.OccHealth);
-      else if (prefix === 'D') setSelectedType(RefineType.OccHealthElectric);
     }
   }, [selectedMiningId, resources]);
 
@@ -335,7 +337,11 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
           id: `${selectedCategory === RefineCategory.Revenue ? 'J' : 'M'}${(Date.now() % 100000000).toString().padStart(8, '0')}`,
           miningId: selectedMiningId,
           rankId: selectedOperatorId,
-          recordedCollectorId: isB2 ? 'SYSTEM_B2' : recordedCollectorId,
+          recordedCollectorId: resolveSystemCollectorIdForWrite({
+            costCategory: costCategory,
+            valueConsumptionMode: selectedCategory === RefineCategory.Value && costCategory === 'B' ? valueConsumptionMode : undefined,
+            recordedCollectorId: recordedCollectorId
+          }),
           category: selectedCategory,
           type: selectedType as RefineType,
           costCategory: costCategory,
@@ -451,7 +457,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
         '经营单元': users.find(u => u.id === log.rankId)?.center || '-',
         '提报时间': formatSubmissionTime(log.timestamp),
         '矿山编号': log.miningId,
-        '采集主体': users.find(u => u.id === log.recordedCollectorId)?.name || log.recordedCollectorId,
+        '采集主体': formatCollectorDisplay(log.recordedCollectorId, users),
         'A': log.costCategory === 'A' ? Math.round(log.dynamicCost) : 0,
         'C': log.costCategory === 'C' ? Math.round(log.dynamicCost) : 0,
         'C权': cWeightValue,
@@ -462,7 +468,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
         'B2权': b2WeightValue,
         '产初/产当 ': valLimitB2Str,
         '确权日期': log.confirmedAt ? new Date(log.confirmedAt).toLocaleString() : '-',
-        '确权状态': log.status === AuditStatus.Approved ? '已入库' : log.status
+        '确权状态': formatAuditStatusLabel(log.status)
       };
     });
 
@@ -1032,7 +1038,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                         log.status === AuditStatus.Approved ? 'bg-emerald-100 text-emerald-700' : 
                         log.status === AuditStatus.Rejected ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'
                       }`}>
-                        {log.status}
+                        {formatAuditStatusLabel(log.status)}
                       </span>
                     </td>
                   </tr>

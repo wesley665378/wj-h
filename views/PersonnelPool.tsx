@@ -25,6 +25,7 @@ import {
 } from '../src/utils/employmentStatus';
 import { getLocalDateString } from '../src/utils/dateUtils';
 import { formatMoney } from '../src/utils/formatMoney';
+import { isSystemAdmin } from '../src/utils/accessControl';
 
 interface PersonnelPoolProps {
   user: User;
@@ -66,10 +67,6 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
     catch (err) { showAlert(`同步失败：${(err as Error).message || '未知错误'}`); return false; }
   };
 
-  const isSystemAdmin = (u: User | null | undefined) => {
-    if (!u) return false;
-    return u.role === Role.Admin || u.category?.toLowerCase() === '系统管理员';
-  };
   const [newCenterName, setNewCenterName] = useState('');
   const [newCenterCategory, setNewCenterCategory] = useState<'前台' | '后台'>('前台');
   const [editingCenter, setEditingCenter] = useState<string | null>(null);
@@ -750,7 +747,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
 
   const deleteUser = async (userId: string) => {
     if (!isSystemAdmin(user)) return showAlert('权限不足。');
-    showConfirm('确定要注销此帐号吗？此操作不可逆！', async () => {
+    showConfirm('确定要注销此账号吗？此操作不可逆！', async () => {
       if (isSyncing.current) return;
       isSyncing.current = true;
 
@@ -759,9 +756,9 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
         const ok = await persistOrAlert({ users: updatedUsers });
         if (!ok) return;
         onUpdateUsers(updatedUsers);
-        showAlert('帐号注销成功');
+        showAlert('账号注销成功');
       } catch (err) {
-        showAlert(`帐号注销失败：${(err as Error).message || '网络问题'}`);
+        showAlert(`账号注销失败：${(err as Error).message || '网络问题'}`);
       } finally {
         isSyncing.current = false;
       }
@@ -1242,14 +1239,14 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
           </Card>
 
           <Card 
-            title="帐号管理 (权限账户概览)" 
+            title="账号管理 (权限账户概览)" 
             className="p-8 rounded-[3rem] border border-slate-100 shadow-sm"
             headerAction={
               <button 
                 onClick={() => setShowAddAccountForm(!showAddAccountForm)}
                 className={`text-xs font-black uppercase tracking-widest px-6 py-3 rounded-2xl transition-all shadow-md ${showAddAccountForm ? 'bg-rose-50 text-rose-500 active:scale-95' : 'bg-slate-900 text-white hover:bg-blue-600 active:scale-95'}`}
               >
-                {showAddAccountForm ? '取消新增' : '新增加管理帐号'}
+                {showAddAccountForm ? '取消新增' : '新增加管理账号'}
               </button>
             }
           >
@@ -1301,7 +1298,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                       }} 
                       className="w-full bg-blue-600 text-white font-black py-5 rounded-2xl text-xs tracking-[0.3em] uppercase hover:bg-blue-700 transition-all shadow-xl active:scale-95"
                     >
-                      确认激活帐号
+                      确认激活账号
                     </button>
                  </div>
                )}

@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ValueCreationLog, MiningResource, AuditStatus, RefineCategory, User, InternalTransaction, RefineType, Role, TransactionType, TransactionStatus, MeetingSample } from '../types';
+import { isAdminOrNpc, isGlobalReader } from '../src/utils/accessControl';
 import { 
   Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend
@@ -16,7 +17,7 @@ import { UI_LABELS } from '../src/constants/uiLabels';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
 import { PURITY_RULES, LINKED_CONFIRMATION_RULES } from '../src/constants/businessRules';
 import { getPurityInfo, calculateHistoricalNetValue, getUserSalaryByMonth, computeValueOutput5Incentive, computeCollection2Incentive } from '../src/utils/business';
-import { isSalaryActiveForMonth } from '../src/utils/employmentStatus';
+import { isSalaryActiveForMonth, isNonEffectiveHoursEffective } from '../src/utils/employmentStatus';
 import { 
   sumConfirmedRevenuePackage, 
   sumValueConversionPackage, 
@@ -24,6 +25,23 @@ import {
 } from '../src/utils/reconcileMiningFromLogs';
 import { getLocalMonthString, resolveLogBusinessMonth, getLocalDateString } from '../src/utils/dateUtils';
 import { formatMoney, roundMoney } from '../src/utils/formatMoney';
+import { deriveProjectStatus } from '../src/utils/projectStatus';
+import { formatProjectStatusLabel } from '../src/utils/statusDisplay';
+
+const getProjectStatusBadgeClass = (status: string) => {
+  switch (status) {
+    case '已结案':
+    case '已封存':
+      return 'bg-slate-100 text-slate-600 border-slate-200';
+    case '待封存':
+    case '静置中':
+      return 'bg-amber-100 text-amber-700 border-amber-200';
+    case '进行中':
+    case '运营中':
+    default:
+      return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+  }
+};
 
 interface DashboardProps {
   logs: ValueCreationLog[];
@@ -45,7 +63,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const [now, setNow] = useState<Date>(() => new Date());
 
-  const canSampleAndExport = currentUser?.role === Role.Admin || currentUser?.role === Role.npcxie;
+  const canSampleAndExport = currentUser ? isAdminOrNpc(currentUser) : false;
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -67,12 +85,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
   const [filterType, setFilterType] = useState<string | null>(null);
   const [filterPurity, setFilterPurity] = useState<string | null>(null);
 
-  const isAdminOrNPC = useMemo(() => {
-    return currentUser?.role === Role.Admin || 
-           currentUser?.category === '系统管理员' || 
-           currentUser?.role === Role.npcxie || 
-           currentUser?.category === 'NPC';
-  }, [currentUser]);
+  const isAdminOrNPC = useMemo(() => currentUser ? isGlobalReader(currentUser) : false, [currentUser]);
 
   const isManager = useMemo(() => 
     currentUser?.category === '经管员高款专' || currentUser?.category === '经管员高产专',
@@ -282,8 +295,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
     // 2. 扣除已核准的非有效工时对冲 (冲抵刚性工资包)
     const approvedDeductions = logs.filter(l => 
-      l.status === AuditStatus.Approved && 
-      l.type === RefineType.NonEffectiveHours &&
+      isNonEffectiveHoursEffective(l) &&
       l.timestamp >= periodRange.start &&
       l.timestamp < periodRange.end &&
       (isAdminOrNPC || (users.find(u => u.id === l.recordedCollectorId)?.center === targetUserCenter))
@@ -365,7 +377,6 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     let b1Costs = 0;
     let b2Costs = 0;
     let cCosts = 0;
-    let dCosts = 0;
     let totalRigidDeduction = 0;
     let platformCoordinationPool = 0;
 
@@ -398,9 +409,8 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
           if (l.costCategory === 'B' && l.valueConsumptionMode === 'B1') b1Costs += l.dynamicCost;
           if (l.costCategory === 'B' && l.valueConsumptionMode === 'B2') b2Costs += l.dynamicCost;
           if (l.costCategory === 'C') cCosts += Math.abs(netValue);
-          if (l.costCategory === 'D') dCosts += l.dynamicCost;
 
-          if (l.type === RefineType.NonEffectiveHours) {
+          if (isNonEffectiveHoursEffective(l)) {
             const collector = userMap.get(l.recordedCollectorId || '');
             if (collector?.category !== 'VP') {
               totalRigidDeduction += netValue;
@@ -500,7 +510,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
         }
       }
     }
-    const operatingLoss = aCosts + b1Costs + b2Costs + cCostsDynamic + dCosts;
+    const operatingLoss = aCosts + b1Costs + b2Costs + cCostsDynamic;
 
     // 4. 已产出总奖金池 (totalBonusPool) - 遍历并累加全量采集专家的【专项计提】
     let totalRedundancySum = 0;
@@ -560,7 +570,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
     return {
       revenueWater, valueWater, incomeWaterPool, totalIncomeWater, rigidSalaryPackage, operatingLoss, totalRigidExpenses, valueBonusPool, revenueBonusPool, dividendPool, fhctzCost,
-      revenueGross: revenueGrossAmount, valueGross: valueGrossAmount, aCosts, b1Costs, b2Costs, cCosts, dCosts, totalSalaryFlow,
+      revenueGross: revenueGrossAmount, valueGross: valueGrossAmount, aCosts, b1Costs, b2Costs, cCosts, totalSalaryFlow,
       collectorStats, categoryStats, revenueQuadrantStats, valueQuadrantStats, totalRigidDeduction, reservoirInflow,
       totalValueInitial, totalRevenueInitial, totalMinedRevenue, totalMinedValue,
       valueConfirmed: valueConfirmedAmount, valuePending: valuePendingAmount, valueUnconfirmed, revenueConfirmed: revenueConfirmedAmount, revenuePending: revenuePendingAmount, revenueUnconfirmed, platformCoordinationPool,
@@ -654,7 +664,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     const isOverwrite = Boolean(currentMeetingSample);
 
     showConfirm(
-      `确认生成「${currentPeriodLabel}」会务留样吗？\n\n本留样只对生成此刻系统内的数据负责。之后再录入的动态消耗、权重等（凡会影响收入包的）都不会改这份留样。${isOverwrite ? '\n\n⚠️ 注意：本期已存在旧留样，本次生成将覆盖该期最新一份。' : ''}`,
+      `确认生成「${currentPeriodLabel}」会务留样吗？\n\n本留样只对生成此刻系统内的数据负责。之后再录入的动态消耗、权重等（凡会影响收产包的）都不会改这份留样。${isOverwrite ? '\n\n⚠️ 注意：本期已存在旧留样，本次生成将覆盖该期最新一份。' : ''}`,
       async () => {
         const frozenAt = Date.now();
         const frozenByUserId = currentUser.userId || currentUser.id || 'admin';
@@ -701,7 +711,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
         }
       },
       undefined,
-      '确定生成',
+      '确认生成',
       '取消'
     );
   };
@@ -1182,7 +1192,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                           <span className="text-[10px] font-bold text-violet-600 bg-violet-100/80 px-2 py-0.5 rounded-md">盈余沉淀</span>
                         </div>
                         <p className="text-xs text-slate-600 leading-relaxed">
-                          系统覆盖成本与承兑后的净盈余沉淀池。<strong className="text-slate-800">80%</strong>流向奖金池进行合伙人及核心团队二次分配，<strong className="text-slate-800">20%</strong>循环沉淀至统筹池。
+                          系统覆盖成本与承兑后的净盈余沉淀池。<strong className="text-slate-800">80%</strong>流向奖金池进行核心团队二次分配，<strong className="text-slate-800">20%</strong>循环沉淀至统筹池。
                         </p>
                       </div>
 
@@ -1759,6 +1769,8 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
                 const q = resourceQuadrants.get(resource.id)!;
                 const purityInfo = getPurityInfo(q.revenue.confirmed, q.value.confirmed, q.value.pending, q.value.capacity);
+                const projectStatusInfo = deriveProjectStatus(resource);
+                const projectStatusLabel = formatProjectStatusLabel(projectStatusInfo.status);
 
                 return (
                   <div key={resource.id} className="bg-slate-50 rounded-[2.5rem] p-5 border border-slate-100 hover:shadow-2xl transition-all duration-500 group relative overflow-hidden">
@@ -1772,9 +1784,10 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                           </div>
                         </div>
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">{resource.types.join(' / ')}</p>
+                        <p className="text-[9px] font-medium text-slate-400 mt-0.5">资源状态：{resource.status}</p>
                       </div>
-                      <span className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${resource.status === '入库' ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600'}`}>
-                        {resource.status}
+                      <span className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${getProjectStatusBadgeClass(projectStatusInfo.status)}`}>
+                        {projectStatusLabel}
                       </span>
                     </div>
 
@@ -1876,6 +1889,8 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                   {displayResources.map(resource => {
                     const q = resourceQuadrants.get(resource.id)!;
                     const purityInfo = getPurityInfo(q.revenue.confirmed, q.value.confirmed, q.value.pending, q.value.capacity);
+                    const projectStatusInfo = deriveProjectStatus(resource);
+                    const projectStatusLabel = formatProjectStatusLabel(projectStatusInfo.status);
                     return (
                       <tr key={resource.id} 
                           onClick={() => setSelectedMiningId(resource.id)}
@@ -1884,6 +1899,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                           <div className="flex flex-col">
                             <span className="text-sm font-black text-slate-900">{resource.id}</span>
                             <span className="text-[9px] font-bold text-slate-400">{resource.types[0]}</span>
+                            <span className="text-[8px] font-medium text-slate-400 mt-0.5">资源状态：{resource.status}</span>
                           </div>
                         </td>
                         <td className="px-6 py-4">
@@ -1920,8 +1936,8 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${resource.status === '入库' ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600'}`}>
-                            {resource.status}
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border ${getProjectStatusBadgeClass(projectStatusInfo.status)}`}>
+                            {projectStatusLabel}
                           </span>
                         </td>
                       </tr>

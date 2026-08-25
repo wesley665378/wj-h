@@ -1,5 +1,6 @@
 import React from 'react';
 import { ShieldAlert, X } from 'lucide-react';
+import { UI_LABELS } from '../constants/uiLabels';
 
 export interface CityGuardianModalState {
   isOpen: boolean;
@@ -78,7 +79,7 @@ export const CityGuardianModal: React.FC<CityGuardianModalProps> = ({ state, onC
             onClick={handleConfirm}
             className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition-colors shadow-sm"
           >
-            {state.confirmText || '确定'}
+            {state.confirmText || UI_LABELS.BTN_CONFIRM}
           </button>
         </div>
       </div>

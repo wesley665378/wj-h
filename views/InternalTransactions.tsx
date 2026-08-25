@@ -8,6 +8,7 @@ import {
 import { Card, ProgressBar } from '../src/components/UI';
 import * as XLSX from 'xlsx';
 import { UI_LABELS } from '../src/constants/uiLabels';
+import { isSystemAdmin } from '../src/utils/accessControl';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
 import { getInitialRevenueCapacity, getInitialValueCapacity, getCurrentRevenueCapacity, getCurrentValueCapacity } from '../src/utils/miningCapacity';
 import {
@@ -149,7 +150,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   const [failureLogs, setFailureLogs] = useState<TransactionFailure[]>([]);
 
   const isNpcxie = currentUser.role === Role.npcxie;
-  const isAdmin = currentUser.role === Role.Admin;
+  const isAdmin = isSystemAdmin(currentUser);
 
   // 检查熔断状态
   const checkBreaker = (targetId: string, type: 'initiation' | 'confirmation') => {
@@ -695,7 +696,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
         </div>
         <h3 className="text-base font-black text-slate-800 tracking-tight">无内部交易访问与操作权限</h3>
         <p className="text-xs text-slate-500 max-w-md leading-relaxed">
-          根据系统权责规范，当前智能体账户 (NPCXIE) 的内部交易发起、审核与流转权限已取消。如需处理内部交易，请使用对应经营单元合伙人或系统管理账户。
+          根据系统权责规范，当前智能体账户 (NPCXIE) 的内部交易发起、审核与流转权限已取消。如需处理内部交易，请使用对应经营单元负责人或系统管理账户。
         </p>
       </div>
     );

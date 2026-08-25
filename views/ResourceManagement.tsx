@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, MiningResource, RefineType, Role, ResourceStatus, ValueCreationLog, InternalTransaction } from '../types';
+import { isSystemAdmin } from '../src/utils/accessControl';
 import { Card, ProgressBar, Badge, ProjectStatusBadge } from '../src/components/UI';
 import * as XLSX from 'xlsx';
 import { deriveProjectStatus } from '../src/utils/projectStatus';
@@ -9,6 +10,7 @@ import { roundMoney, formatMoney } from '../src/utils/formatMoney';
 import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { MiningResourceQueryView, normalizeMiningId } from '../src/components/MiningResourceQueryView';
+import { formatProjectStatusLabel } from '../src/utils/statusDisplay';
 
 interface ResourceManagementProps {
   user: User;
@@ -56,7 +58,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
   const [queriedMiningId, setQueriedMiningId] = useState<string | null>(null);
 
   const isNpcxie = user.role === Role.npcxie || user.category === 'NPC';
-  const isAdmin = user.role === Role.Admin || user.category === '系统管理员';
+  const isAdmin = isSystemAdmin(user);
   const canQuery = isAdmin || isNpcxie;
   const [selectedUnitFilter, setSelectedUnitFilter] = useState<string>('');
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
@@ -81,7 +83,6 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       if (prefix === 'A') setSelectedType(RefineType.Enterprise);
       else if (prefix === 'B') setSelectedType(RefineType.Bidding);
       else if (prefix === 'C') setSelectedType(RefineType.OccHealth);
-      else if (prefix === 'D') setSelectedType(RefineType.OccHealthElectric);
     }
   }, [newMiningId, editingId]);
 
@@ -265,7 +266,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       '收款指派': res.assignedToRevenue || res.assignedTo,
       '产值指派': res.assignedToValue || res.assignedTo,
       '核算类别': res.category || '100%',
-      '矿山状态': deriveProjectStatus(res).status
+      '矿山状态': formatProjectStatusLabel(deriveProjectStatus(res).status)
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
@@ -404,17 +405,17 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
               <span className="text-slate-400 font-black uppercase tracking-wider text-[11px] shrink-0">状态：</span>
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700 font-black">
                 <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
-                进行中 {statusCounts['进行中']}
+                {formatProjectStatusLabel('进行中')} {statusCounts['进行中']}
               </span>
               <span className="text-slate-300">·</span>
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 text-amber-700 font-black">
                 <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                待封存 {statusCounts['待封存']}
+                {formatProjectStatusLabel('待封存')} {statusCounts['待封存']}
               </span>
               <span className="text-slate-300">·</span>
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-600 font-black">
                 <span className="w-2 h-2 rounded-full bg-slate-400"></span>
-                已结案 {statusCounts['已结案']}
+                {formatProjectStatusLabel('已结案')} {statusCounts['已结案']}
               </span>
             </div>
 
@@ -1003,7 +1004,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                         <div style={{ width: `${revPendingPct}%` }} className="bg-amber-400 h-full" title={`待确权: ${rev.pending}`} />
                         <div style={{ width: `${revConfirmedPct}%` }} className="bg-emerald-500 h-full" title={`已确权: ${rev.confirmed}`} />
                         <div style={{ width: `${revUnconfirmedPct}%` }} className="bg-slate-300 h-full" title={`未确权: ${rev.unconfirmed}`} />
-                        <div style={{ width: `${revMinedPct}%` }} className="bg-blue-500 h-full" title={`已入库: ${rev.mined}`} />
+                        <div style={{ width: `${revMinedPct}%` }} className="bg-blue-500 h-full" title={`入库: ${rev.mined}`} />
                       </div>
                     </div>
                     <div className="space-y-1">
@@ -1015,7 +1016,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                         <div style={{ width: `${valPendingPct}%` }} className="bg-amber-400 h-full" title={`待确权: ${val.pending}`} />
                         <div style={{ width: `${valConfirmedPct}%` }} className="bg-emerald-500 h-full" title={`已确权: ${val.confirmed}`} />
                         <div style={{ width: `${valUnconfirmedPct}%` }} className="bg-slate-300 h-full" title={`未确权: ${val.unconfirmed}`} />
-                        <div style={{ width: `${valMinedPct}%` }} className="bg-blue-500 h-full" title={`已入库: ${val.mined}`} />
+                        <div style={{ width: `${valMinedPct}%` }} className="bg-blue-500 h-full" title={`入库: ${val.mined}`} />
                       </div>
                     </div>
                   </div>

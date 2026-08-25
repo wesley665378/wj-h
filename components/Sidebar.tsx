@@ -66,7 +66,7 @@ const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab, onUpda
               </div>
               <div className="min-w-0">
                 <h4 className="text-xs font-bold text-white truncate w-28" title={user.name}>{user.name}</h4>
-                <p className="text-[9px] text-slate-400 font-medium truncate" title={user.category || '合伙人'}>{user.category || '合伙人'}</p>
+                <p className="text-[9px] text-slate-400 font-medium truncate" title={user.category || '—'}>{user.category || '—'}</p>
               </div>
            </div>
         </div>

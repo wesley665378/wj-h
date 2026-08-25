@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { isAdminOrNpc, isGlobalReader } from './src/utils/accessControl';
 import { User, Role, MiningResource, ValueCreationLog, AuditStatus, RefineCategory, RefineType, InternalTransaction, TransactionStatus, SystemOperationLog, CircuitBreaker, ResourceStatus, QuotaSnapshot, AcceptanceRecord, MeetingSample } from './types';
 import { canonicalizeBusinessUnitLabel, resolveBusinessUnitName } from './src/utils/businessUnitName';
 import Dashboard from './views/Dashboard';
@@ -896,17 +897,18 @@ const App: React.FC = () => {
     restoreSession();
   }, []);
 
-  const isAdminOrNPC = currentUser?.role === Role.Admin || currentUser?.role === Role.npcxie;
+  const isAdminOrNPC = currentUser ? isAdminOrNpc(currentUser) : false;
+  const isGlobal = currentUser ? isGlobalReader(currentUser) : false;
   
   const filteredUsers = useMemo(() => {
     if (!currentUser) return [];
-    if (isAdminOrNPC) return managedUsers;
+    if (isGlobal) return managedUsers;
     return managedUsers.filter(u => u.center === currentUser.center || u.role === Role.Admin || u.role === Role.npcxie);
-  }, [managedUsers, currentUser, isAdminOrNPC]);
+  }, [managedUsers, currentUser, isGlobal]);
 
   const filteredResources = useMemo(() => {
     if (!currentUser) return [];
-    if (isAdminOrNPC) return miningResources;
+    if (isGlobal) return miningResources;
     return miningResources.filter(r => {
       const isAssigned = (assigned: string | undefined, center: string) => {
         if (!assigned) return false;
@@ -916,11 +918,11 @@ const App: React.FC = () => {
              isAssigned(r.assignedToRevenue, currentUser.center) || 
              isAssigned(r.assignedToValue, currentUser.center);
     });
-  }, [miningResources, currentUser, isAdminOrNPC]);
+  }, [miningResources, currentUser, isGlobal]);
 
   const filteredLogs = useMemo(() => {
     if (!currentUser) return [];
-    if (isAdminOrNPC) return logs;
+    if (isGlobal) return logs;
     return logs.filter(l => {
       const resource = miningResources.find(r => r.id === l.miningId);
       if (!resource) return false;
@@ -932,11 +934,11 @@ const App: React.FC = () => {
              isAssigned(resource.assignedToRevenue, currentUser.center) || 
              isAssigned(resource.assignedToValue, currentUser.center);
     });
-  }, [logs, miningResources, currentUser, isAdminOrNPC]);
+  }, [logs, miningResources, currentUser, isGlobal]);
 
   const auditLogs = useMemo(() => {
     if (!currentUser) return [];
-    if (isAdminOrNPC) return logs;
+    if (isGlobal) return logs;
     const centerUserIds = new Set(filteredUsers.map(u => u.id));
     
     return logs.filter(l => {
@@ -958,7 +960,7 @@ const App: React.FC = () => {
       }
       return false;
     });
-  }, [logs, miningResources, filteredUsers, currentUser, isAdminOrNPC]);
+  }, [logs, miningResources, filteredUsers, currentUser, isGlobal]);
 
   const filteredDtcbLogs = useMemo(() => {
     return auditLogs.filter(l => l.confirmationType === '手动确权');
@@ -966,22 +968,22 @@ const App: React.FC = () => {
 
   const filteredTransactions = useMemo(() => {
     if (!currentUser) return [];
-    if (isAdminOrNPC) return transactions;
+    if (isGlobal) return transactions;
     const centerUserIds = new Set(filteredUsers.map(u => u.id));
     return transactions.filter(tx => 
       centerUserIds.has(tx.senderId) || centerUserIds.has(tx.receiverId)
     );
-  }, [transactions, filteredUsers, currentUser, isAdminOrNPC]);
+  }, [transactions, filteredUsers, currentUser, isGlobal]);
 
   const filteredCircuitBreakers = useMemo(() => {
     if (!currentUser) return [];
-    if (isAdminOrNPC) return circuitBreakers;
+    if (isGlobal) return circuitBreakers;
     const centerUserIds = new Set(filteredUsers.map(u => u.id));
     const resourceIds = new Set(filteredResources.map(r => r.id));
     return circuitBreakers.filter(cb => 
       centerUserIds.has(cb.targetId) || resourceIds.has(cb.targetId) || (cb.targetName && currentUser.center && cb.targetName.includes(currentUser.center))
     );
-  }, [circuitBreakers, filteredUsers, filteredResources, currentUser, isAdminOrNPC]);
+  }, [circuitBreakers, filteredUsers, filteredResources, currentUser, isGlobal]);
 
   const onSaveMeetingSample = React.useCallback(async (sample: MeetingSample): Promise<boolean> => {
     try {

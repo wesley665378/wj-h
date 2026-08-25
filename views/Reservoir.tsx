@@ -26,10 +26,13 @@ import {
   BarChart3,
   SlidersHorizontal,
   ArrowUpRight,
-  ArrowDownRight
+  ArrowDownRight,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useCostPrivacy, formatCostDisplay } from '../src/hooks/useCostPrivacy';
 
 interface ReservoirProps {
   logs: ValueCreationLog[];
@@ -419,6 +422,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
   const [endDate, setEndDate] = useState<string>('');
   const [searchUnit, setSearchUnit] = useState<string>('');
   const [sortBy, setSortBy] = useState<'inflow' | 'supplement' | 'name' | 'salary'>('inflow');
+  const { isCostVisible, toggleCostVisible, maskMoney } = useCostPrivacy();
 
   const effectiveMonth = useMemo(() => {
     if (startDate) return startDate.slice(0, 7);
@@ -561,6 +565,19 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
               setEndDate('');
             }}
           />
+          <button
+            type="button"
+            onClick={toggleCostVisible}
+            className={`px-3 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center shadow-sm cursor-pointer border ${
+              isCostVisible 
+                ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100' 
+                : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+            }`}
+            title={isCostVisible ? "点击隐藏成本薪资数据" : "点击显示明文成本薪资数据"}
+          >
+            {isCostVisible ? <EyeOff className="w-4 h-4 mr-1.5" /> : <Eye className="w-4 h-4 mr-1.5 text-slate-400" />}
+            <span>{isCostVisible ? "隐藏薪资" : "显示薪资"}</span>
+          </button>
           <button 
             type="button"
             onClick={handleExport}
@@ -702,7 +719,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
                       {formatMoney(m.incomeProductionPackage)}
                     </td>
                     <td className="px-6 py-4 text-right font-mono font-semibold text-slate-700">
-                      {formatMoney(m.unitSalary)}
+                      {maskMoney(m.unitSalary)}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <span className={`font-mono font-bold ${isDeficit ? 'text-amber-600' : 'text-slate-300'}`}>

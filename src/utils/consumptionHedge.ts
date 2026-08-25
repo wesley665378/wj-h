@@ -98,7 +98,6 @@ export function getLogRefineFactor(log: ValueCreationLog, resource?: MiningResou
     if (tier === 'A') return coeffs.Enterprise;
     if (tier === 'B') return coeffs.Bidding;
     if (tier === 'C') return coeffs.SafetyEval;
-    if (tier === 'D') return coeffs.OccHealth;
     return coeffs.SafetyEval;
   } else {
     const coeffs = isHighRevenueExpert ? TIER_COEFFICIENTS.REVENUE_HIGH : isRevenueSpecialist ? TIER_COEFFICIENTS.REVENUE_MID_INITIAL : TIER_COEFFICIENTS.REVENUE_HIGH;

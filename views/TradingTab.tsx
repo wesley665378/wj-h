@@ -1,3 +1,9 @@
+/**
+ * 【架构边界说明】
+ * 本组件仅作为 InternalTransactions（内部交易）的专用子模块存在，权限完全继承父页面。
+ * 禁止强行提升为 App 顶级路由，禁止在此处单独发起绕过 JWT 鉴权的 fetch 请求。
+ */
+
 import React, { useMemo } from 'react';
 import { InternalTransaction, MiningResource, User, TransactionStatus, TransactionType, ValueCreationLog, RefineCategory, AuditStatus } from '../types';
 import { ProgressBar } from '../src/components/UI';

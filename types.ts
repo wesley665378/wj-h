@@ -288,7 +288,7 @@ export interface ValueCreationLog {
   recordedCollectorId?: string; // 提炼人员（仅为记录，不参与计算）
   category: RefineCategory;
   type: RefineType;
-  costCategory?: 'A' | 'B' | 'C' | 'D'; // 动态消耗计入类别
+  costCategory?: 'A' | 'B' | 'C'; // 动态消耗计入类别
   valueConsumptionMode?: 'B1' | 'B2'; // 产值B类消耗模式
   amount: number; // 积分/资源量
   rawAmount: number; // 原始注入总量（用于动态对冲计算基准）

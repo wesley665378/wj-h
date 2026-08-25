@@ -1,4 +1,5 @@
 import { User, Role, ValueCreationLog, MiningResource, RefineCategory, AuditStatus } from '../../types';
+import { isSystemAdmin } from './accessControl';
 import { TIER_COEFFICIENTS } from '../constants/coefficients';
 import { roundMoney } from './formatMoney';
 import {
@@ -74,10 +75,10 @@ export function calculateT1PlusRevenue(amount: number, isHighExpert: boolean, ti
   return amount * rate * cWeight;
 }
 
-export function calculateT1PlusValue(amount: number, isHighExpert: boolean, tier: 'A' | 'B' | 'C' | 'D', cWeight: number, b2Weight: number) {
+export function calculateT1PlusValue(amount: number, isHighExpert: boolean, tier: 'A' | 'B' | 'C', cWeight: number, b2Weight: number) {
   const coeffs = isHighExpert ? TIER_COEFFICIENTS.VALUE_MANAGER : TIER_COEFFICIENTS.VALUE_CHAN;
-  const rates = { A: coeffs.Enterprise, B: coeffs.Bidding, C: coeffs.SafetyEval, D: coeffs.OccHealth };
-  const rate = rates[tier] || coeffs.OccHealth;
+  const rates = { A: coeffs.Enterprise, B: coeffs.Bidding, C: coeffs.SafetyEval };
+  const rate = rates[tier] || coeffs.SafetyEval;
   // REMOVED: TIER_COEFFICIENTS.BASE_LOSS
   return amount * rate * cWeight * b2Weight;
 }
@@ -118,7 +119,6 @@ export const calculateHistoricalNetValue = (log: ValueCreationLog, resources: Mi
       if (tier === 'A') factor = coeffs.Enterprise;
       else if (tier === 'B') factor = coeffs.Bidding;
       else if (tier === 'C') factor = coeffs.SafetyEval;
-      else if (tier === 'D') factor = coeffs.OccHealth;
       else factor = coeffs.SafetyEval;
     } else {
       const coeffs = isHighRevenueExpert ? TIER_COEFFICIENTS.REVENUE_HIGH : isRevenueSpecialist ? TIER_COEFFICIENTS.REVENUE_MID_INITIAL : TIER_COEFFICIENTS.REVENUE_HIGH;
@@ -270,7 +270,7 @@ export const checkUserPermission = (user: User, menuId: string): boolean => {
   if (!user) return false;
 
   // 1. 系统管理员默认全开菜单
-  const isAdmin = user.role === Role.Admin || user.category === '系统管理员';
+  const isAdmin = isSystemAdmin(user);
   if (isAdmin) return true;
 
   // 2. 仅当 permissions 数组存在且长度 > 0 时，才视为手动自定义配置

@@ -3,6 +3,7 @@ import React from 'react';
 import { Lock, Clock, Activity } from 'lucide-react';
 import { ProjectStatus, MiningResource } from '../../types';
 import { deriveProjectStatus } from '../utils/projectStatus';
+import { formatProjectStatusLabel } from '../utils/statusDisplay';
 
 export const Card: React.FC<{
   children: React.ReactNode;
@@ -65,7 +66,7 @@ export const ProjectStatusBadge: React.FC<{
     return (
       <Badge variant="dark" className={`bg-slate-400 border-slate-300 text-white flex items-center gap-1 normal-case ${className}`}>
         <Lock size={10} />
-        已结案
+        {formatProjectStatusLabel(status)}
       </Badge>
     );
   }
@@ -74,7 +75,7 @@ export const ProjectStatusBadge: React.FC<{
     return (
       <Badge variant="warning" className={`bg-amber-100 text-amber-700 border-amber-200 flex items-center gap-1 normal-case ${className}`}>
         <Clock size={10} />
-        待封存 {remainingDays !== undefined ? `(${remainingDays}天)` : ''}
+        {formatProjectStatusLabel(status)} {remainingDays !== undefined ? `(${remainingDays}天)` : ''}
       </Badge>
     );
   }
@@ -82,7 +83,7 @@ export const ProjectStatusBadge: React.FC<{
   return (
     <Badge variant="info" className={`bg-blue-100 text-blue-700 border-blue-200 flex items-center gap-1 normal-case ${className}`}>
       <Activity size={10} />
-      进行中
+      {formatProjectStatusLabel(status)}
     </Badge>
   );
 };

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence } from "framer-motion";
 import StandardModal from "../src/components/StandardModal";
 import { TIER_COEFFICIENTS } from "../src/constants/coefficients";
 import {

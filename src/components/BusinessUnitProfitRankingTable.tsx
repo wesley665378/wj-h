@@ -5,6 +5,7 @@ import { useCostPrivacy } from '../hooks/useCostPrivacy';
 import { formatMoney } from '../utils/formatMoney';
 import { Card } from './UI';
 import { Trophy, ChevronDown, ChevronUp, Eye, EyeOff, Info } from 'lucide-react';
+import { UI_LABELS } from '../constants/uiLabels';
 
 interface BusinessUnitProfitRankingTableProps {
   businessUnits: string[];
@@ -293,7 +294,7 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
                 {pairedRows.length === 0 && (
                   <tr>
                     <td colSpan={12} className="py-12 text-center text-slate-400 font-bold">
-                      暂无经营单元盈利数据
+                      {UI_LABELS.EMPTY_DEFAULT}
                     </td>
                   </tr>
                 )}

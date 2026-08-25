@@ -17,6 +17,8 @@ import { InfoTip } from './InfoTip';
 import * as XLSX from 'xlsx';
 import { BusinessDateFilter } from './BusinessDateFilter';
 import { isLogInFilter, getLocalMonthString } from '../utils/dateUtils';
+import { formatMoney } from '../utils/formatMoney';
+import { UI_LABELS } from '../constants/uiLabels';
 
 export const normalizeMiningId = (id: string | undefined | null): string => {
   return (id || '').trim().toLowerCase();
@@ -396,7 +398,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
           <div className="p-3.5 bg-amber-50/70 border border-amber-200/80 rounded-2xl">
             <span className="text-[10px] font-bold text-amber-700 block">款初 (合同额)</span>
             <span className="text-base font-black text-amber-900 font-mono mt-0.5 block">
-              {Math.round(initialRev).toLocaleString()}
+              {formatMoney(initialRev)}
             </span>
           </div>
           <div className="p-3.5 bg-amber-100/70 border border-amber-300/80 rounded-2xl">
@@ -408,13 +410,13 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
               />
             </div>
             <span className="text-base font-black text-amber-950 font-mono mt-0.5 block">
-              {Math.round(currentRev).toLocaleString()}
+              {formatMoney(currentRev)}
             </span>
           </div>
           <div className="p-3.5 bg-emerald-50/70 border border-emerald-200/80 rounded-2xl">
             <span className="text-[10px] font-bold text-emerald-700 block">产初 (合同额)</span>
             <span className="text-base font-black text-emerald-900 font-mono mt-0.5 block">
-              {Math.round(initialVal).toLocaleString()}
+              {formatMoney(initialVal)}
             </span>
           </div>
           <div className="p-3.5 bg-emerald-100/70 border border-emerald-300/80 rounded-2xl">
@@ -426,19 +428,19 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
               />
             </div>
             <span className="text-base font-black text-emerald-950 font-mono mt-0.5 block">
-              {Math.round(currentVal).toLocaleString()}
+              {formatMoney(currentVal)}
             </span>
           </div>
           <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
             <span className="text-[10px] font-bold text-slate-500 block">已确权C合计</span>
             <span className="text-base font-black text-slate-800 font-mono mt-0.5 block">
-              {Math.round(totalC).toLocaleString()}
+              {formatMoney(totalC)}
             </span>
           </div>
           <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
             <span className="text-[10px] font-bold text-slate-500 block">已确权B2合计</span>
             <span className="text-base font-black text-slate-800 font-mono mt-0.5 block">
-              {Math.round(totalB2).toLocaleString()}
+              {formatMoney(totalB2)}
             </span>
           </div>
           <div className="p-3.5 bg-indigo-50/70 border border-indigo-200 rounded-2xl col-span-2 sm:col-span-4 lg:col-span-1">
@@ -474,24 +476,24 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
             <div className="p-4 bg-amber-50/40 rounded-2xl border border-amber-100 space-y-2">
               <div className="flex justify-between items-center text-xs font-black text-amber-900">
                 <span>收款轨四格进度</span>
-                <span className="font-mono text-[11px] text-amber-700">容量上限：{Math.round(quadrants.revenue.capacity).toLocaleString()}</span>
+                <span className="font-mono text-[11px] text-amber-700">容量上限：{formatMoney(quadrants.revenue.capacity)}</span>
               </div>
               <div className="grid grid-cols-4 gap-2 text-center text-xs">
                 <div className="p-2 bg-white rounded-xl border border-amber-200 shadow-2xs">
                   <span className="text-[10px] text-amber-600 block font-bold">待确权</span>
-                  <span className="font-mono font-black text-amber-900">{Math.round(quadrants.revenue.pending).toLocaleString()}</span>
+                  <span className="font-mono font-black text-amber-900">{formatMoney(quadrants.revenue.pending)}</span>
                 </div>
                 <div className="p-2 bg-white rounded-xl border border-emerald-200 shadow-2xs">
                   <span className="text-[10px] text-emerald-600 block font-bold">已确权</span>
-                  <span className="font-mono font-black text-emerald-900">{Math.round(quadrants.revenue.confirmed).toLocaleString()}</span>
+                  <span className="font-mono font-black text-emerald-900">{formatMoney(quadrants.revenue.confirmed)}</span>
                 </div>
                 <div className="p-2 bg-white rounded-xl border border-slate-200 shadow-2xs">
                   <span className="text-[10px] text-slate-500 block font-bold">未确权</span>
-                  <span className="font-mono font-black text-slate-700">{Math.round(quadrants.revenue.unconfirmed).toLocaleString()}</span>
+                  <span className="font-mono font-black text-slate-700">{formatMoney(quadrants.revenue.unconfirmed)}</span>
                 </div>
                 <div className="p-2 bg-white rounded-xl border border-blue-200 shadow-2xs">
                   <span className="text-[10px] text-blue-600 block font-bold">入库</span>
-                  <span className="font-mono font-black text-blue-900">{Math.round(quadrants.revenue.mined).toLocaleString()}</span>
+                  <span className="font-mono font-black text-blue-900">{formatMoney(quadrants.revenue.mined)}</span>
                 </div>
               </div>
             </div>
@@ -500,24 +502,24 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
             <div className="p-4 bg-emerald-50/40 rounded-2xl border border-emerald-100 space-y-2">
               <div className="flex justify-between items-center text-xs font-black text-emerald-900">
                 <span>产值轨四格进度</span>
-                <span className="font-mono text-[11px] text-emerald-700">容量上限：{Math.round(quadrants.value.capacity).toLocaleString()}</span>
+                <span className="font-mono text-[11px] text-emerald-700">容量上限：{formatMoney(quadrants.value.capacity)}</span>
               </div>
               <div className="grid grid-cols-4 gap-2 text-center text-xs">
                 <div className="p-2 bg-white rounded-xl border border-amber-200 shadow-2xs">
                   <span className="text-[10px] text-amber-600 block font-bold">待确权</span>
-                  <span className="font-mono font-black text-amber-900">{Math.round(quadrants.value.pending).toLocaleString()}</span>
+                  <span className="font-mono font-black text-amber-900">{formatMoney(quadrants.value.pending)}</span>
                 </div>
                 <div className="p-2 bg-white rounded-xl border border-emerald-200 shadow-2xs">
                   <span className="text-[10px] text-emerald-600 block font-bold">已确权</span>
-                  <span className="font-mono font-black text-emerald-900">{Math.round(quadrants.value.confirmed).toLocaleString()}</span>
+                  <span className="font-mono font-black text-emerald-900">{formatMoney(quadrants.value.confirmed)}</span>
                 </div>
                 <div className="p-2 bg-white rounded-xl border border-slate-200 shadow-2xs">
                   <span className="text-[10px] text-slate-500 block font-bold">未确权</span>
-                  <span className="font-mono font-black text-slate-700">{Math.round(quadrants.value.unconfirmed).toLocaleString()}</span>
+                  <span className="font-mono font-black text-slate-700">{formatMoney(quadrants.value.unconfirmed)}</span>
                 </div>
                 <div className="p-2 bg-white rounded-xl border border-blue-200 shadow-2xs">
                   <span className="text-[10px] text-blue-600 block font-bold">入库</span>
-                  <span className="font-mono font-black text-blue-900">{Math.round(quadrants.value.mined).toLocaleString()}</span>
+                  <span className="font-mono font-black text-blue-900">{formatMoney(quadrants.value.mined)}</span>
                 </div>
               </div>
             </div>
@@ -544,15 +546,15 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
           <div className="flex items-center gap-2 text-xs">
             <div className="px-3 py-1.5 bg-amber-50 rounded-xl border border-amber-200 text-amber-900">
               <span className="text-[10px] text-amber-700 block font-bold">收款包合计</span>
-              <span className="font-mono font-black">{totalRevenuePackage.toLocaleString()}</span>
+              <span className="font-mono font-black">{formatMoney(totalRevenuePackage)}</span>
             </div>
             <div className="px-3 py-1.5 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-900">
               <span className="text-[10px] text-emerald-700 block font-bold">产兑包合计</span>
-              <span className="font-mono font-black">{totalValuePackage.toLocaleString()}</span>
+              <span className="font-mono font-black">{formatMoney(totalValuePackage)}</span>
             </div>
             <div className="px-3 py-1.5 bg-blue-50 rounded-xl border border-blue-200 text-blue-900">
               <span className="text-[10px] text-blue-700 block font-bold">收产包总计</span>
-              <span className="font-mono font-black">{totalCombinedPackage.toLocaleString()}</span>
+              <span className="font-mono font-black">{formatMoney(totalCombinedPackage)}</span>
             </div>
           </div>
         </div>
@@ -578,7 +580,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
               {jzczRows.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="py-8 text-center text-slate-400 font-medium">
-                    暂无符合条件的价值创造流水记录
+                    {UI_LABELS.EMPTY_LIST}
                   </td>
                 </tr>
               ) : (
@@ -615,13 +617,13 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
                         {formatExpertCategoryDisplay(l.recordedCollectorId || l.rankId, managedUsers)}
                       </td>
                       <td className="py-2 px-3 text-right font-mono font-bold text-slate-800">
-                        {rawInj.toLocaleString()}
+                        {formatMoney(rawInj)}
                       </td>
                       <td className="py-2 px-3 text-right font-mono font-bold text-amber-600">
-                        {isRev ? pkgNet.toLocaleString() : '—'}
+                        {isRev ? formatMoney(pkgNet) : '—'}
                       </td>
                       <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">
-                        {!isRev ? pkgNet.toLocaleString() : '—'}
+                        {!isRev ? formatMoney(pkgNet) : '—'}
                       </td>
                       <td className="py-2 px-3 text-right font-mono text-slate-600">
                         {isRev ? `${(cWeightRev * 100).toFixed(2)}%` : `${(cWeightVal * 100).toFixed(2)}%`}
@@ -677,7 +679,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
               {dtcbRows.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="py-8 text-center text-slate-400 font-medium">
-                    暂无本矿关联的动态消耗流水记录
+                    {UI_LABELS.EMPTY_LIST}
                   </td>
                 </tr>
               ) : (
@@ -720,10 +722,10 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
                         {(l as any).businessUnit || (l as any).center || (managedUsers.find(u => u.id === l.recordedCollectorId)?.center) || '—'}
                       </td>
                       <td className="py-2 px-3 text-right font-mono font-bold text-rose-600">
-                        {rawCost.toLocaleString()}
+                        {formatMoney(rawCost)}
                       </td>
                       <td className="py-2 px-3 text-right font-mono font-bold text-slate-800">
-                        {netHedge.toLocaleString()}
+                        {formatMoney(netHedge)}
                       </td>
                       <td className="py-2 px-3 text-right font-mono text-[11px] text-slate-500">
                         {relatedWeight}
@@ -779,7 +781,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
               {nbjyRows.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="py-8 text-center text-slate-400 font-medium">
-                    暂无本矿关联的内部交易流水记录
+                    {UI_LABELS.EMPTY_LIST}
                   </td>
                 </tr>
               ) : (
@@ -811,10 +813,10 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
                         </span>
                       </td>
                       <td className="py-2 px-3 text-right font-mono font-bold text-amber-600">
-                        {revAmt.toLocaleString()}
+                        {formatMoney(revAmt)}
                       </td>
                       <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">
-                        {valAmt.toLocaleString()}
+                        {formatMoney(valAmt)}
                       </td>
                       <td className="py-2 px-3 text-slate-500 max-w-[200px] truncate" title={t.description}>
                         {t.description || '—'}

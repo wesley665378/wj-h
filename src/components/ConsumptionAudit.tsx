@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Check, X, AlertTriangle, ShieldCheck, Landmark, Coins, HelpCircle, RefreshCw } from 'lucide-react';
+import { Check, X, AlertTriangle, ShieldCheck, Landmark, Coins, HelpCircle, RefreshCw, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { formatMoney } from '../utils/formatMoney';
+import { useCostPrivacy } from '../hooks/useCostPrivacy';
 
 /**
  * Backend/API Raw Data Model representation
@@ -238,7 +240,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     type="text"
                     readOnly
                     id="meta-base-points"
-                    value={`${Math.round(formData.basePoints).toLocaleString()}`}
+                    value={formatMoney(formData.basePoints)}
                     className="w-full px-3 py-2 bg-slate-100/80 border border-slate-200 text-slate-700 font-mono tabular-nums text-xs font-black outline-none"
                   />
                 </div>
@@ -251,7 +253,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     type="text"
                     readOnly
                     id="meta-calc-val"
-                    value={Math.round(targetValue).toLocaleString()}
+                    value={formatMoney(targetValue)}
                     className="w-full px-3 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 font-mono tabular-nums text-xs font-black outline-none"
                   />
                 </div>
@@ -279,7 +281,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     type="text"
                     readOnly
                     id="input-field-a"
-                    value={formData.aValue > 0 ? Math.round(formData.aValue).toLocaleString() : '—'}
+                    value={formData.aValue > 0 ? formatMoney(formData.aValue) : '—'}
                     className={`w-full p-2.5 rounded-xl border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
                       formData.type === 'A'
                         ? 'bg-emerald-50 border-emerald-200 text-slate-800 font-black'
@@ -300,7 +302,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     type="text"
                     readOnly
                     id="input-field-b1"
-                    value={formData.b1Value > 0 ? Math.round(formData.b1Value).toLocaleString() : '—'}
+                    value={formData.b1Value > 0 ? formatMoney(formData.b1Value) : '—'}
                     className={`w-full p-2.5 rounded-xl border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
                       formData.type === 'B1'
                         ? 'bg-emerald-50 border-emerald-200 text-slate-800 font-black'
@@ -321,7 +323,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     type="text"
                     readOnly
                     id="input-field-b2"
-                    value={formData.b2Value > 0 ? Math.round(formData.b2Value).toLocaleString() : '—'}
+                    value={formData.b2Value > 0 ? formatMoney(formData.b2Value) : '—'}
                     className={`w-full p-2.5 rounded-xl border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
                       formData.type === 'B2'
                         ? 'bg-emerald-50 border-emerald-200 text-slate-800 font-black'
@@ -342,7 +344,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     type="text"
                     readOnly
                     id="input-field-c"
-                    value={formData.cValue > 0 ? Math.round(formData.cValue).toLocaleString() : '—'}
+                    value={formData.cValue > 0 ? formatMoney(formData.cValue) : '—'}
                     className={`w-full p-2.5 rounded-xl border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
                       formData.type === 'C'
                         ? 'bg-emerald-50 border-emerald-200 text-slate-800 font-black'
@@ -453,7 +455,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                 <div className="space-y-0.5">
                   <span className="text-slate-500 block">实时测算大区总额</span>
                   <span className="font-bold text-slate-900 tabular-nums">
-                    {Math.round(formData.verifiedAmount).toLocaleString()} + [纠偏 {Math.round(formData.adjustmentValue).toLocaleString()}] = {Math.round(auditSum).toLocaleString()}
+                    {formatMoney(formData.verifiedAmount)} + [纠偏 {formatMoney(formData.adjustmentValue)}] = {formatMoney(auditSum)}
                   </span>
                 </div>
                 <div className="text-right space-y-0.5">
@@ -461,7 +463,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                   <span className={`font-bold tabular-nums ${isAuditBalanced ? 'text-emerald-600' : 'text-rose-600'}`}>
                     {isAuditBalanced 
                       ? '✓ 契合平账 (0)' 
-                      : `${deviation > 0 ? '+' : ''}${Math.round(deviation).toLocaleString()}`
+                      : `${deviation > 0 ? '+' : ''}${formatMoney(deviation)}`
                     }
                   </span>
                 </div>
@@ -507,7 +509,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
               
               {!isAuditBalanced && (
                 <p className="text-[10px] text-center text-rose-500 font-bold mt-2">
-                  提示：当前核算值 ({Math.round(auditSum).toLocaleString()}) 与系统原始基准 ({Math.round(targetValue).toLocaleString()}) 不吻合，请调节对齐。
+                  提示：当前核算值 ({formatMoney(auditSum)}) 与系统原始基准 ({formatMoney(targetValue)}) 不吻合，请调节对齐。
                 </p>
               )}
               {formData.enableAdjustment && !isNotesValid && (
