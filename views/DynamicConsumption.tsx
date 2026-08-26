@@ -11,6 +11,7 @@ import { UI_LABELS } from '../src/constants/uiLabels';
 import { TERMINOLOGY } from '../src/constants/terminology';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
 import { isProjectWritable, deriveProjectStatus } from '../src/utils/projectStatus';
+import { isNonEffectiveHoursEffective } from '../src/utils/employmentStatus';
 import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { calculateConsumptionMirrorFields } from '../src/utils/business';
@@ -461,6 +462,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
         '提报时间': formatSubmissionTime(log.timestamp),
         '矿山编号': log.miningId,
         '采集主体': formatCollectorDisplay(log.recordedCollectorId, users),
+        '非效对冲': (log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? Math.round(log.dynamicCost || log.amount || 0) : 0,
         'A': log.costCategory === 'A' ? Math.round(log.dynamicCost) : 0,
         'C': log.costCategory === 'C' ? Math.round(log.dynamicCost) : 0,
         'C权': cWeightValue,
@@ -953,6 +955,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                 <th className="px-4 py-6 text-center">{TERMINOLOGY.BUSINESS_UNIT}</th>
                 <th className="px-4 py-6 text-center">{TERMINOLOGY.MINING_RESOURCE_ID}</th>
                 <th className="px-4 py-6 font-bold text-slate-800">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
+                <th className="px-3 py-6 text-right text-indigo-600">非效对冲</th>
                 <th className="px-3 py-6 text-right text-blue-600">A</th>
                 <th className="px-3 py-6 text-right text-amber-600">C积分</th>
                 <th className="px-4 py-6 text-right text-amber-700">C权</th>
@@ -996,6 +999,9 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                         <span className="text-xs font-black text-slate-900">{users.find(u => u.id === log.recordedCollectorId)?.name || log.recordedCollectorId}</span>
                         <span className="text-[8px] px-2 py-0.5 rounded font-black bg-slate-100 text-slate-500">{log.type}</span>
                       </div>
+                    </td>
+                    <td className="px-3 py-6 text-right font-mono font-bold text-indigo-600">
+                      {(log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? maskMoney(Math.round(log.dynamicCost || log.amount || 0)) : '-'}
                     </td>
                     <td className="px-3 py-6 text-right font-mono font-bold text-blue-600">
                       {log.costCategory === 'A' ? maskMoney(Math.round(log.dynamicCost)) : '-'}
@@ -1042,7 +1048,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
               })}
               {consumptionLogs.length === 0 && (
                 <tr>
-                   <td colSpan={15} className="py-20 text-center opacity-20 text-xs font-black uppercase tracking-widest">
+                   <td colSpan={17} className="py-20 text-center opacity-20 text-xs font-black uppercase tracking-widest">
                       当前终端无消耗记录
                    </td>
                 </tr>

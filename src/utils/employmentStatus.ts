@@ -74,7 +74,10 @@ export function getResignHedgeFormulaDesc(user: User, resignDate: string): strin
 }
 
 export function isNonEffectiveHoursEffective(log: ValueCreationLog): boolean {
-  return log.type === RefineType.NonEffectiveHours && (log.status === AuditStatus.Confirmed || log.status === AuditStatus.Approved);
+  if (!log) return false;
+  const isTypeMatch = log.type === RefineType.NonEffectiveHours || (log.type as any) === '非有效工时对冲' || (log.type as any) === 'NonEffectiveHours';
+  const isStatusMatch = log.status === AuditStatus.Confirmed || log.status === AuditStatus.Approved || (log.status as any) === '已确权' || (log.status as any) === '入库' || (log.status as any) === 'Confirmed' || (log.status as any) === 'Approved';
+  return Boolean(isTypeMatch && isStatusMatch);
 }
 
 /**

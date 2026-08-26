@@ -277,61 +277,75 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
         };
       });
     } else {
-      // Admin / npcxie 可多单元：根据 users 出现过的 center 建卡
+      // Admin / npcxie 可多单元：按单段 center 建卡，不要把「A,B」整串当一个卡名
       users.forEach(u => {
-        const centerName = u.center || '未分配';
-        if (!centers[centerName]) {
-          centers[centerName] = {
-            name: centerName,
-            value: 0,
-            revenueLimit: 0,
-            valueLimit: 0,
-            revenue2Percent: 0,
-            value5Percent: 0
-          };
-        }
+        const uCenterList = parseCenterList(u.center);
+        const listToCreate = uCenterList.length > 0 ? uCenterList : ['未分配'];
+        listToCreate.forEach(centerName => {
+          if (!centers[centerName]) {
+            centers[centerName] = {
+              name: centerName,
+              value: 0,
+              revenueLimit: 0,
+              valueLimit: 0,
+              revenue2Percent: 0,
+              value5Percent: 0
+            };
+          }
+        });
       });
     }
 
     // 1. 基础工资包 (按月累加)
     users
-      .filter(u => isGlobalReaderUser || (u.center && uniqueCentersSet.has(u.center.toUpperCase())))
+      .filter(u => u.category !== 'VP')
       .forEach(u => {
-        if (u.category === 'VP') return;
-        
-        const centerName = u.center || '未分配';
-        if (centers[centerName]) {
-          monthsInPeriod.forEach(m => {
-            if (isSalaryActiveForMonth(u, m)) {
-              centers[centerName].value += getUserSalaryByMonth(u, m);
-            }
-          });
-        }
+        const uCenterList = parseCenterList(u.center);
+        // 交集判断，禁止整串 has
+        const matchedCenters = isGlobalReaderUser
+          ? (uCenterList.length > 0 ? uCenterList : ['未分配'])
+          : uCenterList.filter(c => uniqueCentersSet.has(c.toUpperCase()));
+
+        if (matchedCenters.length === 0) return;
+
+        monthsInPeriod.forEach(m => {
+          if (isSalaryActiveForMonth(u, m)) {
+            const sal = getUserSalaryByMonth(u, m);
+            matchedCenters.forEach(centerName => {
+              if (centers[centerName]) {
+                centers[centerName].value += sal;
+              }
+            });
+          }
+        });
       });
 
     // 2. 扣除已核准的非有效工时对冲 (冲抵刚性工资包)
     const approvedDeductions = logs.filter(l => 
       isNonEffectiveHoursEffective(l) &&
       l.timestamp >= periodRange.start &&
-      l.timestamp < periodRange.end &&
-      (isGlobalReaderUser || (() => {
-        const recordedCollector = users.find(u => u.id === l.recordedCollectorId);
-        return recordedCollector?.center && uniqueCentersSet.has(recordedCollector.center.toUpperCase());
-      })())
+      l.timestamp < periodRange.end
     );
 
     approvedDeductions.forEach(l => {
-      const collector = users.find(u => u.id === l.recordedCollectorId);
+      const collector = users.find(u => u.id === l.recordedCollectorId || u.userId === l.recordedCollectorId);
       if (collector?.category === 'VP') return;
       
-      const centerName = collector?.center || '未分配';
-      if (!isGlobalReaderUser && !uniqueCentersSet.has(centerName.toUpperCase())) return;
+      const collectorCenterList = parseCenterList(collector?.center);
+      // 交集判断，禁止整串 has
+      const matchedCenters = isGlobalReaderUser
+        ? (collectorCenterList.length > 0 ? collectorCenterList : ['未分配'])
+        : collectorCenterList.filter(c => uniqueCentersSet.has(c.toUpperCase()));
 
-      if (!centers[centerName]) {
-        centers[centerName] = { name: centerName, value: 0, revenueLimit: 0, valueLimit: 0, revenue2Percent: 0, value5Percent: 0 };
-      }
-      
-      centers[centerName].value += calculateHistoricalNetValue(l, resources, users);
+      if (matchedCenters.length === 0) return;
+
+      const deduction = Number(l.dynamicCost) || Math.abs(Number(l.netValue)) || 0;
+      matchedCenters.forEach(centerName => {
+        if (!centers[centerName]) {
+          centers[centerName] = { name: centerName, value: 0, revenueLimit: 0, valueLimit: 0, revenue2Percent: 0, value5Percent: 0 };
+        }
+        centers[centerName].value -= deduction;
+      });
     });
 
     // 3. Revenue & Value Limits & Special Pools (Period-based)
@@ -342,7 +356,8 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       .forEach(r => {
         let centerName = '';
         if (isGlobalReaderUser) {
-          centerName = r.assignedTo || '未分配';
+          const rAssigned = parseCenterList(r.assignedTo);
+          centerName = rAssigned.length > 0 ? rAssigned[0] : '未分配';
         } else {
           // Find which center from uniqueCentersSet is matched by the resource
           const assignedList = [r.assignedTo, r.assignedToRevenue, r.assignedToValue]
@@ -438,12 +453,14 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
           if (l.costCategory === 'B' && l.valueConsumptionMode === 'B1') b1Costs += l.dynamicCost;
           if (l.costCategory === 'B' && l.valueConsumptionMode === 'B2') b2Costs += l.dynamicCost;
           if (l.costCategory === 'C') cCosts += Math.abs(netValue);
+        }
 
-          if (isNonEffectiveHoursEffective(l)) {
-            const collector = userMap.get(l.recordedCollectorId || '');
-            if (collector?.category !== 'VP') {
-              totalRigidDeduction += netValue;
-            }
+        // 非有效工时对冲：仅 type === 非有效工时对冲 且状态为 已确权/入库 才扣
+        if (isNonEffectiveHoursEffective(l)) {
+          const collector = userMap.get(l.recordedCollectorId || '');
+          if (collector?.category !== 'VP') {
+            const deduction = Number(l.dynamicCost) || Math.abs(Number(l.netValue)) || 0;
+            totalRigidDeduction -= deduction;
           }
         }
 
@@ -528,7 +545,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
         .filter(u => u.category !== 'VP' && isSalaryActiveForMonth(u, m))
         .reduce((acc, u) => acc + getUserSalaryByMonth(u, m), 0);
     });
-    const rigidSalaryPackage = totalRigidExpenses;
+    const rigidSalaryPackage = totalRigidExpenses + totalRigidDeduction;
 
     // 3. 运营直接损耗 (operatingLoss) - 包含 A, B1, B2, C(收集 C 的 dynamicCost) 且 D 类
     // 收集 Approved 状态下 C 类的 dynamicCost 累加
@@ -570,8 +587,8 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     platformCoordinationPool = revenueStored * 0.20;
 
     // 6. 最终分红池结余（纯业务盈余）公式
-    const fhctzCost = totalIncomeWater < totalRigidExpenses ? (totalRigidExpenses - totalIncomeWater) : 0;
-    const dividendPoolRaw = Math.max(0, totalStoredWater - totalRigidExpenses - operatingLoss - totalBonusPool - platformCoordinationPool);
+    const fhctzCost = totalIncomeWater < rigidSalaryPackage ? (rigidSalaryPackage - totalIncomeWater) : 0;
+    const dividendPoolRaw = Math.max(0, totalStoredWater - rigidSalaryPackage - operatingLoss - totalBonusPool - platformCoordinationPool);
     const dividendPool = Math.max(0, dividendPoolRaw - fhctzCost);
     const reservoirInflow = totalStoredWater;
 
@@ -684,7 +701,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
   const displayRevenueWater = isViewingSample && currentMeetingSample ? currentMeetingSample.kpis.totalRevenuePackage : waterMetrics.revenueWater;
   const displayValueWater = isViewingSample && currentMeetingSample ? currentMeetingSample.kpis.totalValuePackage : waterMetrics.valueWater;
   const displayDividendPool = isViewingSample && currentMeetingSample ? (currentMeetingSample.kpis.dividendPool ?? waterMetrics.dividendPool) : waterMetrics.dividendPool;
-  const displayTotalRigidExpenses = isViewingSample && currentMeetingSample ? (currentMeetingSample.kpis.totalRigidExpenses ?? waterMetrics.totalRigidExpenses) : waterMetrics.totalRigidExpenses;
+  const displayTotalRigidExpenses = isViewingSample && currentMeetingSample ? (currentMeetingSample.kpis.rigidSalaryPackage ?? currentMeetingSample.kpis.totalRigidExpenses ?? waterMetrics.rigidSalaryPackage) : waterMetrics.rigidSalaryPackage;
   const displayOperatingLoss = isViewingSample && currentMeetingSample ? (currentMeetingSample.kpis.operatingLoss ?? waterMetrics.operatingLoss) : waterMetrics.operatingLoss;
   const displayTotalBonusPool = isViewingSample && currentMeetingSample ? (currentMeetingSample.kpis.totalBonusPool ?? waterMetrics.totalBonusPool) : waterMetrics.totalBonusPool;
   const displayPlatformCoordinationPool = isViewingSample && currentMeetingSample ? (currentMeetingSample.kpis.platformCoordinationPool ?? waterMetrics.platformCoordinationPool) : waterMetrics.platformCoordinationPool;
@@ -867,7 +884,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
   const funnelData = [
     { name: '收产包', value: waterMetrics.incomeWaterPool, color: '#A855F7', icon: '🌊', precision: 2 },
-    { name: '刚性池 (Rigid)', value: waterMetrics.totalRigidExpenses, color: '#1E293B', icon: '⚡', precision: 2 },
+    { name: '刚性池 (Rigid)', value: waterMetrics.rigidSalaryPackage, color: '#1E293B', icon: '⚡', precision: 2 },
     { name: '分红池 (Dividend Pool)', value: waterMetrics.dividendPool, color: '#10B981', icon: '💰', precision: 2 },
     { name: '统筹池 (Coordination)', value: waterMetrics.platformCoordinationPool, color: '#3B82F6', icon: '🛡️', precision: 2 },
   ];
@@ -1837,7 +1854,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
                           {resource.types.map(t => formatRefineTypeLabel(t)).join(' / ')}
                         </p>
-                        <p className="text-[9px] font-medium text-slate-400 mt-0.5">资源状态：{resource.status}</p>
+                        <p className="text-[9px] font-medium text-slate-400 mt-0.5">资源状态：{projectStatusLabel}</p>
                       </div>
                       <span className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border ${getProjectStatusBadgeClass(projectStatusInfo.status)}`}>
                         {projectStatusLabel}
@@ -1952,7 +1969,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                           <div className="flex flex-col">
                             <span className="text-sm font-black text-slate-900">{resource.id}</span>
                             <span className="text-[9px] font-bold text-slate-400">{formatRefineTypeLabel(resource.types[0])}</span>
-                            <span className="text-[8px] font-medium text-slate-400 mt-0.5">资源状态：{resource.status}</span>
+                            <span className="text-[8px] font-medium text-slate-400 mt-0.5">资源状态：{projectStatusLabel}</span>
                           </div>
                         </td>
                         <td className="px-6 py-4">

@@ -457,7 +457,7 @@ const App: React.FC = () => {
     verifiedAmount?: number,
     auditNotes?: string,
   ) => {
-    const oldLog = logs.find(l => l.id === logId);
+    const oldLog = logs.find(l => l && l.id === logId);
     if (!oldLog) return;
 
     // 1. 按钮禁用/连点保护
@@ -466,48 +466,63 @@ const App: React.FC = () => {
     try {
       // 2. 调用统一接口层确权
       const extras = verifiedAmount != null || auditNotes ? { verifiedAmount, auditNotes } : undefined;
-      const { log, resource, snapshot, linkedLogs = [], recalibratedLogs = [] } = await putAuditLog(logId, status, extras);
+      const res = await putAuditLog(logId, status, extras);
+      if (!res) {
+        throw new Error('确权服务未返回有效数据');
+      }
+      const { log: serverLog, resource, snapshot, linkedLogs = [], recalibratedLogs = [] } = res;
+      const targetLog = serverLog ? { ...oldLog, ...serverLog } : { ...oldLog, status, confirmedAt: Date.now() };
 
       // 3. 更新界面数据 (确权响应驱动，服务端权威合并)
       setLogs(prevLogs => {
-        let updatedLogs = prevLogs.map(l => l.id === logId ? log : l);
+        let updatedLogs = prevLogs.map(l => (l && l.id === logId) ? targetLog : l).filter(Boolean);
 
         // 合并服务端联动确权产出的关联日志
-        if (linkedLogs && linkedLogs.length > 0) {
-          const linkedMap = new Map(linkedLogs.map(l => [l.id, l]));
-          updatedLogs = updatedLogs.map(l => linkedMap.has(l.id) ? linkedMap.get(l.id)! : l);
+        if (linkedLogs && Array.isArray(linkedLogs) && linkedLogs.length > 0) {
+          const validLinked = linkedLogs.filter(Boolean);
+          const linkedMap = new Map(validLinked.map(l => [l.id, l]));
+          updatedLogs = updatedLogs.map(l => (l && linkedMap.has(l.id)) ? { ...l, ...linkedMap.get(l.id)! } : l);
           const existingIds = new Set(updatedLogs.map(l => l.id));
-          for (const ll of linkedLogs) {
-            if (!existingIds.has(ll.id)) {
+          for (const ll of validLinked) {
+            if (ll && ll.id && !existingIds.has(ll.id)) {
               updatedLogs.push(ll);
+              existingIds.add(ll.id);
             }
           }
         }
 
         // 合并服务端重算产出的对冲日志
-        if (recalibratedLogs && recalibratedLogs.length > 0) {
-          const recalMap = new Map(recalibratedLogs.map(l => [l.id, l]));
-          updatedLogs = updatedLogs.map(l => recalMap.has(l.id) ? recalMap.get(l.id)! : l);
-        } else {
+        if (recalibratedLogs && Array.isArray(recalibratedLogs) && recalibratedLogs.length > 0) {
+          const validRecal = recalibratedLogs.filter(Boolean);
+          const recalMap = new Map(validRecal.map(l => [l.id, l]));
+          updatedLogs = updatedLogs.map(l => (l && recalMap.has(l.id)) ? { ...l, ...recalMap.get(l.id)! } : l);
+        } else if (targetLog && targetLog.miningId && targetLog.miningId !== 'SYSTEM_DEDUCTION' && targetLog.miningId !== '统筹池') {
           // 前端对冲补算: 使用 applyConsumptionHedgeToLogs 传入完整的 jzcz 和 dtcb
-          const currentResources = [...miningResources.map(r => r.id === resource.id ? resource : r)];
-          const dtcbLogs = updatedLogs.filter(l => l.confirmationType === '手动确权');
-          const jzczLogs = updatedLogs.filter(l => l.confirmationType !== '手动确权');
+          const currentResources = [...miningResources.map(r => (resource && r && r.id === resource.id) ? resource : r)];
+          const dtcbLogs = updatedLogs.filter(l => l && l.confirmationType === '手动确权');
+          const jzczLogs = updatedLogs.filter(l => l && l.confirmationType !== '手动确权');
           const reHedgedJzcz = applyConsumptionHedgeToLogs(
-            log.miningId, 
+            targetLog.miningId, 
             jzczLogs, 
             dtcbLogs, 
             currentResources, 
             managedUsers
           );
-          const reHedgedMap = new Map(reHedgedJzcz.map(l => [l.id, l]));
-          updatedLogs = updatedLogs.map(l => reHedgedMap.has(l.id) ? reHedgedMap.get(l.id)! : l);
+          if (reHedgedJzcz && Array.isArray(reHedgedJzcz)) {
+            const reHedgedMap = new Map(reHedgedJzcz.filter(Boolean).map(l => [l.id, l]));
+            updatedLogs = updatedLogs.map(l => (l && reHedgedMap.has(l.id)) ? { ...l, ...reHedgedMap.get(l.id)! } : l);
+          }
         }
 
-        return updatedLogs;
+        return updatedLogs.filter(Boolean);
       });
-      setMiningResources(prevResources => prevResources.map(r => r.id === resource.id ? resource : r));
-      setQuotaSnapshots(prev => ({ ...prev, [resource.id]: snapshot }));
+
+      if (resource && resource.id) {
+        setMiningResources(prevResources => prevResources.map(r => (r && r.id === resource.id) ? resource : r));
+        if (snapshot) {
+          setQuotaSnapshots(prev => ({ ...prev, [resource.id]: snapshot }));
+        }
+      }
 
       addSystemLog('价值确权', `将流水 ${logId} 的状态更新为 ${status} (后端执行${linkedLogs && linkedLogs.length > 0 ? `，联动确权 ${linkedLogs.length} 条记录` : ''})`);
       toast.success('确权成功');
@@ -976,7 +991,7 @@ const App: React.FC = () => {
     if (!currentUser) return {} as any;
     return {
       kanban: { 
-        logs: filteredLogs, 
+        logs: auditLogs, 
         resources: filteredResources, 
         users: filteredUsers, 
         currentUser, 

@@ -395,6 +395,7 @@ const Auditing: React.FC<AuditingProps> = ({
           '矿山编号': log.miningId,
           '采集主体': users.find(u => u.id === log.recordedCollectorId)?.name || log.recordedCollectorId,
           '经营单元': users.find(u => u.id === log.rankId)?.center || "未分配",
+          '非效对冲': (log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? (log.dynamicCost || log.amount || 0) : '-',
           'A': log.costCategory === 'A' ? log.dynamicCost : '-',
           'C积分': log.costCategory === 'C' ? log.dynamicCost : '-',
           'C权': cWeightValue,
@@ -953,6 +954,7 @@ const Auditing: React.FC<AuditingProps> = ({
                     <th className="px-4 py-6">提炼类型</th>
                     <th className="px-4 py-6 text-center">{TERMINOLOGY.BUSINESS_UNIT}</th>
                     <th className="px-4 py-6 font-bold text-slate-800">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
+                    <th className="px-3 py-6 text-right text-indigo-600">非效对冲</th>
                     <th className="px-3 py-6 text-right text-blue-600">A</th>
                     <th className="px-3 py-6 text-right text-amber-600">C积分</th>
                     <th className="px-4 py-6 text-right text-amber-700 font-extrabold bg-amber-50/20">C权</th>
@@ -988,6 +990,9 @@ const Auditing: React.FC<AuditingProps> = ({
                             </span>
                         </td>
                         <td className="px-4 py-6 font-bold text-slate-900 text-xs">{collectorDisplay}</td>
+                        <td className="px-3 py-6 text-right font-mono font-bold text-indigo-600">
+                          {(log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? maskMoney(Math.round(log.dynamicCost || log.amount || 0)) : '-'}
+                        </td>
                         <td className="px-3 py-6 text-right font-mono font-bold text-blue-600">
                           {log.costCategory === 'A' ? maskMoney(Math.round(log.dynamicCost)) : '-'}
                         </td>
@@ -1053,7 +1058,7 @@ const Auditing: React.FC<AuditingProps> = ({
                   })}
                   {(activeTab === "history" ? historyTasks.length : consumptionTasks.length) === 0 && (
                     <tr>
-                      <td colSpan={activeTab === "consumption" ? 17 : 16} className="py-20 text-center opacity-20 text-xs font-black uppercase tracking-widest">
+                      <td colSpan={activeTab === "consumption" ? 18 : 17} className="py-20 text-center opacity-20 text-xs font-black uppercase tracking-widest">
                         当前结算周期内无任何{activeTab === "consumption" ? "消耗确权任务" : "成本审计记录"}
                       </td>
                     </tr>

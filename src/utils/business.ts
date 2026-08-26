@@ -85,24 +85,24 @@ export function calculateT1PlusValue(amount: number, isHighExpert: boolean, tier
 
 export const calculateHistoricalNetValue = (log: ValueCreationLog, resources: MiningResource[], managedUsers: User[]) => {
   if (!log) return 0;
-  const resource = resources.find(r => r && r.id === log.miningId);
-  const collector = managedUsers.find(u => u && u.id === log.recordedCollectorId);
+  const resource = (resources || []).find(r => r && r.id === log.miningId);
+  const collector = (managedUsers || []).find(u => u && (u.id === log.recordedCollectorId || u.userId === log.recordedCollectorId));
   
   if (!collector) return log.netValue || 0;
 
-  const isHighValueExpert = (collector.category || '').includes('高产专') || (collector.secondaryRoles as string[] || []).includes('高产专');
-  const isHighRevenueExpert = (collector.category || '').includes('高款专') || (collector.secondaryRoles as string[] || []).includes('高款专');
-  const isRevenueSpecialist = (collector.category || '').includes('款专') || (collector.secondaryRoles as string[] || []).includes('款专');
+  const isHighValueExpert = (collector.category || '').includes('高产专') || ((collector.secondaryRoles as string[]) || []).includes('高产专');
+  const isHighRevenueExpert = (collector.category || '').includes('高款专') || ((collector.secondaryRoles as string[]) || []).includes('高款专');
+  const isRevenueSpecialist = (collector.category || '').includes('款专') || ((collector.secondaryRoles as string[]) || []).includes('款专');
 
   let factor = 0;
   if (resource) {
-    if (log.category === RefineCategory.Value) {
+    if (log.category === RefineCategory.Value || (log.category as string) === 'Value' || (log.category as string) === '产值') {
       if (resource.refineTypeFactors?.[log.type]?.customValueFactor !== undefined) {
         factor = resource.refineTypeFactors[log.type]!.customValueFactor!;
       } else if (resource.customValueFactor !== undefined) {
         factor = resource.customValueFactor;
       }
-    } else if (log.category === RefineCategory.Revenue) {
+    } else if (log.category === RefineCategory.Revenue || (log.category as string) === 'Revenue' || (log.category as string) === '收款') {
       if (resource.refineTypeFactors?.[log.type]?.customRevenueFactor !== undefined) {
         factor = resource.refineTypeFactors[log.type]!.customRevenueFactor!;
       } else if (resource.customRevenueFactor !== undefined) {
@@ -113,7 +113,7 @@ export const calculateHistoricalNetValue = (log: ValueCreationLog, resources: Mi
 
   if (factor === 0) {
     const tier = log.costCategory || 'C';
-    if (log.category === RefineCategory.Value) {
+    if (log.category === RefineCategory.Value || (log.category as string) === 'Value' || (log.category as string) === '产值') {
       // Use TIER_COEFFICIENTS here
       const coeffs = isHighValueExpert ? TIER_COEFFICIENTS.VALUE_MANAGER : TIER_COEFFICIENTS.VALUE_CHAN;
       if (tier === 'A') factor = coeffs.Enterprise;
@@ -130,8 +130,8 @@ export const calculateHistoricalNetValue = (log: ValueCreationLog, resources: Mi
   }
 
   const weight = log.cClassRatio || 1;
-  const b2Weight = log.category === RefineCategory.Value ? (log.b2ClassRatio || 1) : 1;
-  const baseAmount = log.rawAmount || log.amount; 
+  const b2Weight = (log.category === RefineCategory.Value || (log.category as string) === 'Value' || (log.category as string) === '产值') ? (log.b2ClassRatio || 1) : 1;
+  const baseAmount = Number(log.rawAmount !== undefined && log.rawAmount !== null ? log.rawAmount : log.amount) || 0; 
   return baseAmount * weight * b2Weight * factor;
 };
 
@@ -165,7 +165,17 @@ export const getPurityInfo = (revenue: number, value: number, pendingValue: numb
 };
 
 export const calculateConsumptionMirrorFields = (log: ValueCreationLog, resources: MiningResource[], allLogs: ValueCreationLog[]) => {
-  const res = resources.find(r => r.id === log.miningId);
+  if (!log) {
+    return {
+      cWeightValue: '1.0000',
+      b2WeightValue: '-',
+      revLimitStr: '-',
+      valLimitCStr: '-',
+      valLimitB2Str: '-'
+    };
+  }
+
+  const res = (resources || []).find(r => r && r.id === log.miningId);
   if (!res) {
     return {
       cWeightValue: '1.0000',
@@ -176,12 +186,12 @@ export const calculateConsumptionMirrorFields = (log: ValueCreationLog, resource
     };
   }
   
-  const hedgeInfo = calculateHedgeCapacitiesAndWeights(res, allLogs);
+  const hedgeInfo = calculateHedgeCapacitiesAndWeights(res, allLogs || []);
   const cw = hedgeInfo.cWeightRev;
   const bw = hedgeInfo.b2Weight;
 
   const cWeightValue = cw < 1 ? cw.toFixed(4) : '1.0000';
-  const b2WeightValue = log.category === RefineCategory.Revenue ? '-' : (bw < 1 ? bw.toFixed(4) : '1.0000');
+  const b2WeightValue = (log.category === RefineCategory.Revenue || (log.category as string) === 'Revenue' || (log.category as string) === '收款') ? '-' : (bw < 1 ? bw.toFixed(4) : '1.0000');
 
   const revLimitStr = `${Math.round(hedgeInfo.revInitial).toLocaleString()} / ${Math.round(hedgeInfo.revCurrent).toLocaleString()}`;
   const valLimitCStr = `${Math.round(hedgeInfo.valInitial).toLocaleString()} / ${Math.round(hedgeInfo.valCurrent).toLocaleString()}`;

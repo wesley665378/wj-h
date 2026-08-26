@@ -565,12 +565,13 @@ async function startServer() {
     }
   };
 
-  async function getResourceWithSnapshot(db: any, miningId: string) {
+  async function getResourceWithSnapshot(db: any, miningId?: string) {
+    const targetMiningId = miningId || (MOCK_RESOURCES_DB.length > 0 ? MOCK_RESOURCES_DB[0].id : 'KS001');
     // 1. Fetch resource from DB or memory
     let resource: any = null;
-    if (db) {
+    if (db && miningId && miningId !== 'SYSTEM_DEDUCTION' && miningId !== '统筹池') {
       try {
-        const [rows]: any = await db.execute('SELECT * FROM mining_resources WHERE id = ?', [miningId]);
+        const [rows]: any = await db.execute('SELECT * FROM mining_resources WHERE id = ?', [targetMiningId]);
         if (rows && rows.length > 0) {
           resource = { ...rows[0] };
         }
@@ -580,13 +581,13 @@ async function startServer() {
     }
 
     if (!resource) {
-      resource = MOCK_RESOURCES_DB.find(r => r.id === miningId);
+      resource = MOCK_RESOURCES_DB.find(r => r.id === targetMiningId) || MOCK_RESOURCES_DB[0];
     }
 
     if (!resource) {
       // Return empty fallback or create KS001 defaults
       resource = { 
-        id: miningId, 
+        id: targetMiningId, 
         initialRevenueCapacity: 9330000,
         initialValueCapacity: 9330000,
         valueCapacity: 9330000, 
@@ -754,7 +755,8 @@ async function startServer() {
    * 2. 可转换额度 = min(待转换产值, max(0, 已确权收款 - 已确权产值))
    * 3. 按时间戳升序对日志进行确权转换，如果单条超出剩余额度则进行拆单，并将转换后的日志写入数据库/内存，返回变更的 linkedLogs
    */
-  async function applyTimberLinkage(db: any, miningId: string): Promise<any[]> {
+  async function applyTimberLinkage(db: any, miningId?: string): Promise<any[]> {
+    if (!miningId || miningId === 'SYSTEM_DEDUCTION' || miningId === '统筹池') return [];
     let logs: any[] = [];
     if (db) {
       try {
@@ -894,7 +896,8 @@ async function startServer() {
    * 服务端 B2/C 动态对冲权重重算 (recalibrateMiningLogsServer)
    * 确保 B2/C 确权后 amount/netValue 权重重算以服务端为准
    */
-  async function recalibrateMiningLogsServer(db: any, miningId: string): Promise<any[]> {
+  async function recalibrateMiningLogsServer(db: any, miningId?: string): Promise<any[]> {
+    if (!miningId || miningId === 'SYSTEM_DEDUCTION' || miningId === '统筹池') return [];
     let logs: any[] = [];
     let resource: any = null;
 
@@ -1013,11 +1016,17 @@ async function startServer() {
       
       let log: any = null;
       if (db) {
-        const [rows]: any = await db.execute('SELECT * FROM logs WHERE id = ?', [logId]);
-        if (rows && rows.length > 0) {
-          log = { ...rows[0] };
+        try {
+          const [rows]: any = await db.execute('SELECT * FROM logs WHERE id = ?', [logId]);
+          if (rows && rows.length > 0) {
+            log = { ...rows[0] };
+          }
+        } catch (e) {
+          console.warn("DB fetch log in /api/audit failed:", (e as Error).message);
         }
-      } else {
+      }
+      
+      if (!log) {
         log = MOCK_LOGS_DB.find(l => l.id === logId);
       }
 
@@ -1029,35 +1038,62 @@ async function startServer() {
       log.status = status;
       log.confirmedAt = Date.now();
 
+      const isConsumptionLog = 
+        log.costCategory === 'C' || 
+        log.costCategory === 'A' || 
+        log.costCategory === 'B' || 
+        log.type === 'NonEffectiveHours' || 
+        log.type === '非有效工时' || 
+        log.confirmationType === '手动确权' || 
+        (log.dynamicCost !== undefined && Number(log.dynamicCost) > 0);
+
       if (verifiedAmount !== undefined && verifiedAmount !== null && !isNaN(Number(verifiedAmount))) {
         const numAmt = Number(verifiedAmount);
-        log.amount = numAmt;
-        log.rawAmount = numAmt;
         log.verifiedAmount = numAmt;
-        const isRev = (log.category === 'Revenue' || log.category === '收款');
-        const factor = isRev ? 0.27 : 0.48;
-        log.netValue = Math.round(numAmt * factor);
+        if (isConsumptionLog) {
+          log.dynamicCost = numAmt;
+          if (log.costCategory === 'C' || log.costCategory === 'A' || (log.costCategory === 'B' && log.valueConsumptionMode === 'B1') || log.type === 'NonEffectiveHours' || log.type === '非有效工时') {
+            log.netValue = -numAmt;
+          } else if (log.costCategory === 'B' && log.valueConsumptionMode === 'B2') {
+            log.netValue = 0;
+          }
+        } else {
+          log.amount = numAmt;
+          log.rawAmount = numAmt;
+          const isRev = (log.category === 'Revenue' || log.category === '收款');
+          const factor = isRev ? 0.27 : 0.48;
+          log.netValue = Math.round(numAmt * factor);
+        }
       }
 
       if (db) {
         try {
-          await db.execute('UPDATE logs SET status = ?, amount = ?, rawAmount = ?, netValue = ?, confirmedAt = ? WHERE id = ?', [status, log.amount, log.rawAmount || log.amount, log.netValue || 0, log.confirmedAt, logId]);
+          await db.execute(
+            'UPDATE logs SET status = ?, amount = ?, rawAmount = ?, dynamicCost = ?, netValue = ?, confirmedAt = ? WHERE id = ?', 
+            [status, log.amount || 0, log.rawAmount || log.amount || 0, log.dynamicCost || 0, log.netValue || 0, log.confirmedAt, logId]
+          );
         } catch (err) {
-          await db.execute('UPDATE logs SET status = ?, amount = ?, netValue = ? WHERE id = ?', [status, log.amount, log.netValue || 0, logId]);
+          try {
+            await db.execute('UPDATE logs SET status = ?, amount = ?, netValue = ? WHERE id = ?', [status, log.amount || 0, log.netValue || 0, logId]);
+          } catch (e2) {
+            console.warn("Update log in /api/audit failed:", (e2 as Error).message);
+          }
         }
+      }
+      
+      const idx = MOCK_LOGS_DB.findIndex(l => l.id === logId);
+      if (idx !== -1) {
+        MOCK_LOGS_DB[idx] = { ...log };
       } else {
-        const idx = MOCK_LOGS_DB.findIndex(l => l.id === logId);
-        if (idx !== -1) {
-          MOCK_LOGS_DB[idx] = log;
-        }
+        MOCK_LOGS_DB.push({ ...log });
       }
 
       // 服务端联动确权核心执行：写库以服务端 applyTimberLinkage 为准
       let linkedLogs: any[] = [];
-      if (status === '已确权' || status === 'Confirmed') {
+      if ((status === '已确权' || status === 'Confirmed') && log.miningId) {
         linkedLogs = await applyTimberLinkage(db, log.miningId);
       }
-      const recalibratedLogs = await recalibrateMiningLogsServer(db, log.miningId);
+      const recalibratedLogs = log.miningId ? await recalibrateMiningLogsServer(db, log.miningId) : [];
 
       // Re-evaluate resource limits and snapshots
       const { resource, snapshot } = await getResourceWithSnapshot(db, log.miningId);

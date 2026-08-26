@@ -10,18 +10,18 @@ export function calculateAccruedCosts(miningId: string, allLogs: ValueCreationLo
   );
 
   const C = resourceLogs
-    .filter(l => l.costCategory === 'C')
+    .filter(l => l && l.costCategory === 'C')
     .reduce((sum, l) => sum + (l.dynamicCost !== undefined && l.dynamicCost !== null ? Number(l.dynamicCost) : (Number(l.amount) || 0)), 0);
 
   const B2 = resourceLogs
-    .filter(l => l.costCategory === 'B' && l.valueConsumptionMode === 'B2')
+    .filter(l => l && l.costCategory === 'B' && l.valueConsumptionMode === 'B2')
     .reduce((sum, l) => sum + (l.dynamicCost !== undefined && l.dynamicCost !== null ? Number(l.dynamicCost) : (Number(l.amount) || 0)), 0);
 
   return { C, B2 };
 }
 
-export function calculateHedgeCapacitiesAndWeights(resource: MiningResource, allLogs: ValueCreationLog[]) {
-  if (!resource) {
+export function calculateHedgeCapacitiesAndWeights(resource?: MiningResource | null, allLogs?: ValueCreationLog[] | null) {
+  if (!resource || !resource.id) {
     return {
       revInitial: 0,
       valInitial: 0,
@@ -36,7 +36,7 @@ export function calculateHedgeCapacitiesAndWeights(resource: MiningResource, all
     };
   }
 
-  const { C, B2 } = calculateAccruedCosts(resource.id, allLogs);
+  const { C, B2 } = calculateAccruedCosts(resource.id, allLogs || []);
   const revInitial = getInitialRevenueCapacity(resource);
   const valInitial = getInitialValueCapacity(resource);
 
@@ -119,13 +119,15 @@ export function applyConsumptionHedgeToLogs(
   resources: MiningResource[],
   managedUsers: User[]
 ): ValueCreationLog[] {
-  const resource = resources.find(r => r.id === miningId);
+  if (!jzczLogs || !Array.isArray(jzczLogs)) return [];
+  const resource = (resources || []).find(r => r && r.id === miningId);
   if (!resource) return jzczLogs;
 
-  const combinedLogs = [...jzczLogs, ...dtcbLogs];
+  const combinedLogs = [...(jzczLogs || []).filter(Boolean), ...(dtcbLogs || []).filter(Boolean)];
   const { cWeightRev, cWeightVal, b2Weight } = calculateHedgeCapacitiesAndWeights(resource, combinedLogs);
 
   return jzczLogs.map(log => {
+    if (!log) return log;
     if (log.miningId !== miningId) return log;
 
     // 排除成本类消耗单 (C, A, B2)
