@@ -1,4 +1,4 @@
-import { apiClient, setAuthToken } from './client';
+import { apiClient, setAuthToken, unwrapApiEnvelope } from './client';
 import { User } from '../../types';
 
 export interface LoginResponse {
@@ -8,7 +8,8 @@ export interface LoginResponse {
 }
 
 export const loginWithApi = async (userId: string, password: string): Promise<LoginResponse> => {
-  const data = await apiClient.post<LoginResponse>('/api/auth/login', { userId, password });
+  const raw = await apiClient.post<any>('/api/auth/login', { userId, password });
+  const data = unwrapApiEnvelope<LoginResponse>(raw);
   if (!data?.token) {
     throw new Error('登录响应缺少 token，请联系管理员检查后端鉴权');
   }
@@ -18,8 +19,9 @@ export const loginWithApi = async (userId: string, password: string): Promise<Lo
 
 export const fetchClientIp = async (): Promise<string> => {
   try {
-    const data = await apiClient.get<{ ip: string }>('/api/client-ip');
-    return data.ip || '127.0.0.1';
+    const raw = await apiClient.get<any>('/api/client-ip');
+    const data = unwrapApiEnvelope<{ ip: string }>(raw);
+    return data?.ip || '127.0.0.1';
   } catch {
     return '127.0.0.1';
   }
@@ -30,19 +32,22 @@ export const changePasswordApi = async (
   newPassword: string,
   oldPassword?: string
 ): Promise<{ success: boolean; message?: string }> => {
-  return apiClient.post<{ success: boolean; message?: string }>('/api/auth/change-password', {
+  const raw = await apiClient.post<any>('/api/auth/change-password', {
     userId,
     id: userId,
     newPassword,
     oldPassword
   });
+  return unwrapApiEnvelope<{ success: boolean; message?: string }>(raw);
 };
 
 export const fetchSessionUser = async (): Promise<User> => {
-  const data = await apiClient.get<{ user: User }>('/api/auth/me');
-  if (!data?.user) {
+  const raw = await apiClient.get<any>('/api/auth/me');
+  const data = unwrapApiEnvelope<any>(raw);
+  const user = data?.user || (data?.id ? data : null) || raw?.user || raw?.data?.user || raw?.data;
+  if (!user || !user.id) {
     throw new Error('获取会话用户失败');
   }
-  return data.user;
+  return user as User;
 };
 

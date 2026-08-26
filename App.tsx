@@ -757,14 +757,14 @@ const App: React.FC = () => {
     }
   }, [logs, miningResources, performTimberLinkage]);
 
-  // 2. 数据处理与初始加载
+  // 2. 数据处理与初始加载 (仅本地单机模式读取/初始化 localStorage)
   useEffect(() => {
-    if (!safeGetItem('cleared_test_data_v2')) {
-      onClearTestData();
-      return;
-    }
-
     if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
+      if (!safeGetItem('cleared_test_data_v2')) {
+        onClearTestData();
+        return;
+      }
+
       try {
         const savedResources = safeGetItem('shihe_resources');
         if (savedResources) setMiningResources(JSON.parse(savedResources));

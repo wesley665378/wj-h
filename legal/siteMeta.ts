@@ -1,25 +1,9 @@
-import { LegalDocument, USER_AGREEMENT, PRIVACY_POLICY } from './documents';
+/**
+ * @deprecated SSOT Notice:
+ * 单一真实数据源 (SSOT) 现已迁移至 /src/legal/siteMeta.ts。
+ * 此根目录文件仅为向后兼容保留的重导出 Shim。
+ */
 
-export interface SiteMeta {
-  appName: string;
-  subTitle: string;
-  copyright: string;
-  companyName: string;
-  icpNumber: string;
-  icpLink: string;
-  userAgreement: LegalDocument;
-  privacyPolicy: LegalDocument;
-}
-
-export const SITE_META: SiteMeta = {
-  appName: "城市守护者",
-  subTitle: "价值循环智能体管理系统",
-  copyright: "© 2026 深圳市世和安全技术咨询有限公司 版权所有",
-  companyName: "深圳市世和安全技术咨询有限公司",
-  icpNumber: "粤ICP备09029974号-7",
-  icpLink: "https://beian.miit.gov.cn/",
-  userAgreement: USER_AGREEMENT,
-  privacyPolicy: PRIVACY_POLICY,
-};
-
+export * from '../src/legal/siteMeta';
+import SITE_META from '../src/legal/siteMeta';
 export default SITE_META;

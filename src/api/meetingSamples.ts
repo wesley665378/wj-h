@@ -1,6 +1,7 @@
-import { apiClient } from './client';
+import { apiClient, unwrapApiEnvelope } from './client';
 import { MeetingSample } from '../../types';
 
 export const saveMeetingSampleApi = async (sample: MeetingSample): Promise<{ success: boolean }> => {
-  return apiClient.post<{ success: boolean }>('/api/meeting-samples', sample);
+  const res = await apiClient.post<any>('/api/meeting-samples', sample);
+  return unwrapApiEnvelope<{ success: boolean }>(res);
 };

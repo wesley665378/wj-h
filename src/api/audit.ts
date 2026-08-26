@@ -1,4 +1,4 @@
-import { apiClient } from './client';
+import { apiClient, unwrapApiEnvelope } from './client';
 import { ValueCreationLog, AuditStatus, MiningResource, QuotaSnapshot } from '../../types';
 
 export interface AuditResponse {
@@ -22,7 +22,9 @@ export const putAuditLog = async (
   if (typeof opts?.auditNotes === 'string' && opts.auditNotes.trim()) {
     body.auditNotes = opts.auditNotes.trim();
   }
-  return apiClient.put<AuditResponse>('/api/audit', body);
+  const raw = await apiClient.put<any>('/api/audit', body);
+  return unwrapApiEnvelope<AuditResponse>(raw);
 };
 
 export const auditLog = putAuditLog;
+

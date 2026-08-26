@@ -2,10 +2,25 @@ import { User, Role } from '../../types';
 
 export const parseCenterList = (center: string | null | undefined): string[] => {
   if (!center) return [];
-  const parts = center.split(/[,，;；、]/);
-  return parts
-    .map(p => p.trim().toUpperCase())
-    .filter(p => p.length > 0);
+  let cleaned = String(center).trim();
+  if (cleaned.startsWith('[') && cleaned.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed)) {
+        return Array.from(new Set(parsed.flatMap(p => parseCenterList(String(p))).filter(Boolean)));
+      }
+    } catch {
+      cleaned = cleaned.slice(1, -1);
+    }
+  }
+  const parts = cleaned.split(/[,，;；、]/);
+  return Array.from(
+    new Set(
+      parts
+        .map(p => p.trim().replace(/^['"\[\]]+|['"\[\]]+$/g, '').trim())
+        .filter(p => p.length > 0)
+    )
+  );
 };
 
 /**

@@ -56,6 +56,42 @@ export const clearAuthToken = (): void => {
   setAuthToken(null);
 };
 
+/**
+ * 解包 API 响应中的统一包装层 (Envelope)
+ * 支持 { code: 200, data: T }, { success: true, data: T }, { status: 200, data: T }, { data: T } 等格式
+ * 若传入数据本身已经是目标实体对象或空值，则直接返回
+ */
+export function unwrapApiEnvelope<T = any>(response: any): T {
+  if (response === null || response === undefined) {
+    return response as T;
+  }
+
+  let current = response;
+  // 支持最多解包两层 envelope
+  for (let i = 0; i < 2; i++) {
+    if (typeof current === 'object' && current !== null) {
+      // 业务错误码拦截 (例如 code: 400, 500, 或 status: 'error')
+      if (typeof current.code === 'number' && current.code >= 400) {
+        throw new ApiError(current.msg || current.message || current.error || `业务错误 (代码: ${current.code})`, current.code, current);
+      }
+      if (current.success === false && !('data' in current)) {
+        throw new ApiError(current.msg || current.message || current.error || '请求执行失败', 400, current);
+      }
+
+      // 如果包含 data 字段且不是 undefined，则解包
+      if ('data' in current && current.data !== undefined) {
+        current = current.data;
+      } else {
+        break;
+      }
+    } else {
+      break;
+    }
+  }
+
+  return current as T;
+}
+
 export const toastApiError = (err: unknown, defaultMsg: string = '请求操作失败'): void => {
   console.error('API Request Error:', err);
   if (err instanceof ApiError) {
@@ -114,11 +150,17 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 
   if (!response.ok) {
-    const errorMsg = 
-      (responseData && typeof responseData === 'object' && (responseData.error || responseData.message)) ||
-      (typeof responseData === 'string' && responseData) ||
-      `请求失败 (状态码: ${response.status})`;
-    
+    let extractedMsg: string | undefined;
+    if (responseData && typeof responseData === 'object') {
+      extractedMsg = responseData.msg || responseData.message || responseData.error || responseData.errMsg || responseData.reason;
+      if (!extractedMsg && responseData.data && typeof responseData.data === 'object') {
+        extractedMsg = responseData.data.msg || responseData.data.message || responseData.data.error;
+      }
+    } else if (typeof responseData === 'string' && responseData.trim()) {
+      extractedMsg = responseData.trim();
+    }
+
+    const errorMsg = extractedMsg || `请求失败 (状态码: ${response.status})`;
     throw new ApiError(errorMsg, response.status, responseData);
   }
 

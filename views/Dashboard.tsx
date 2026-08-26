@@ -106,7 +106,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
   const uniqueCenters = useMemo(() => {
     if (isGlobalReaderUser) {
-      return businessUnits;
+      return Array.from(new Set(businessUnits.flatMap(b => parseCenterList(b)).filter(Boolean)));
     }
     return currentUser?.center ? parseCenterList(currentUser.center) : [];
   }, [businessUnits, currentUser, isGlobalReaderUser]);
@@ -174,11 +174,12 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
   // 当切换 periodType 时，重置 periodValue 为当前时间对应的值
   useEffect(() => {
-    if (periodType === 'month') setPeriodValue(now.getMonth() + 1);
-    else if (periodType === 'quarter') setPeriodValue(Math.floor(now.getMonth() / 3) + 1);
-    else if (periodType === 'half') setPeriodValue(now.getMonth() < 6 ? 1 : 2);
-    else setPeriodValue(now.getFullYear());
-  }, [periodType, now]);
+    const current = new Date();
+    if (periodType === 'month') setPeriodValue(current.getMonth() + 1);
+    else if (periodType === 'quarter') setPeriodValue(Math.floor(current.getMonth() / 3) + 1);
+    else if (periodType === 'half') setPeriodValue(current.getMonth() < 6 ? 1 : 2);
+    else setPeriodValue(current.getFullYear());
+  }, [periodType]);
 
   const currentPeriodLabel = useMemo(() => {
     if (periodType === 'month') return `${now.getFullYear()}年${periodValue}月`;
@@ -267,22 +268,55 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     if (!isGlobalReaderUser) {
       // 经营单元/经管员/VP 账号登录后，「经营单元效率看板」只显示本账号对应的 centers 的卡片
       uniqueCenters.forEach(c => {
-        centers[c] = {
-          name: c,
-          value: 0,
-          revenueLimit: 0,
-          valueLimit: 0,
-          revenue2Percent: 0,
-          value5Percent: 0
-        };
+        parseCenterList(c).forEach(centerName => {
+          if (!centers[centerName]) {
+            centers[centerName] = {
+              name: centerName,
+              value: 0,
+              revenueLimit: 0,
+              valueLimit: 0,
+              revenue2Percent: 0,
+              value5Percent: 0
+            };
+          }
+        });
       });
     } else {
       // Admin / npcxie 可多单元：按单段 center 建卡，不要把「A,B」整串当一个卡名
+      uniqueCenters.forEach(c => {
+        parseCenterList(c).forEach(centerName => {
+          if (!centers[centerName]) {
+            centers[centerName] = {
+              name: centerName,
+              value: 0,
+              revenueLimit: 0,
+              valueLimit: 0,
+              revenue2Percent: 0,
+              value5Percent: 0
+            };
+          }
+        });
+      });
       users.forEach(u => {
         const uCenterList = parseCenterList(u.center);
         const listToCreate = uCenterList.length > 0 ? uCenterList : ['未分配'];
         listToCreate.forEach(centerName => {
           if (!centers[centerName]) {
+            centers[centerName] = {
+              name: centerName,
+              value: 0,
+              revenueLimit: 0,
+              valueLimit: 0,
+              revenue2Percent: 0,
+              value5Percent: 0
+            };
+          }
+        });
+      });
+      resources.forEach(r => {
+        const rCenters = [r.assignedTo, r.assignedToRevenue, r.assignedToValue].flatMap(c => parseCenterList(c));
+        rCenters.forEach(centerName => {
+          if (centerName && !centers[centerName]) {
             centers[centerName] = {
               name: centerName,
               value: 0,
@@ -312,9 +346,10 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
           if (isSalaryActiveForMonth(u, m)) {
             const sal = getUserSalaryByMonth(u, m);
             matchedCenters.forEach(centerName => {
-              if (centers[centerName]) {
-                centers[centerName].value += sal;
+              if (!centers[centerName]) {
+                centers[centerName] = { name: centerName, value: 0, revenueLimit: 0, valueLimit: 0, revenue2Percent: 0, value5Percent: 0 };
               }
+              centers[centerName].value += sal;
             });
           }
         });
@@ -354,26 +389,27 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     resources
       .filter(r => isGlobalReaderUser || isResourceAssignedToCenter(r, currentUser?.center))
       .forEach(r => {
-        let centerName = '';
-        if (isGlobalReaderUser) {
-          const rAssigned = parseCenterList(r.assignedTo);
-          centerName = rAssigned.length > 0 ? rAssigned[0] : '未分配';
-        } else {
-          // Find which center from uniqueCentersSet is matched by the resource
-          const assignedList = [r.assignedTo, r.assignedToRevenue, r.assignedToValue]
-            .flatMap(c => parseCenterList(c));
-          const matchedCenter = assignedList.find(c => uniqueCentersSet.has(c.toUpperCase()));
-          centerName = matchedCenter || targetUserCenter;
-        }
-
-        if (!isGlobalReaderUser && !uniqueCentersSet.has(centerName.toUpperCase())) return;
-
-        if (!centers[centerName]) {
-          centers[centerName] = { name: centerName, value: 0, revenueLimit: 0, valueLimit: 0, revenue2Percent: 0, value5Percent: 0 };
-        }
-        centers[centerName].revenueLimit += r.revenueCapacity;
-        centers[centerName].valueLimit += r.valueCapacity;
+        const assignedList = [r.assignedTo, r.assignedToRevenue, r.assignedToValue]
+          .flatMap(c => parseCenterList(c));
         
+        let targetCentersForResource: string[] = [];
+        if (isGlobalReaderUser) {
+          targetCentersForResource = assignedList.length > 0 ? Array.from(new Set(assignedList)) : ['未分配'];
+        } else {
+          targetCentersForResource = Array.from(new Set(assignedList.filter(c => uniqueCentersSet.has(c.toUpperCase()))));
+          if (targetCentersForResource.length === 0 && uniqueCenters.length > 0) {
+            targetCentersForResource = [uniqueCenters[0]];
+          }
+        }
+
+        targetCentersForResource.forEach(centerName => {
+          if (!centers[centerName]) {
+            centers[centerName] = { name: centerName, value: 0, revenueLimit: 0, valueLimit: 0, revenue2Percent: 0, value5Percent: 0 };
+          }
+          centers[centerName].revenueLimit += r.revenueCapacity;
+          centers[centerName].valueLimit += r.valueCapacity;
+        });
+
         // Calculate period-based extraction
         const miningLogs = periodLogs.filter(l => l.miningId === r.id && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved));
         
@@ -382,17 +418,21 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
         
         // 收款专项计提 (2%) = amount × 2%（含款专且不含经管员，不乘 C权、B2权）
         const rev2 = revLogs.reduce((sum, l) => {
-          const u = users.find(user => user.id === l.recordedCollectorId);
+          const u = users.find(user => user.id === l.recordedCollectorId || user.userId === l.recordedCollectorId);
           return sum + computeCollection2Incentive(l, u);
         }, 0);
         // 产值专项计提 (5%) = amount × 5%（仅初产专/中产专触发，中产专也是5%，不乘 C权、B2权）
         const val5 = valLogs.reduce((sum, l) => {
-          const u = users.find(user => user.id === l.recordedCollectorId);
+          const u = users.find(user => user.id === l.recordedCollectorId || user.userId === l.recordedCollectorId);
           return sum + computeValueOutput5Incentive(l, u);
         }, 0);
         
-        centers[centerName].revenue2Percent += rev2;
-        centers[centerName].value5Percent += val5;
+        targetCentersForResource.forEach(centerName => {
+          if (centers[centerName]) {
+            centers[centerName].revenue2Percent += rev2;
+            centers[centerName].value5Percent += val5;
+          }
+        });
       });
 
     return Object.values(centers)
@@ -1673,7 +1713,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                     onClick={() => setFilterCenter(filterCenter === center ? null : center)}
                     className={`px-4 py-2 rounded-full text-[10px] font-black whitespace-nowrap transition-all ${filterCenter === center ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
                   >
-                    {center} ({resources.filter(r => r.assignedTo === center || r.assignedToRevenue === center || r.assignedToValue === center).length})
+                    {center} ({resources.filter(r => isResourceAssignedToCenter(r, center)).length})
                   </button>
                 ))}
 

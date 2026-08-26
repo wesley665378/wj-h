@@ -1,4 +1,4 @@
-import { apiClient } from './client';
+import { apiClient, unwrapApiEnvelope } from './client';
 import {
   User,
   ValueCreationLog,
@@ -42,16 +42,15 @@ export interface SyncWorkspacePayload {
 
 export const fetchWorkspaceData = async (): Promise<WorkspaceDataResponse> => {
   const res = await apiClient.get<any>('/api/workspace');
-  if (res && res.code !== undefined && res.data !== undefined) {
-    return res.data as WorkspaceDataResponse;
-  }
-  return res as WorkspaceDataResponse;
+  return unwrapApiEnvelope<WorkspaceDataResponse>(res);
 };
 
 export const syncWorkspace = async (payload: SyncWorkspacePayload): Promise<{ success: boolean; error?: string }> => {
-  return apiClient.post<{ success: boolean; error?: string }>('/api/workspace/sync', payload);
+  const res = await apiClient.post<any>('/api/workspace/sync', payload);
+  return unwrapApiEnvelope<{ success: boolean; error?: string }>(res);
 };
 
 export const fetchResourceStatus = async (miningId: string): Promise<{ resource: MiningResource; snapshot: QuotaSnapshot }> => {
-  return apiClient.get<{ resource: MiningResource; snapshot: QuotaSnapshot }>(`/api/resource/${miningId}/status`);
+  const res = await apiClient.get<any>(`/api/resource/${miningId}/status`);
+  return unwrapApiEnvelope<{ resource: MiningResource; snapshot: QuotaSnapshot }>(res);
 };

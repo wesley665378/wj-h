@@ -1,4 +1,4 @@
-import { apiClient } from './client';
+import { apiClient, unwrapApiEnvelope } from './client';
 
 export interface DistributionDataResponse {
   month: string;
@@ -15,15 +15,15 @@ export const fetchDistributionData = async (
   if (status) params.append('status', status);
   const qs = params.toString();
   
-  const res = await apiClient.get<any>(`/api/distribution${qs ? `?${qs}` : ''}`);
+  const raw = await apiClient.get<any>(`/api/distribution${qs ? `?${qs}` : ''}`);
+  const res = unwrapApiEnvelope<any>(raw);
   
-  // Unpack { code, msg, data } envelope for production compatibility
-  if (res && res.code !== undefined && res.data !== undefined) {
-    const unpacked = res.data;
+  // Unpack structure if contains filterMonth/experts
+  if (res && (res.filterMonth !== undefined || res.experts !== undefined)) {
     return {
-      month: unpacked.filterMonth || month || '',
+      month: res.filterMonth || month || '',
       status: status || '',
-      distribution: unpacked.experts || [], // experts -> distribution rows
+      distribution: res.experts || [], // experts -> distribution rows
     };
   }
 
