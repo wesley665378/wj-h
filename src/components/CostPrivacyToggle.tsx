@@ -38,7 +38,7 @@ export const CostPrivacyToggle: React.FC<CostPrivacyToggleProps> = ({
         <EyeOff size={iconSize} className="text-slate-400 shrink-0" />
       )}
       {showLabel && (
-        <span>{isCostVisible ? '成本明文' : '成本脱敏'}</span>
+        <span>{isCostVisible ? '明文显示' : '成本脱敏'}</span>
       )}
     </button>
   );

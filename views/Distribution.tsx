@@ -29,8 +29,7 @@ import {
   RefineType,
   AcceptanceRecord,
 } from "../types";
-import * as XLSX from "xlsx";
-import { exportWorkbook, buildExcelFilename } from "../src/utils/excelIo";
+import { XLSX, exportWorkbook, buildExcelFilename } from "../src/utils/excelIo";
 import { toast } from "sonner";
 import { CityGuardianModal, useCityGuardianModal } from "../src/components/CityGuardianModal";
 import { useCostPrivacy } from "../src/hooks/useCostPrivacy";

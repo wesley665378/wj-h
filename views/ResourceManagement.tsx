@@ -2,9 +2,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, MiningResource, RefineType, Role, ResourceStatus, ValueCreationLog, InternalTransaction } from '../types';
 import { isSystemAdmin } from '../src/utils/accessControl';
+import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
+import { getLocalMonthString } from '../src/utils/dateUtils';
 import { Card, ProgressBar, Badge, ProjectStatusBadge } from '../src/components/UI';
-import * as XLSX from 'xlsx';
-import { exportWorkbook, buildExcelFilename, EXCEL_IMPORT_MAX_BYTES, EXCEL_IMPORT_MAX_ROWS } from '../src/utils/excelIo';
+import { XLSX, exportWorkbook, buildExcelFilename, EXCEL_IMPORT_MAX_BYTES, EXCEL_IMPORT_MAX_ROWS } from '../src/utils/excelIo';
 import { deriveProjectStatus } from '../src/utils/projectStatus';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
 import { roundMoney, formatMoney } from '../src/utils/formatMoney';
@@ -60,6 +61,9 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
   // 按矿山编号查询相关状态
   const [searchMiningId, setSearchMiningId] = useState('');
   const [queriedMiningId, setQueriedMiningId] = useState<string | null>(null);
+  const [businessMonth, setBusinessMonth] = useState<string>(getLocalMonthString());
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
 
   const isNpcxie = user.role === Role.npcxie || user.category === 'NPC';
   const isAdmin = isSystemAdmin(user);
@@ -350,6 +354,15 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
               >
                 <span>查询</span>
               </button>
+              <div className="w-full mt-4 pt-4 border-t border-slate-700/50">
+                <BusinessDateFilter
+                  month={businessMonth}
+                  onMonthChange={setBusinessMonth}
+                  startDate={startDate}
+                  endDate={endDate}
+                  onDateRangeChange={(s, e) => { setStartDate(s); setEndDate(e); }}
+                />
+              </div>
             </form>
           </div>
         </Card>

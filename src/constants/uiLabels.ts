@@ -25,7 +25,7 @@ export const UI_LABELS = {
   EFFICIENCY_TIER: '评价等级',
 
   LOGIN_ACCOUNT: '账号',
-  MY_ACCOUNT_PAGE: '我的账户',
+  MY_ACCOUNT_PAGE: '我的帐户',
 
   EMPTY_DEFAULT: '暂无数据',
   EMPTY_LIST: '暂无记录',

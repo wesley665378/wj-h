@@ -12,17 +12,19 @@ export class ApiError extends Error {
   }
 }
 
+import { safeGetItem, safeSetItem, safeRemoveItem } from '../utils/safeLocalStorage';
+
 const TOKEN_KEY = 'shihe_token';
 const LEGACY = 'shihe_auth_token';
 
 let currentAuthToken: string | null = (() => {
   try {
-    let token = localStorage.getItem(TOKEN_KEY);
+    let token = safeGetItem(TOKEN_KEY);
     if (!token) {
-      token = localStorage.getItem(LEGACY);
+      token = safeGetItem(LEGACY);
       if (token) {
-        localStorage.setItem(TOKEN_KEY, token);
-        localStorage.removeItem(LEGACY);
+        safeSetItem(TOKEN_KEY, token);
+        safeRemoveItem(LEGACY);
       }
     }
     return token || null;
@@ -35,15 +37,16 @@ export const setAuthToken = (token: string | null): void => {
   currentAuthToken = token;
   try {
     if (token) {
-      localStorage.setItem(TOKEN_KEY, token);
+      safeSetItem(TOKEN_KEY, token);
     } else {
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(LEGACY);
+      safeRemoveItem(TOKEN_KEY);
+      safeRemoveItem(LEGACY);
     }
   } catch (e) {
     console.warn('Failed to save auth token to localStorage', e);
   }
 };
+
 
 export const getAuthToken = (): string | null => {
   return currentAuthToken;

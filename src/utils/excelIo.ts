@@ -6,6 +6,8 @@ import * as XLSX from 'xlsx';
 export const EXCEL_IMPORT_MAX_BYTES = 5 * 1024 * 1024; // 5MB
 export const EXCEL_IMPORT_MAX_ROWS = 5000;
 
+export { XLSX };
+
 /**
  * Excel 导出统一 SSOT 工具模块 (附录 A′-5)
  */

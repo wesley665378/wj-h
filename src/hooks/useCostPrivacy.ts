@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { formatMoney } from '../utils/formatMoney';
+import { safeGetItem, safeSetItem } from '../utils/safeLocalStorage';
 
 const STORAGE_KEY = 'shihe_cost_visible';
 const EVENT_NAME = 'shihe_cost_privacy_change';
@@ -18,12 +19,12 @@ export function formatCostDisplay(amount: number | string | null | undefined, is
 export function useCostPrivacy() {
   const [isCostVisible, setIsCostVisible] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    return localStorage.getItem(STORAGE_KEY) === 'true';
+    return safeGetItem(STORAGE_KEY) === 'true';
   });
 
   useEffect(() => {
     const handlePrivacyChange = () => {
-      const val = localStorage.getItem(STORAGE_KEY) === 'true';
+      const val = safeGetItem(STORAGE_KEY) === 'true';
       setIsCostVisible(val);
     };
 
@@ -38,7 +39,7 @@ export function useCostPrivacy() {
   const toggleCostVisible = useCallback(() => {
     setIsCostVisible((prev) => {
       const next = !prev;
-      localStorage.setItem(STORAGE_KEY, String(next));
+      safeSetItem(STORAGE_KEY, String(next));
       window.dispatchEvent(new Event(EVENT_NAME));
       return next;
     });

@@ -6,8 +6,7 @@ import { Card, Badge, ProjectStatusBadge } from '../src/components/UI';
 // (Eye/EyeOff removed)
 import { CostPrivacyToggle } from '../src/components/CostPrivacyToggle';
 import { useCostPrivacy } from '../src/hooks/useCostPrivacy';
-import * as XLSX from 'xlsx';
-import { exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
+import { XLSX, exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
 import { UI_LABELS } from '../src/constants/uiLabels';
 import { TERMINOLOGY } from '../src/constants/terminology';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';

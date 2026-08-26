@@ -3,57 +3,113 @@ import { MiningResource, ProjectStatus, ResourceStatus } from '../../types';
 /**
  * 项目态公式 SSOT (前端第二道闸)
  * 对齐后端：settlementService
- * 禁止写 99% 触顶规则
  */
 
 export const ARCHIVE_IDLE_MS = 90 * 24 * 60 * 60 * 1000;
-const LIMIT_EPS = 0.5;
+export const LIMIT_EPS = 0.5;
 
-export function getAvailableQuota(resource: MiningResource | null): number {
-  if (!resource) return 0;
-  const revCap = resource.revenueCapacity || 0;
-  const valCap = resource.valueCapacity || 0;
-  const confirmedRev = resource.confirmedRevenue || 0;
-  const confirmedVal = resource.confirmedValue || 0;
-  const pendingRev = resource.pendingRevenue || 0;
-  const pendingVal = resource.pendingValue || 0;
-  return Math.min(Math.max(0, revCap - confirmedRev - pendingRev), Math.max(0, valCap - confirmedVal - pendingVal));
+export interface AvailableQuota {
+  revenueLimit: number;
+  valueLimit: number;
+  availableRevenue: number;
+  availableValue: number;
+  confirmedRevenue: number;
+  confirmedValue: number;
+  pendingRevenue: number;
+  pendingValue: number;
+  minedRevenue: number;
+  minedValue: number;
+}
+
+export function getAvailableQuota(resource: MiningResource | null): AvailableQuota {
+  if (!resource) {
+    return {
+      revenueLimit: 0,
+      valueLimit: 0,
+      availableRevenue: 0,
+      availableValue: 0,
+      confirmedRevenue: 0,
+      confirmedValue: 0,
+      pendingRevenue: 0,
+      pendingValue: 0,
+      minedRevenue: 0,
+      minedValue: 0,
+    };
+  }
+
+  const revenueLimit = Math.max(
+    resource.revenueCapacity || 0,
+    resource.initialRevenueCapacity || 0,
+    resource.initialRevenueLimit || 0
+  );
+  const valueLimit = Math.max(
+    resource.valueCapacity || 0,
+    resource.initialValueCapacity || 0,
+    resource.initialValueLimit || 0
+  );
+
+  const confirmedRevenue = resource.confirmedRevenue || 0;
+  const confirmedValue = resource.confirmedValue || 0;
+  const pendingRevenue = resource.pendingRevenue || 0;
+  const pendingValue = resource.pendingValue || 0;
+  const minedRevenue = resource.minedRevenue || 0;
+  const minedValue = resource.minedValue || 0;
+
+  return {
+    revenueLimit: Math.round(revenueLimit),
+    valueLimit: Math.round(valueLimit),
+    confirmedRevenue: Math.round(confirmedRevenue),
+    confirmedValue: Math.round(confirmedValue),
+    pendingRevenue: Math.round(pendingRevenue),
+    pendingValue: Math.round(pendingValue),
+    minedRevenue: Math.round(minedRevenue),
+    minedValue: Math.round(minedValue),
+    availableRevenue: Math.round(Math.max(0, revenueLimit - confirmedRevenue - pendingRevenue - minedRevenue)),
+    availableValue: Math.round(Math.max(0, valueLimit - confirmedValue - pendingValue - minedValue)),
+  };
+}
+
+export function getAvailableQuotaMin(resource: MiningResource | null): number {
+  const quota = getAvailableQuota(resource);
+  return Math.min(quota.availableRevenue, quota.availableValue);
 }
 
 export function isMineralCapReached(resource: MiningResource | null): boolean {
   if (!resource) return false;
   
-  const revCap = resource.revenueCapacity || 0;
-  const valCap = resource.valueCapacity || 0;
-  const confirmedRev = resource.confirmedRevenue || 0;
-  const confirmedVal = resource.confirmedValue || 0;
-  const pendingRev = resource.pendingRevenue || 0;
-  const pendingVal = resource.pendingValue || 0;
+  const quota = getAvailableQuota(resource);
+  
+  // 须两限 > 0
+  if (quota.revenueLimit <= 0 || quota.valueLimit <= 0) return false;
 
-  // 两初限相等
-  if (Math.abs(revCap - valCap) > LIMIT_EPS) return false;
+  // 两限相等
+  if (Math.abs(quota.revenueLimit - quota.valueLimit) > LIMIT_EPS) return false;
 
-  const isRevCapped = Math.abs(confirmedRev - revCap) <= LIMIT_EPS && pendingRev <= LIMIT_EPS;
-  const isValCapped = Math.abs(confirmedVal - valCap) <= LIMIT_EPS && pendingVal <= LIMIT_EPS;
+  // confirmed ≈ 限
+  const isRevCapped = Math.abs(quota.confirmedRevenue - quota.revenueLimit) <= LIMIT_EPS;
+  const isValCapped = Math.abs(quota.confirmedValue - quota.valueLimit) <= LIMIT_EPS;
 
-  return isRevCapped && isValCapped;
+  // pending ≈ 0
+  const isPendingEmpty = quota.pendingRevenue <= LIMIT_EPS && quota.pendingValue <= LIMIT_EPS;
+
+  return isRevCapped && isValCapped && isPendingEmpty;
 }
 
 export function isMineralArchived(resource: MiningResource | null): boolean {
-  if (!resource) return true;
+  if (!resource) return false;
   return (resource.lifecycleStatus || '').toLowerCase() === 'archived';
 }
 
 export function toReachedMs(resource: MiningResource | null): number {
   if (!resource) return 0;
-  if (resource.cappedAt && resource.cappedAt > 0) {
-    return resource.cappedAt;
-  }
   if (resource.reachedDate) {
     const time = new Date(resource.reachedDate).getTime();
     if (time > 0 && !isNaN(time)) {
       return time;
     }
+  }
+  if (resource.cappedAt && resource.cappedAt > 0) {
+    return resource.cappedAt;
   }
   return 0;
 }
@@ -69,7 +125,7 @@ export function getSettlingDaysLeft(resource: MiningResource | null): number {
 
 export function deriveProjectStatus(resource?: MiningResource | null): { status: ProjectStatus; remainingDays?: number } {
   if (!resource) {
-    return { status: ProjectStatus.Archived };
+    return { status: ProjectStatus.InProgress };
   }
 
   if (isMineralArchived(resource)) {

@@ -22,12 +22,11 @@ import StandardModal from '../src/components/StandardModal';
 import { UI_LABELS } from '../src/constants/uiLabels';
 import { TERMINOLOGY } from '../src/constants/terminology';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
-import * as XLSX from 'xlsx';
-import { exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
+import { XLSX, exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
 import { calculateHistoricalNetValue, calculateDualTrackCoreMatrices, calculateT1PlusValue, calculateT1PlusRevenue } from '../src/utils/business';
 import { calculateHedgeCapacitiesAndWeights } from '../src/utils/consumptionHedge';
 import { deriveProjectStatus, isProjectWritable } from '../src/utils/projectStatus';
-import { isAdminOrNpc } from '../src/utils/accessControl';
+import { isAdminOrNpc, parseCenterList } from '../src/utils/accessControl';
 import { userCenterMatchesBusinessUnit } from '../src/utils/businessUnitName';
 import { labelBusinessUnit } from '../src/utils/statusDisplay';
 import { toast } from 'sonner';
@@ -271,7 +270,11 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     // 自动匹配当前智能体账号所属经营单元
     if (user.center) {
       // Search within businessUnitManagers to ensure we only pick valid ones
-      const businessUnitRep = businessUnitManagers.find(u => u.center === user.center && u.role === Role.Rank);
+      const userCenters = parseCenterList(user.center);
+      const businessUnitRep = businessUnitManagers.find(u => {
+        const uCenters = parseCenterList(u.center);
+        return u.role === Role.Rank && userCenters.some(c => uCenters.includes(c));
+      });
       if (businessUnitRep) {
         setSelectedOperatorId(businessUnitRep.id);
       } else {
@@ -289,7 +292,11 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     if (!isCollector) return false;
     if (u.userStatus === 'inactive') return false;
     // 注入积分 采集主体 只显示 同一 经营单元 采集主体列表
-    if (user.center && u.center !== user.center) return false;
+    if (user.center) {
+      const userCenters = parseCenterList(user.center);
+      const uCenters = parseCenterList(u.center);
+      if (!userCenters.some(c => uCenters.includes(c))) return false;
+    }
     return true;
   }), [managedUsers, user.center]);
   
@@ -333,9 +340,11 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       // 仅进行中状态可提报
       if (!isProjectWritable(r)) return false;
       
-      const isAssigned = (assigned: string | undefined, center: string) => {
-        if (!assigned) return false;
-        return assigned.split(',').map(c => c.trim()).includes(center);
+      const isAssigned = (assigned: string | undefined, center: string | undefined) => {
+        if (!assigned || !center) return false;
+        const assignedList = parseCenterList(assigned);
+        const centerList = parseCenterList(center);
+        return centerList.some(c => assignedList.includes(c));
       };
 
       if (selectedCategory === RefineCategory.Revenue) {
@@ -420,18 +429,26 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   // 计算从内部交易中接收到的积分上限 (仅针对接收方)
   const isOriginalOwner = useMemo(() => {
     if (!selectedResource || !user.center) return false;
+    const userCenters = parseCenterList(user.center);
+    const checkMatch = (assigned?: string) => {
+      if (!assigned) return false;
+      const assignedList = parseCenterList(assigned);
+      return userCenters.some(c => assignedList.includes(c));
+    };
     if (selectedCategory === RefineCategory.Revenue) {
-      return selectedResource.assignedToRevenue?.split(',').map(c => c.trim()).includes(user.center) || 
-             selectedResource.assignedTo?.split(',').map(c => c.trim()).includes(user.center);
+      return checkMatch(selectedResource.assignedToRevenue) || checkMatch(selectedResource.assignedTo);
     } else {
-      return selectedResource.assignedToValue?.split(',').map(c => c.trim()).includes(user.center) ||
-             selectedResource.assignedTo?.split(',').map(c => c.trim()).includes(user.center);
+      return checkMatch(selectedResource.assignedToValue) || checkMatch(selectedResource.assignedTo);
     }
   }, [selectedResource, user.center, selectedCategory]);
 
   const userCenterUsers = useMemo(() => {
     if (!user.center) return new Set([user.id]);
-    return new Set(managedUsers.filter(u => u.center === user.center).map(u => u.id));
+    const userCenters = parseCenterList(user.center);
+    return new Set(managedUsers.filter(u => {
+      const uCenters = parseCenterList(u.center);
+      return userCenters.some(c => uCenters.includes(c));
+    }).map(u => u.id));
   }, [managedUsers, user.center, user.id]);
 
   const receivedLimit = useMemo(() => {
@@ -1098,7 +1115,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         <form onSubmit={handleSubmit} className="p-4 md:p-6 space-y-4 md:space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
             {/* Row 1 - Left Column: 采集主体 */}
-            <div className="flex flex-col space-y-1.5 col-span-2">
+            <div className="flex flex-col space-y-1.5 sm:col-span-2">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
                 采集主体 <span className="text-rose-500 ml-1 font-bold">*</span>
               </label>
@@ -1175,7 +1192,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             </div>
 
             {/* Row 1 - Right Column: 矿山编号 */}
-            <div className="flex flex-col space-y-1.5 col-span-2 relative">
+            <div className="flex flex-col space-y-1.5 sm:col-span-2 relative">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
                 矿山编号 <span className="text-rose-500 ml-1 font-bold">*</span>
               </label>
@@ -1240,7 +1257,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             </div>
 
             {/* Row 2 - Col 1: 提炼配方 */}
-            <div className="flex flex-col space-y-1.5 col-span-1">
+            <div className="flex flex-col space-y-1.5 sm:col-span-1">
               <div className="flex items-center space-x-1.5 h-4">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">提炼配方</label>
                 {hasCustomFactor ? (
@@ -1279,7 +1296,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             </div>
 
             {/* Row 2 - Col 2: 提炼类型 */}
-            <div className="flex flex-col space-y-1.5 col-span-1">
+            <div className="flex flex-col space-y-1.5 sm:col-span-1">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">提炼类型</label>
               <select value={selectedRefineType} onChange={(e) => setSelectedRefineType(e.target.value as RefineType)} className="w-full bg-slate-100 border border-slate-200 rounded-md px-3 py-2 text-xs outline-none text-slate-400 cursor-not-allowed h-10" required disabled={true}>
                 {selectedResource ? selectedResource.types.map(type => (
@@ -1291,7 +1308,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             </div>
 
             {/* Row 2 - Col 3: 业务日期 */}
-            <div className="flex flex-col space-y-1.5 col-span-1">
+            <div className="flex flex-col space-y-1.5 sm:col-span-1">
               <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center h-4">
                 业务日期 <span className="text-rose-500 ml-1 font-bold">*</span>
               </label>
@@ -1305,7 +1322,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             </div>
 
             {/* Row 2 - Col 4: 执行类型 */}
-            <div className="flex flex-col space-y-1.5 col-span-1">
+            <div className="flex flex-col space-y-1.5 sm:col-span-1">
               <div className="flex items-center justify-between h-4">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                   执行类型
@@ -1710,7 +1727,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           </div>
         }
       >
-        {/* 价值动态流 */}
+        {/* 价值动态流 (收款轨/产值轨) */}
         <div className="p-6 bg-slate-50/50 border-b border-slate-200 space-y-4">
           <div className="border-b border-slate-200 pb-2">
             <h4 className="text-sm font-black text-slate-900 tracking-tight flex items-center gap-2">
@@ -1860,7 +1877,100 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           </div>
         )}
 
-        <div className="overflow-x-auto border-b border-slate-100 pb-2 custom-scrollbar">
+        {/* 移动端卡片视图 (Narrow Screen Card View) */}
+        <div className="block md:hidden space-y-3 p-2">
+          {filteredLogs.map(log => {
+            if (!log) return null;
+            const collector = managedUsers.find(u => u.id === log.recordedCollectorId);
+            const resource = resources.find(r => r.id === log.miningId);
+            const operator = managedUsers.find(u => u.id === log.rankId);
+            
+            const weightInfo = getHedgeWeight(log.recordedCollectorId || '', log.amount);
+            const cWeight = log.cClassRatio !== undefined ? log.cClassRatio : weightInfo.cWeight;
+            const b2Weight = log.b2ClassRatio !== undefined ? log.b2ClassRatio : weightInfo.b2Weight;
+            const factor = getLogRefineFactor(log, resource, collector);
+            const rawAmount = log.rawAmount || log.amount || 0;
+
+            const isValueLine = log.category === RefineCategory.Value;
+            const isRevenueLine = log.category === RefineCategory.Revenue;
+
+            const valPreHedge = rawAmount * factor;
+            const valPostHedge = valPreHedge * cWeight * b2Weight;
+            const valHasHedge = cWeight < 1 || b2Weight < 1;
+
+            const revPreHedge = rawAmount * 0.933 * factor;
+            const revPostHedge = revPreHedge * cWeight;
+            const revHasHedge = cWeight < 1;
+
+            const displayInjection = isRevenueLine
+              ? (log.rawAmount != null ? Math.round(log.rawAmount * 0.933) : Math.round(log.amount || 0))
+              : (log.rawAmount != null ? log.rawAmount : log.amount || 0);
+
+            return (
+              <div key={log.id} className="bg-white border border-slate-200 rounded-xl p-3 shadow-2xs space-y-2 text-[11px]">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Badge variant={log.category === RefineCategory.Revenue ? 'warning' : 'success'}>
+                      {log.category === RefineCategory.Revenue ? '收款' : '产值'}
+                    </Badge>
+                    <span className="font-mono font-bold text-slate-800">{log.miningId}</span>
+                    <span className="font-mono text-slate-400 text-[10px]">#{log.id}</span>
+                  </div>
+                  <Badge variant={
+                    log.status === AuditStatus.Approved ? 'success' : 
+                    log.status === AuditStatus.Rejected ? 'error' : 
+                    log.status === AuditStatus.Confirmed ? 'info' : 'warning'
+                  }>
+                    {log.status === AuditStatus.Approved ? '入库' : log.status}
+                  </Badge>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-slate-700">
+                  <div>
+                    <span className="text-slate-400 text-[10px] block">{TERMINOLOGY.BUSINESS_UNIT} / 收集人</span>
+                    <span className="font-bold">{labelBusinessUnit(operator?.center)} · {collector?.name || log.recordedCollectorId}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-slate-400 text-[10px] block">注入积分</span>
+                    <span className="font-mono font-bold text-slate-900">{formatMoney(displayInjection)}</span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 p-2 rounded-lg grid grid-cols-2 gap-2 text-[10px]">
+                  <div>
+                    <span className="text-slate-400">C权 / B2权: </span>
+                    <span className="font-mono font-bold text-slate-800">{cWeight.toFixed(4)} / {isRevenueLine ? '—' : b2Weight.toFixed(4)}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-slate-400">确权类型: </span>
+                    <span className="font-bold text-slate-700">{log.confirmationType || '手动确权'}</span>
+                  </div>
+                  <div className="col-span-2 flex justify-between items-center border-t border-slate-100 pt-1 mt-1">
+                    <span className="text-slate-500 font-bold">{isValueLine ? '产兑包' : '收款包'}:</span>
+                    <span className={`font-mono font-bold ${isValueLine ? 'text-emerald-600' : 'text-amber-600'}`}>
+                      {isValueLine ? (
+                        valHasHedge ? `${formatMoney(valPreHedge)} → ${formatMoney(valPostHedge)}` : formatMoney(valPostHedge)
+                      ) : (
+                        revHasHedge ? `${formatMoney(revPreHedge)} → ${formatMoney(revPostHedge)}` : formatMoney(revPostHedge)
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center text-[9px] text-slate-400 pt-1">
+                  <span>业务: {resolveLogBusinessDate(log)}</span>
+                  <span>提交: {formatSubmissionDate(log.timestamp)}</span>
+                </div>
+              </div>
+            );
+          })}
+          {filteredLogs.length === 0 && (
+            <div className="px-6 py-12 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</div>
+          )}
+        </div>
+
+        {/* 桌面端表格视图 (Desktop Table View) */}
+        <div className="hidden md:block overflow-x-auto border-b border-slate-100 pb-2 custom-scrollbar">
           <table className="w-full text-left whitespace-nowrap min-w-max">
             <thead className="bg-white z-10 shadow-sm">
               <tr className="bg-slate-50/90 text-[9px] font-bold text-slate-400 uppercase border-b border-slate-200">

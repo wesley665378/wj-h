@@ -1,8 +1,10 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
+import { toast } from 'sonner';
 import { ValueCreationLog, MiningResource, AuditStatus, RefineCategory, User, InternalTransaction, RefineType, Role, TransactionType, TransactionStatus, MeetingSample } from '../types';
-import { isAdminOrNpc, isGlobalReader } from '../src/utils/accessControl';
+import { isAdminOrNpc, isGlobalReader, parseCenterList } from '../src/utils/accessControl';
+import { isResourceAssignedToCenter } from '../src/utils/centerScope';
 import { 
   Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend
@@ -13,8 +15,7 @@ import { UI_TOKENS } from '../src/constants/uiTokens';
 import { RefreshCw, Info, LayoutGrid, List, AlertTriangle, Wallet, FileSpreadsheet, Sparkles, Lock, CheckCircle2 } from 'lucide-react';
 import { useCostPrivacy } from '../src/hooks/useCostPrivacy';
 import { useCityGuardianModal, CityGuardianModal } from '../src/components/CityGuardianModal';
-import * as XLSX from 'xlsx';
-import { exportWorkbook } from '../src/utils/excelIo';
+import { XLSX, exportWorkbook } from '../src/utils/excelIo';
 import { Card, StatItem, ProgressBar } from '../src/components/UI';
 import { UI_LABELS } from '../src/constants/uiLabels';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
@@ -26,7 +27,7 @@ import {
   sumValueConversionPackage, 
   sumIncomeProductionPackage 
 } from '../src/utils/reconcileMiningFromLogs';
-import { getLocalMonthString, resolveLogBusinessMonth, getLocalDateString } from '../src/utils/dateUtils';
+import { getLocalMonthString, isLogInFilter } from '../src/utils/dateUtils';
 import { formatMoney, roundMoney } from '../src/utils/formatMoney';
 import { deriveProjectStatus } from '../src/utils/projectStatus';
 import { formatProjectStatusLabel, formatRefineTypeLabel } from '../src/utils/statusDisplay';
@@ -89,6 +90,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
   const [filterPurity, setFilterPurity] = useState<string | null>(null);
 
   const isAdminOrNPC = useMemo(() => currentUser ? isAdminOrNpc(currentUser) : false, [currentUser]);
+  const isGlobalReaderUser = useMemo(() => currentUser ? isGlobalReader(currentUser) : false, [currentUser]);
 
   const isManager = useMemo(() => 
     currentUser?.category === '经管员高款专' || currentUser?.category === '经管员高产专',
@@ -103,11 +105,11 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
   };
 
   const uniqueCenters = useMemo(() => {
-    if (isAdminOrNPC) {
+    if (isGlobalReaderUser) {
       return businessUnits;
     }
-    return currentUser?.center ? [currentUser.center] : [];
-  }, [businessUnits, currentUser, isAdminOrNPC]);
+    return currentUser?.center ? parseCenterList(currentUser.center) : [];
+  }, [businessUnits, currentUser, isGlobalReaderUser]);
 
   const uniqueTypes = useMemo(() => {
     const types = new Set<string>();
@@ -129,13 +131,15 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       const purityInfo = q 
         ? getPurityInfo(q.revenue.confirmed, q.value.confirmed, q.value.pending, q.value.capacity)
         : getPurityInfo(r.confirmedRevenue, r.confirmedValue, r.pendingValue, r.valueCapacity);
-      const restrictCenter = isManager ? currentUser.center : filterCenter;
-      const matchesCenter = !restrictCenter || r.assignedTo === restrictCenter || r.assignedToRevenue === restrictCenter || r.assignedToValue === restrictCenter;
+      const restrictCenter = isManager ? currentUser?.center : filterCenter;
+      const restrictCentersList = parseCenterList(restrictCenter);
+      const resCentersList = [r.assignedTo, r.assignedToRevenue, r.assignedToValue].flatMap(c => parseCenterList(c));
+      const matchesCenter = restrictCentersList.length === 0 || resCentersList.some(c => restrictCentersList.includes(c));
       const matchesType = !filterType || r.types.includes(filterType as RefineType);
       const matchesPurity = !filterPurity || purityInfo.label.includes(filterPurity);
       return matchesCenter && matchesType && matchesPurity;
     });
-  }, [resources, filterCenter, filterType, filterPurity, isManager, resourceQuadrants]);
+  }, [resources, filterCenter, filterType, filterPurity, isManager, currentUser, resourceQuadrants]);
 
   const globalWeightedPurity = useMemo(() => {
     let totalConfirmedRevenue = 0;
@@ -226,9 +230,15 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     const months: string[] = [];
     const current = new Date(periodRange.start);
     const end = new Date(periodRange.end);
-    while (current < end) {
+    if (isNaN(current.getTime()) || isNaN(end.getTime()) || current >= end) {
+      return months;
+    }
+
+    let limit = 0;
+    while (current < end && limit < 100) {
       months.push(getLocalMonthString(current));
       current.setMonth(current.getMonth() + 1);
+      limit++;
     }
     return months;
   }, [periodRange]);
@@ -252,17 +262,20 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     }> = {};
     
     const targetUserCenter = currentUser?.center || '未分配';
+    const uniqueCentersSet = new Set(uniqueCenters.map(c => c.toUpperCase()));
 
-    if (!isAdminOrNPC) {
-      // 经营单元/经管员账号登录后，「经营单元效率看板」只显示本账号 User.center 一张卡
-      centers[targetUserCenter] = {
-        name: targetUserCenter,
-        value: 0,
-        revenueLimit: 0,
-        valueLimit: 0,
-        revenue2Percent: 0,
-        value5Percent: 0
-      };
+    if (!isGlobalReaderUser) {
+      // 经营单元/经管员/VP 账号登录后，「经营单元效率看板」只显示本账号对应的 centers 的卡片
+      uniqueCenters.forEach(c => {
+        centers[c] = {
+          name: c,
+          value: 0,
+          revenueLimit: 0,
+          valueLimit: 0,
+          revenue2Percent: 0,
+          value5Percent: 0
+        };
+      });
     } else {
       // Admin / npcxie 可多单元：根据 users 出现过的 center 建卡
       users.forEach(u => {
@@ -282,7 +295,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
     // 1. 基础工资包 (按月累加)
     users
-      .filter(u => isAdminOrNPC || u.center === targetUserCenter)
+      .filter(u => isGlobalReaderUser || (u.center && uniqueCentersSet.has(u.center.toUpperCase())))
       .forEach(u => {
         if (u.category === 'VP') return;
         
@@ -301,7 +314,10 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       isNonEffectiveHoursEffective(l) &&
       l.timestamp >= periodRange.start &&
       l.timestamp < periodRange.end &&
-      (isAdminOrNPC || (users.find(u => u.id === l.recordedCollectorId)?.center === targetUserCenter))
+      (isGlobalReaderUser || (() => {
+        const recordedCollector = users.find(u => u.id === l.recordedCollectorId);
+        return recordedCollector?.center && uniqueCentersSet.has(recordedCollector.center.toUpperCase());
+      })())
     );
 
     approvedDeductions.forEach(l => {
@@ -309,7 +325,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       if (collector?.category === 'VP') return;
       
       const centerName = collector?.center || '未分配';
-      if (!isAdminOrNPC && centerName !== targetUserCenter) return;
+      if (!isGlobalReaderUser && !uniqueCentersSet.has(centerName.toUpperCase())) return;
 
       if (!centers[centerName]) {
         centers[centerName] = { name: centerName, value: 0, revenueLimit: 0, valueLimit: 0, revenue2Percent: 0, value5Percent: 0 };
@@ -322,10 +338,20 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     const periodLogs = logs.filter(l => l.timestamp >= periodRange.start && l.timestamp < periodRange.end);
     
     resources
-      .filter(r => isAdminOrNPC || r.assignedTo === targetUserCenter || r.assignedToRevenue === targetUserCenter || r.assignedToValue === targetUserCenter)
+      .filter(r => isGlobalReaderUser || isResourceAssignedToCenter(r, currentUser?.center))
       .forEach(r => {
-        const centerName = r.assignedTo || targetUserCenter;
-        if (!isAdminOrNPC && centerName !== targetUserCenter) return;
+        let centerName = '';
+        if (isGlobalReaderUser) {
+          centerName = r.assignedTo || '未分配';
+        } else {
+          // Find which center from uniqueCentersSet is matched by the resource
+          const assignedList = [r.assignedTo, r.assignedToRevenue, r.assignedToValue]
+            .flatMap(c => parseCenterList(c));
+          const matchedCenter = assignedList.find(c => uniqueCentersSet.has(c.toUpperCase()));
+          centerName = matchedCenter || targetUserCenter;
+        }
+
+        if (!isGlobalReaderUser && !uniqueCentersSet.has(centerName.toUpperCase())) return;
 
         if (!centers[centerName]) {
           centers[centerName] = { name: centerName, value: 0, revenueLimit: 0, valueLimit: 0, revenue2Percent: 0, value5Percent: 0 };
@@ -355,9 +381,9 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       });
 
     return Object.values(centers)
-      .filter(c => isAdminOrNPC ? c.name !== '未分配' : true)
+      .filter(c => isGlobalReaderUser ? c.name !== '未分配' : true)
       .sort((a, b) => b.value - a.value);
-  }, [users, logs, periodRange, monthsInPeriod, resources, currentUser, isAdminOrNPC]);
+  }, [users, logs, periodRange, monthsInPeriod, resources, currentUser, isGlobalReaderUser, uniqueCenters]);
 
   const totalSalaryFlow = useMemo(() => {
     return salaryByCenter.reduce((acc, curr) => acc + curr.value, 0);
@@ -445,7 +471,10 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
         // Collector Stats
         const collector = userMap.get(l.recordedCollectorId || '');
-        if (!(sourceView === 'unit' && currentUser.center && collector?.center !== currentUser.center) && (!isManager || collector?.center === currentUser.center)) {
+        const isCollectorAllowed = isGlobalReaderUser || 
+          (collector?.center && uniqueCenters.map(c => c.toUpperCase()).includes(collector.center.toUpperCase()));
+
+        if (isCollectorAllowed && (!isManager || (collector?.center && collector.center === currentUser.center))) {
           const collectorName = collector?.name || l.recordedCollectorId || '系统/未知';
           const category = collector?.category;
 
@@ -582,46 +611,48 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
   }, [logs, periodRange, totalSalaryFlow, resources, users, currentUser, sourceView, transactions, isManager]);
 
-  // 监听资金注入：每月3日，当刚性池中的刚性工资包大于收产包时，由统筹池兜底流入收款
-  useEffect(() => {
-    const today = new Date();
-    // 判断是否为当月 3 日
-    const isThirdDayOfMonth = today.getDate() === 3;
-    if (!isThirdDayOfMonth) return;
-
-    // 收产包总额
+  // 统筹池兜底操作：须用户明确确认后写库，杜绝 useEffect 静默执行
+  const handleTriggerCoordinationAdjustment = useCallback(() => {
     const rigidSalaryPackage = waterMetrics.rigidSalaryPackage;
-    // 收产包总额
     const incomeWaterPool = waterMetrics.incomeWaterPool;
-
     const netBalance = incomeWaterPool - rigidSalaryPackage;
-    
-    // 只有当净额为负数且 onSystemAdjustment 存在时才触发兜底
-    if (onSystemAdjustment && netBalance < 0) {
-      const amountToInject = Math.abs(netBalance);
-      console.log(`每月3日触发统筹兜底：统筹池向收产包流入 ${amountToInject.toFixed(2)} 收款`);
-      
-      const newLog = {
-        id: `J${(Date.now() % 100000000).toString().padStart(8, '0')}`,
-        miningId: '统筹池',
-        rankId: 'system',
-        category: RefineCategory.Revenue,
-        type: RefineType.Enterprise,
-        amount: amountToInject,
-        rawAmount: amountToInject,
-        dynamicCost: 0,
-        costCategory: undefined,
-        netValue: amountToInject, // 直接增加收产包
-        timestamp: Date.now(),
-        status: AuditStatus.Approved,
-        confirmationType: '系统兜底确权'
-      };
-      
-      const details = `每月3日兜底处理：统筹池向收产包流入 ${amountToInject.toFixed(2)} 收款积分。操作前：刚性工资包=${rigidSalaryPackage.toFixed(2)}，收产包=${incomeWaterPool.toFixed(2)}，差额=${netBalance.toFixed(2)}`;
-      
-      onSystemAdjustment(newLog as any, details);
+
+    if (netBalance >= 0) {
+      showAlert(`当前收产包 (${formatMoney(incomeWaterPool)}) 足以覆盖刚性工资包 (${formatMoney(rigidSalaryPackage)})，无资金缺口 (差额 +${formatMoney(netBalance)})，无需执行统筹兜底。`);
+      return;
     }
-  }, [onSystemAdjustment, waterMetrics.rigidSalaryPackage, waterMetrics.incomeWaterPool]);
+
+    const amountToInject = Math.abs(netBalance);
+    showConfirm(
+      `确定执行【统筹池兜底注入】操作？\n\n• 刚性工资包：${formatMoney(rigidSalaryPackage)}\n• 当前收产包：${formatMoney(incomeWaterPool)}\n• 兜底缺口金额：${formatMoney(amountToInject)}\n\n确认后将从统筹池向收产包流入 ${formatMoney(amountToInject)} 收款确权积分。`,
+      () => {
+        if (onSystemAdjustment) {
+          const newLog = {
+            id: `J${(Date.now() % 100000000).toString().padStart(8, '0')}`,
+            miningId: '统筹池',
+            rankId: 'system',
+            category: RefineCategory.Revenue,
+            type: RefineType.Enterprise,
+            amount: amountToInject,
+            rawAmount: amountToInject,
+            dynamicCost: 0,
+            costCategory: undefined,
+            netValue: amountToInject,
+            timestamp: Date.now(),
+            status: AuditStatus.Approved,
+            confirmationType: '系统兜底确权'
+          };
+          const details = `统筹兜底处理：统筹池向收产包流入 ${formatMoney(amountToInject)} 收款积分。操作前：刚性工资包=${formatMoney(rigidSalaryPackage)}，收产包=${formatMoney(incomeWaterPool)}，差额=${formatMoney(netBalance)}`;
+          onSystemAdjustment(newLog as any, details);
+          toast.success(`统筹兜底注入成功：已注入 ${formatMoney(amountToInject)} 收款积分`);
+          showAlert(`统筹兜底资金注入成功！已向收产包注入 ${formatMoney(amountToInject)} 收款积分。`);
+        }
+      },
+      undefined,
+      '确认注入',
+      '取消'
+    );
+  }, [waterMetrics.rigidSalaryPackage, waterMetrics.incomeWaterPool, onSystemAdjustment, showAlert, showConfirm]);
 
   // --- 会务留样与报告状态管理 ---
   const isSampleSupported = periodType === 'month' || periodType === 'quarter';
@@ -867,8 +898,12 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       {/* Optimized Header Layout */}
       <div className="bg-white p-3 md:p-4 rounded-2xl md:rounded-3xl border border-slate-100 shadow-sm space-y-3">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
             <span className="text-xs font-black text-slate-800 tracking-wider">经营看板控制台</span>
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-200">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">统计周期</span>
+              <span className="text-xs font-black text-blue-600">{currentPeriodLabel}</span>
+            </div>
           </div>
 
           {/* Right: Period Type Selector */}
@@ -1282,6 +1317,19 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
             `}</style>
             
             <div className="relative w-full aspect-[10/9] md:aspect-[35/24] bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden mb-8">
+              <div className="absolute top-4 left-6 right-6 flex items-center justify-between z-10">
+                <div className="text-xl font-black text-slate-700">价值流转沙盘</div>
+                {waterMetrics.incomeWaterPool < waterMetrics.rigidSalaryPackage && (
+                  <button
+                    onClick={handleTriggerCoordinationAdjustment}
+                    className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 transition-all transform active:scale-95 cursor-pointer"
+                    title="收产包低于刚性工资包，点击执行统筹池兜底注入（须弹窗确认）"
+                  >
+                    <span>🛡️</span>
+                    <span>执行统筹兜底注入 (缺口: {formatMoney(waterMetrics.rigidSalaryPackage - waterMetrics.incomeWaterPool)})</span>
+                  </button>
+                )}
+              </div>
               {/* SVG Pipes Background */}
               <svg className="absolute inset-0 w-full h-full z-0">
                 <defs>
@@ -1389,14 +1437,20 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
               </svg>
 
               {/* 统筹池 (Center-Left) */}
-              <div className="water-pool text-white shadow-lg w-[24%] aspect-square" style={{ background: 'linear-gradient(135deg, #a855f7, #7e22ce)', left: '44%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-1s' }}>
+              <div 
+                className="water-pool text-white shadow-lg w-[24%] aspect-[5/3] cursor-pointer group hover:scale-105 transition-transform" 
+                style={{ background: 'linear-gradient(135deg, #a855f7, #7e22ce)', left: '44%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-1s' }}
+                onClick={handleTriggerCoordinationAdjustment}
+                title="统筹池：点击可执行统筹兜底资金注入（须弹窗确认）"
+              >
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
-                <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none whitespace-nowrap">统筹池</h4>
+                <h4 className="text-[10px] font-black mb-0.5 relative z-10 drop-shadow-md leading-none whitespace-nowrap">统筹池</h4>
                 <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{formatMoney(displayPlatformCoordinationPool)}</div>
+                <div className="text-[8px] font-bold text-white/70 relative z-10 mt-1 tracking-tight group-hover:text-white">点击兜底注入</div>
               </div>
 
               {/* 1. 收产包 (Top Left) */}
-              <div className="water-pool text-white shadow-lg w-[24%] aspect-square" style={{ background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', left: '18%', top: '25%', transform: 'translate(-50%, -50%)', animationDelay: '0s' }}>
+              <div className="water-pool text-white shadow-lg w-[24%] aspect-[5/3]" style={{ background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', left: '18%', top: '25%', transform: 'translate(-50%, -50%)', animationDelay: '0s' }}>
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-0.5 relative z-10 drop-shadow-md leading-none">收产包</h4>
                 <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md border-b border-blue-400/50 pb-0.5 mb-1 w-[95%] leading-none text-center">{formatMoney(displayIncomeWaterPool)}</div>
@@ -1418,7 +1472,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                 const totalRigid = displayTotalRigidExpenses + operatingLoss;
                 return (
                   <div 
-                    className="water-pool text-white shadow-lg w-[28%] aspect-square cursor-pointer group" 
+                    className="water-pool text-white shadow-lg w-[28%] aspect-[2/1] cursor-pointer group" 
                     style={{ background: 'linear-gradient(135deg, #f43f5e, #be123c)', left: '82%', top: '25%', transform: 'translate(-50%, -50%)', animationDelay: '-2s' }}
                     onClick={() => onSwitchTab?.('consumption')}
                   >
@@ -1451,21 +1505,21 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
               })()}
 
               {/* 3. 奖金池 (Middle Right) */}
-              <div className="water-pool text-white shadow-lg w-[24%] aspect-square" style={{ background: 'linear-gradient(135deg, #10b981, #047857)', left: '82%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-3s' }}>
+              <div className="water-pool text-white shadow-lg w-[24%] aspect-[5/3]" style={{ background: 'linear-gradient(135deg, #10b981, #047857)', left: '82%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-3s' }}>
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none">奖金池</h4>
                 <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{formatMoney(displayTotalBonusPool)}</div>
               </div>
 
               {/* 4. 承兑池 (Bottom Right) */}
-              <div className="water-pool text-white shadow-lg w-[24%] aspect-square" style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)', left: '82%', top: '85%', transform: 'translate(-50%, -50%)', animationDelay: '-4s' }}>
+              <div className="water-pool text-white shadow-lg w-[24%] aspect-[5/3]" style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)', left: '82%', top: '85%', transform: 'translate(-50%, -50%)', animationDelay: '-4s' }}>
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none">承兑池</h4>
                 <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{formatMoney(displayTotalBonusPool)}</div>
               </div>
 
               {/* 5. 分红池 (Bottom Left) */}
-              <div className="water-pool text-white shadow-lg w-[24%] aspect-square" style={{ background: 'linear-gradient(135deg, #a855f7, #7e22ce)', left: '18%', top: '85%', transform: 'translate(-50%, -50%)', animationDelay: '-6s' }}>
+              <div className="water-pool text-white shadow-lg w-[24%] aspect-[5/3]" style={{ background: 'linear-gradient(135deg, #a855f7, #7e22ce)', left: '18%', top: '85%', transform: 'translate(-50%, -50%)', animationDelay: '-6s' }}>
                 <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
                 <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none">分红池</h4>
                 <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md border-b border-white/20 pb-0.5 mb-1 w-[90%] leading-none text-center">
@@ -1645,7 +1699,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
         </div>
       </Card>
 
-              {/* 资产状态监控 (价值动态流) */}
+              {/* 资产状态监控 (收款/产值价值流) */}
       <div className="lg:col-span-12">
         <div className={`bg-white rounded-[2rem] md:${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-xl p-4 md:p-6`}>
           <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 md:mb-10 gap-6">

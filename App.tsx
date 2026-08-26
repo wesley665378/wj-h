@@ -1,7 +1,7 @@
 
 import { safeSetItem, safeGetItem } from './src/utils/safeLocalStorage';
 import React, { useState, useEffect, useMemo } from 'react';
-import { isAdminOrNpc, isGlobalReader, isSystemAdmin } from './src/utils/accessControl';
+import { isAdminOrNpc, isGlobalReader, isSystemAdmin, parseCenterList } from './src/utils/accessControl';
 import { filterUsersByCenter, filterResourcesByCenter, filterLogsByCenter, filterTransactionsByCenter, isResourceAssignedToCenter } from './src/utils/centerScope';
 import { TERM_FILTERED_LOGS, TERM_AUDIT_LOGS } from './src/constants/terminology';
 import { useCityGuardianModal, CityGuardianModal } from './src/components/CityGuardianModal';
@@ -82,7 +82,7 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
       try {
-        const saved = localStorage.getItem('shihe_user');
+        const saved = safeGetItem('shihe_user');
         return saved ? JSON.parse(saved) : null;
       } catch (e) {
         console.error('Failed to parse user from localStorage', e);
@@ -95,7 +95,7 @@ const App: React.FC = () => {
   const [businessUnits, setBusinessUnits] = useState<string[]>(() => {
     if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
       try {
-        const saved = localStorage.getItem('shihe_business_units');
+        const saved = safeGetItem('shihe_business_units');
         const parsed = saved ? JSON.parse(saved) : ['RC', '经营单元-001'];
         return Array.isArray(parsed) ? parsed : ['RC', '经营单元-001'];
       } catch (e) {
@@ -238,12 +238,9 @@ const App: React.FC = () => {
     };
     fetchWorkspace();
     
-    // 执行 SQL 迁移 (静默)
-    fetch(`${import.meta.env.VITE_API_BASE || ''}/api/admin/migrate`, { method: 'POST' }).catch(() => {});
-    
     // 清除已废弃的数据
     if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
-      const currentUnits = localStorage.getItem('shihe_business_units');
+      const currentUnits = safeGetItem('shihe_business_units');
       if (currentUnits) {
         try {
           let units = JSON.parse(currentUnits);
@@ -269,7 +266,7 @@ const App: React.FC = () => {
   const [circuitBreakers, setCircuitBreakers] = useState<CircuitBreaker[]>(() => {
     if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
       try {
-        const saved = localStorage.getItem('shihe_circuit_breakers');
+        const saved = safeGetItem('shihe_circuit_breakers');
         return saved ? JSON.parse(saved) : [];
       } catch {
         return [];
@@ -747,21 +744,21 @@ const App: React.FC = () => {
 
   // 2. 数据处理与初始加载
   useEffect(() => {
-    if (!localStorage.getItem('cleared_test_data_v2')) {
+    if (!safeGetItem('cleared_test_data_v2')) {
       onClearTestData();
       return;
     }
 
     if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
       try {
-        const savedResources = localStorage.getItem('shihe_resources');
+        const savedResources = safeGetItem('shihe_resources');
         if (savedResources) setMiningResources(JSON.parse(savedResources));
       } catch (e) {
         console.warn('Failed to parse shihe_resources from localStorage', e);
       }
 
       try {
-        const savedTransactions = localStorage.getItem('shihe_transactions');
+        const savedTransactions = safeGetItem('shihe_transactions');
         if (savedTransactions) setTransactions(JSON.parse(savedTransactions));
       } catch (e) {
         console.warn('Failed to parse shihe_transactions from localStorage', e);
@@ -805,8 +802,6 @@ const App: React.FC = () => {
       if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
         // E′-6 规则澄清: shihe_* 本地缓存仅作为客户端前端暂存与开发环境保底，非权威主账本；服务端 API 接口及工作区同步 payload 为权威源。
         safeSetItem('shihe_managed_users', JSON.stringify(managedUsers));
-        safeSetItem('shihe_logs', JSON.stringify(logs));
-        safeSetItem('shihe_transactions', JSON.stringify(transactions));
         safeSetItem('shihe_business_units', JSON.stringify(businessUnits));
       }
 
@@ -949,8 +944,11 @@ const App: React.FC = () => {
     if (isGlobal) return circuitBreakers;
     const centerUserIds = new Set(filteredUsers.map(u => u.id));
     const resourceIds = new Set(filteredResources.map(r => r.id));
+    const centers = parseCenterList(currentUser.center);
     return circuitBreakers.filter(cb => 
-      centerUserIds.has(cb.targetId) || resourceIds.has(cb.targetId) || (cb.targetName && currentUser.center && cb.targetName.includes(currentUser.center))
+      centerUserIds.has(cb.targetId) || 
+      resourceIds.has(cb.targetId) || 
+      (cb.targetName && centers.some(c => cb.targetName.toUpperCase().includes(c)))
     );
   }, [circuitBreakers, filteredUsers, filteredResources, currentUser, isGlobal]);
 
@@ -982,7 +980,7 @@ const App: React.FC = () => {
         resources: filteredResources, 
         users: filteredUsers, 
         currentUser, 
-        transactions,
+        transactions: filteredTransactions,
         onSystemAdjustment,
         onSwitchTab: setActiveTab,
         businessUnits: businessUnits,
@@ -996,7 +994,7 @@ const App: React.FC = () => {
         logs: filteredLogs, 
         onLogSubmit, 
         onSwitchTab: setActiveTab,
-        transactions,
+        transactions: filteredTransactions,
         onAuditTransaction,
         onAddCircuitBreaker,
         quotaSnapshots,
@@ -1099,11 +1097,11 @@ const App: React.FC = () => {
         logs: auditLogs, 
         users: filteredUsers, 
         currentUser, 
-        transactions, 
+        transactions: filteredTransactions, 
         resources: filteredResources, 
         onSubmitTransaction
       },
-      account: { currentUser, logs: auditLogs, transactions, resources: filteredResources, users: filteredUsers },
+      account: { currentUser, logs: auditLogs, transactions: filteredTransactions, resources: filteredResources, users: filteredUsers },
       personnel: { 
         user: currentUser,
         users: filteredUsers, 

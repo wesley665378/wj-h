@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { User, SystemOperationLog } from '../../types';
 import { fetchClientIp } from '../api/auth';
-import { getAuthToken, clearAuthToken } from '../api/client';
+import { safeGetItem, safeSetItem, safeRemoveItem } from '../utils/safeLocalStorage';
+import { clearAuthToken } from '../api/client';
 
 export interface UseSessionMetaReturn {
   clientIp: string;
@@ -16,7 +17,7 @@ export const useSessionMeta = (currentUser: User | null): UseSessionMetaReturn =
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
   const [systemLogs, setSystemLogs] = useState<SystemOperationLog[]>(() => {
     try {
-      const saved = localStorage.getItem('shihe_system_logs');
+      const saved = safeGetItem('shihe_system_logs');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
@@ -54,7 +55,7 @@ export const useSessionMeta = (currentUser: User | null): UseSessionMetaReturn =
   // Keep system logs cached in localStorage
   useEffect(() => {
     try {
-      localStorage.setItem('shihe_system_logs', JSON.stringify(systemLogs));
+      safeSetItem('shihe_system_logs', JSON.stringify(systemLogs));
     } catch (e) {
       console.warn('Failed to cache system logs', e);
     }
@@ -76,12 +77,12 @@ export const useSessionMeta = (currentUser: User | null): UseSessionMetaReturn =
   const clearSessionState = useCallback(() => {
     clearAuthToken();
     try {
-      localStorage.removeItem('shihe_user');
-      localStorage.removeItem('shihe_managed_users');
-      localStorage.removeItem('shihe_logs');
-      localStorage.removeItem('shihe_transactions');
-      localStorage.removeItem('shihe_business_units');
-      localStorage.removeItem('shihe_circuit_breakers');
+      safeRemoveItem('shihe_user');
+      safeRemoveItem('shihe_managed_users');
+      safeRemoveItem('shihe_logs');
+      safeRemoveItem('shihe_transactions');
+      safeRemoveItem('shihe_business_units');
+      safeRemoveItem('shihe_circuit_breakers');
     } catch (e) {
       console.warn('Failed to clean session storage', e);
     }

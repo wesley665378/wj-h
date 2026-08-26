@@ -30,8 +30,7 @@ import {
   Eye,
   EyeOff
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
-import { exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
+import { XLSX, exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
 import { CostPrivacyToggle } from '../src/components/CostPrivacyToggle';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCostPrivacy, formatCostDisplay } from '../src/hooks/useCostPrivacy';

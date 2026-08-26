@@ -7,8 +7,7 @@ import {
   Cell, Legend, CartesianGrid, PieChart, Pie 
 } from 'recharts';
 import { Card, ProgressBar } from '../src/components/UI';
-import * as XLSX from 'xlsx';
-import { exportWorkbook } from '../src/utils/excelIo';
+import { XLSX, exportWorkbook } from '../src/utils/excelIo';
 import { formatMoney } from '../src/utils/formatMoney';
 import { UI_LABELS } from '../src/constants/uiLabels';
 import { isSystemAdmin } from '../src/utils/accessControl';

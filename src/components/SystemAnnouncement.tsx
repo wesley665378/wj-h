@@ -4,6 +4,7 @@ import { Megaphone, Plus, Trash2, Pin, Bell, CheckCircle2, AlertTriangle, AlertC
 import { toast } from 'sonner';
 import { useCityGuardianModal, CityGuardianModal } from './CityGuardianModal';
 import { isSystemAdmin } from '../utils/accessControl';
+import { safeGetItem, safeSetItem } from '../utils/safeLocalStorage';
 
 interface SystemAnnouncementProps {
   currentUser: User;
@@ -37,7 +38,7 @@ export const SystemAnnouncement: React.FC<SystemAnnouncementProps> = ({ currentU
   const { modalState, showConfirm, closeModal } = useCityGuardianModal();
   const [announcements, setAnnouncements] = useState<Announcement[]>(() => {
     try {
-      const saved = localStorage.getItem('shihe_announcements');
+      const saved = safeGetItem('shihe_announcements');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -52,7 +53,7 @@ export const SystemAnnouncement: React.FC<SystemAnnouncementProps> = ({ currentU
   const [readIds, setReadIds] = useState<string[]>(() => {
     try {
       const key = `shihe_read_announcements_${currentUser.id}`;
-      const saved = localStorage.getItem(key);
+      const saved = safeGetItem(key);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) return parsed;
@@ -79,7 +80,7 @@ export const SystemAnnouncement: React.FC<SystemAnnouncementProps> = ({ currentU
   // Save announcements to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem('shihe_announcements', JSON.stringify(announcements));
+      safeSetItem('shihe_announcements', JSON.stringify(announcements));
     } catch (e) {
       console.error('Failed to save announcements:', e);
     }
@@ -89,7 +90,7 @@ export const SystemAnnouncement: React.FC<SystemAnnouncementProps> = ({ currentU
   useEffect(() => {
     try {
       const key = `shihe_read_announcements_${currentUser.id}`;
-      localStorage.setItem(key, JSON.stringify(readIds));
+      safeSetItem(key, JSON.stringify(readIds));
     } catch (e) {
       console.error('Failed to save read state:', e);
     }

@@ -11,8 +11,7 @@ import { CostPrivacyToggle } from '../src/components/CostPrivacyToggle';
 import { formatAmount } from '../src/utils/formatters';
 import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
 import { InfoTip } from '../src/components/InfoTip';
-import * as XLSX from 'xlsx';
-import { exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
+import { XLSX, exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
 import { toast } from 'sonner';
 import { Wallet, TrendingUp, ShieldCheck, ArrowRight, FileSpreadsheet, Search, Filter, Calendar, RefreshCw } from 'lucide-react';
 
@@ -258,7 +257,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, '我的账户流水明细');
+    XLSX.utils.book_append_sheet(workbook, worksheet, '我的帐户流水明细');
 
     // 增加汇总页签
     const summaryData = [
@@ -273,7 +272,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
     XLSX.utils.book_append_sheet(workbook, summarySheet, '汇总报告');
 
     const modeStr = startDate && endDate ? `${startDate}_至_${endDate}` : (selectedMonth || effectiveMonth);
-    exportWorkbook(workbook, buildExcelFilename(`我的账户流水明细_${currentUser.name}`, modeStr));
+    exportWorkbook(workbook, buildExcelFilename(`我的帐户流水明细_${currentUser.name}`, modeStr));
     toast.success('已导出流水报告（含汇总页签）');
   };
 
@@ -283,7 +282,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
       <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-6 ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-sm`}>
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-black text-slate-900 tracking-tight">我的账户</h1>
+            <h1 className="text-xl font-black text-slate-900 tracking-tight">我的帐户</h1>
             <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-xs font-mono font-bold">
               {currentUser.name} | {currentUser.category || currentUser.role}
             </Badge>

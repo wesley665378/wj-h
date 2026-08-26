@@ -1,12 +1,13 @@
 import { UI_TOKENS } from '../src/constants/uiTokens';
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { User, Role, ValueCreationLog } from '../types';
-import * as XLSX from 'xlsx';
+import { XLSX, exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
 import { Card, Badge } from '../src/components/UI';
 import { UserTableRow } from '../src/components/UserTableRow';
 import { MENU_ITEMS, RANK_DICTIONARY } from '../constants';
 import { checkUserPermission, RANK_CONFIG } from '../src/utils/business';
 import { getLocalMonthString } from '../src/utils/dateUtils';
+import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
 import { 
   resolveBusinessUnitName, 
   canonicalizeBusinessUnitLabel, 
@@ -18,6 +19,7 @@ import {
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { assertAcceptablePassword } from '../src/utils/security';
 import { stripUsersPasswords } from '../src/utils/userSyncPayload';
+import { parseCenterList } from '../src/utils/centerScope';
 import { 
   suggestResignHedgeAmount, 
   getResignHedgeFormulaDesc,
@@ -81,6 +83,9 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<'全部' | '采集主体' | '管理与VP'>('全部');
   const [searchQuery, setSearchQuery] = useState('');
+  const [businessMonth, setBusinessMonth] = useState<string>(getLocalMonthString());
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
   
 
 
@@ -198,7 +203,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
         id: newUserFormData.id,
         userId: newUserFormData.userId || newUserFormData.id,
         name: newUserFormData.name,
-        center: newUserFormData.center,
+        center: parseCenterList(newUserFormData.center).join(', '),
         role: role, 
         category: newUserFormData.category,
         secondaryRoles: newUserFormData.secondaryRoles,
@@ -317,7 +322,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       userId: formData.userId,
       name: formData.name,
       role: role,
-      center: formData.center,
+      center: parseCenterList(formData.center).join(', '),
       category: formData.category,
       secondaryRoles: formData.secondaryRoles,
       salaryPackageType: formData.salaryPackageType,
@@ -909,11 +914,42 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
               
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
-                  <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">经营单元</p>
-                  <select value={newUserFormData.center} onChange={e => setNewUserFormData({...newUserFormData, center: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none text-[10px]">
-                    <option value="">指派单元...</option>
-                    {businessUnits.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                  <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">
+                    {newUserFormData.category === 'VP' ? '经营单元 (VP 多选)' : '经营单元'}
+                  </p>
+                  {newUserFormData.category === 'VP' ? (
+                    <div className="bg-white border border-slate-200 rounded-xl p-2 space-y-1">
+                      {businessUnits.map(unit => {
+                        const selectedCenters = parseCenterList(newUserFormData.center);
+                        const unitUpper = unit.trim().toUpperCase();
+                        const isChecked = selectedCenters.includes(unitUpper);
+                        return (
+                          <label key={unit} className="flex items-center space-x-2 text-[10px] font-bold text-slate-700 cursor-pointer hover:bg-slate-50 p-1 rounded">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={e => {
+                                let nextList = [...selectedCenters];
+                                if (e.target.checked) {
+                                  if (!nextList.includes(unitUpper)) nextList.push(unitUpper);
+                                } else {
+                                  nextList = nextList.filter(c => c !== unitUpper);
+                                }
+                                setNewUserFormData({ ...newUserFormData, center: nextList.join(', ') });
+                              }}
+                              className="rounded text-blue-600 focus:ring-blue-500"
+                            />
+                            <span>{unit}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <select value={newUserFormData.center} onChange={e => setNewUserFormData({...newUserFormData, center: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none text-[10px]">
+                      <option value="">指派单元...</option>
+                      {businessUnits.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">职级</p>
@@ -972,11 +1008,42 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                       <input type="text" placeholder="名称" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" />
                     </div>
                     <div className="space-y-1">
-                      <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">指派经营单元</p>
-                      <select value={formData.center} onChange={e => setFormData({...formData, center: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs">
-                        <option value="">未分类 / 全域</option>
-                        {businessUnits.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
+                      <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">
+                        {formData.category === 'VP' ? '指派经营单元 (VP 多选)' : '指派经营单元'}
+                      </p>
+                      {formData.category === 'VP' ? (
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-2 space-y-1">
+                          {businessUnits.map(unit => {
+                            const selectedCenters = parseCenterList(formData.center);
+                            const unitUpper = unit.trim().toUpperCase();
+                            const isChecked = selectedCenters.includes(unitUpper);
+                            return (
+                              <label key={unit} className="flex items-center space-x-2 text-xs font-bold text-slate-700 cursor-pointer hover:bg-slate-100 p-1 rounded">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={e => {
+                                    let nextList = [...selectedCenters];
+                                    if (e.target.checked) {
+                                      if (!nextList.includes(unitUpper)) nextList.push(unitUpper);
+                                    } else {
+                                      nextList = nextList.filter(c => c !== unitUpper);
+                                    }
+                                    setFormData({ ...formData, center: nextList.join(', ') });
+                                  }}
+                                  className="rounded text-blue-600 focus:ring-blue-500"
+                                />
+                                <span>{unit}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <select value={formData.center} onChange={e => setFormData({...formData, center: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs">
+                          <option value="">未分类 / 全域</option>
+                          {businessUnits.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      )}
                     </div>
                     <div className="space-y-1">
                       <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">职级</p>
@@ -1046,6 +1113,14 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                       </button>
                     )}
                   </div>
+                  <BusinessDateFilter
+                    month={businessMonth}
+                    onMonthChange={setBusinessMonth}
+                    startDate={startDate}
+                    endDate={endDate}
+                    onDateRangeChange={(s, e) => { setStartDate(s); setEndDate(e); }}
+                    className="ml-4"
+                  />
 
                 </div>
              </div>

@@ -203,6 +203,8 @@ export interface MiningResource {
   id: string; 
   initialRevenueCapacity: number; // 合同款初
   initialValueCapacity: number; // 合同产初
+  initialRevenueLimit?: number; // 合同款限/款初限
+  initialValueLimit?: number; // 合同产限/产初限
   types: RefineType[]; // 提炼类型（支持多选）
   revenueCapacity: number; // 款当
   valueCapacity: number; // 产当
@@ -386,4 +388,48 @@ export interface MeetingSample {
     logCount?: number; // 该期流水条数
     [key: string]: any;
   };
+}
+
+export type SettlementPayoutCategory = '产值奖金' | '收款奖金' | '5%专项包' | '2%专项包' | '刚性保证' | '弹性激励' | '特批调整' | '其他' | string;
+
+export interface DividendPoolAdjustment {
+  id: string;
+  centerId?: string;
+  centerName?: string;
+  amount: number;
+  reason?: string;
+  operatorId?: string;
+  operatorName?: string;
+  timestamp?: number;
+  month?: string;
+  periodMonth?: string;
+  recordType?: 'system' | 'manual' | 'fhctz' | 'supplement' | string;
+  entrySide?: 'in' | 'out' | 'credit' | 'debit' | string;
+  status?: 'pending' | 'approved' | 'verified' | 'rejected' | 'active' | string;
+  details?: string;
+  source?: string;
+  targetId?: string;
+  targetName?: string;
+  [key: string]: any;
+}
+
+export interface SettlementPayout {
+  id: string;
+  userId: string;
+  userName: string;
+  category: SettlementPayoutCategory;
+  miningId?: string;
+  theoreticalAmount?: number;
+  amount: number;
+  diffType?: string;
+  diffReason?: string;
+  approvalRef?: string;
+  description?: string;
+  operatorId?: string;
+  status: '已承兑' | '待承兑' | 'pending' | 'approved' | 'rejected' | 'paid' | string;
+  timestamp?: number;
+  month?: string;
+  businessDate?: string;
+  remarks?: string;
+  [key: string]: any;
 }
