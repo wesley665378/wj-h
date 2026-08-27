@@ -27,7 +27,8 @@ import { calculateHistoricalNetValue, calculateDualTrackCoreMatrices, calculateT
 import { calculateHedgeCapacitiesAndWeights } from '@/utils/consumptionHedge';
 import { deriveProjectStatus, isProjectWritable } from '@/utils/projectStatus';
 import { isAdminOrNpc, parseCenterList } from '@/utils/accessControl';
-import { userCenterMatchesBusinessUnit } from '@/utils/businessUnitName';
+import { userCenterMatchesBusinessUnit, businessUnitLabelsEqual } from '@/utils/businessUnitName';
+import { isCenterManagerUser, sortCenterManagers } from '@/utils/centerManager';
 import { labelBusinessUnit } from '@/utils/statusDisplay';
 import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '@/components/CityGuardianModal';
@@ -258,13 +259,15 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   }, [users]);
 
   const canSelectOthers = useMemo(() => {
-    return user.role === Role.Rank || user.category === '系统管理员' || user.role === Role.Admin;
+    return isCenterManagerUser(user) || user.category === '系统管理员' || user.role === Role.Admin;
   }, [user]);
 
-  const businessUnitManagers = useMemo(() => managedUsers.filter(u => 
-    (u.userStatus !== 'inactive') &&
-    (u.role === Role.Rank || u.category === '系统管理员' || user.role === Role.Admin)
-  ), [managedUsers, user.role]);
+  const businessUnitManagers = useMemo(() => {
+    const managers = managedUsers.filter(u => 
+      isCenterManagerUser(u) || u.category === '系统管理员' || u.role === Role.Admin
+    );
+    return sortCenterManagers(managers);
+  }, [managedUsers]);
 
   useEffect(() => {
     // 自动匹配当前智能体账号所属经营单元
@@ -273,7 +276,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       const userCenters = parseCenterList(user.center);
       const businessUnitRep = businessUnitManagers.find(u => {
         const uCenters = parseCenterList(u.center);
-        return u.role === Role.Rank && userCenters.some(c => uCenters.includes(c));
+        return isCenterManagerUser(u) && userCenters.some(c => uCenters.includes(c));
       });
       if (businessUnitRep) {
         setSelectedOperatorId(businessUnitRep.id);
@@ -1209,9 +1212,13 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                   <option value="">自动匹配矿山编号...</option>
                   {availableResources.map(r => {
                     const { status } = deriveProjectStatus(r);
+                    const userCenters = parseCenterList(user.center);
+                    const q = r.quotas?.find(qItem => userCenters.some(uc => businessUnitLabelsEqual(qItem.centerId, uc)));
+                    const quotaInfo = q ? ` | 接后: ${selectedCategory === RefineCategory.Value ? formatMoney(q.valueQuota) : formatMoney(q.revenueQuota)}` : '';
+                    
                     return (
                       <option key={r.id} value={r.id} disabled={selectedCategory === RefineCategory.Value && r.valueDepleted}>
-                        {r.id} | [{status}] | 产当: {getCurrentValueCapacity(r)} (已确: {r.confirmedValue}) | 款当: {getCurrentRevenueCapacity(r)} (已确: {r.confirmedRevenue}) {selectedCategory === RefineCategory.Value && r.valueDepleted ? '[已满]' : ''}
+                        {r.id} | [{status}]{quotaInfo} | 产当: {getCurrentValueCapacity(r)} (已确: {r.confirmedValue}) | 款当: {getCurrentRevenueCapacity(r)} (已确: {r.confirmedRevenue}) {selectedCategory === RefineCategory.Value && r.valueDepleted ? '[已满]' : ''}
                       </option>
                     );
                   })}

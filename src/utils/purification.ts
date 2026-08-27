@@ -1,4 +1,5 @@
 import { ValueCreationLog, MiningResource, AuditStatus, RefineCategory } from '../../types';
+import { businessUnitLabelsEqual } from './businessUnitName';
 
 export interface QuadrantData {
   capacity: number;
@@ -25,7 +26,8 @@ export function getQuadrantLedgerAmount(log: ValueCreationLog): number {
  */
 export function calculateSingleResourceQuadrants(
   resource: MiningResource,
-  logs: ValueCreationLog[]
+  logs: ValueCreationLog[],
+  centerId?: string | null
 ): MiningQuadrants {
   const relevantLogs = logs.filter(l => l.miningId === resource.id);
 
@@ -41,8 +43,17 @@ export function calculateSingleResourceQuadrants(
   const existingB2 = confirmedB2Logs.reduce((sum, l) => sum + (l.dynamicCost || 0), 0);
 
   // 款初/款当/产初/产当
-  const initialRevCap = resource.initialRevenueCapacity !== undefined ? resource.initialRevenueCapacity : resource.revenueCapacity || 0;
-  const initialValueCap = resource.initialValueCapacity !== undefined ? resource.initialValueCapacity : resource.valueCapacity || 0;
+  // 🛑 DB-02-F 修复：如果指定了经营单元，优先从该单元的配额（quotas）获取上限
+  let initialRevCap = resource.initialRevenueCapacity !== undefined ? resource.initialRevenueCapacity : resource.revenueCapacity || 0;
+  let initialValueCap = resource.initialValueCapacity !== undefined ? resource.initialValueCapacity : resource.valueCapacity || 0;
+
+  if (centerId && resource.quotas && resource.quotas.length > 0) {
+    const q = resource.quotas.find(item => businessUnitLabelsEqual(item.centerId, centerId));
+    if (q) {
+      initialRevCap = q.revenueQuota || 0;
+      initialValueCap = q.valueQuota || 0;
+    }
+  }
 
   const revenueCapacity = Math.max(0, initialRevCap - existingC);
   const valueCapacity = Math.max(0, initialValueCap - existingC - existingB2);
@@ -98,12 +109,13 @@ export function calculateSingleResourceQuadrants(
 export function aggregateMiningQuadrantsFromLogs(
   logs: ValueCreationLog[],
   resources: MiningResource[],
-  miningId?: string
+  miningId?: string,
+  centerId?: string | null
 ): MiningQuadrants {
   if (miningId) {
     const resource = resources.find(r => r.id === miningId);
     if (resource) {
-      return calculateSingleResourceQuadrants(resource, logs);
+      return calculateSingleResourceQuadrants(resource, logs, centerId);
     }
     return {
       revenue: { capacity: 0, pending: 0, confirmed: 0, unconfirmed: 0, mined: 0 },
@@ -118,7 +130,7 @@ export function aggregateMiningQuadrantsFromLogs(
   };
 
   for (const r of resources) {
-    const singles = calculateSingleResourceQuadrants(r, logs);
+    const singles = calculateSingleResourceQuadrants(r, logs, centerId);
     totals.revenue.capacity += singles.revenue.capacity;
     totals.revenue.pending += singles.revenue.pending;
     totals.revenue.confirmed += singles.revenue.confirmed;

@@ -42,7 +42,7 @@ import {
 } from '../src/utils/dateUtils';
 import { formatAmount, formatRatio, formatPercent } from '../src/utils/formatters';
 import { calculateHedgeCapacitiesAndWeights } from '../src/utils/consumptionHedge';
-import { filterAuditLogsByCenter, isLogLinkedToCenterUser, isGlobalReader, parseCenterList } from '../src/utils/centerScope';
+import { filterAuditLogsByCenter, isLogLinkedToCenterUser, isGlobalReader, parseCenterList, isCenterManagerUser, sortCenterManagers } from '../src/utils/centerScope';
 import { InfoTip } from '../src/components/InfoTip';
 import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
 import { getExecutionType, getExecutionTypeBadgeColor, EXECUTION_TYPE_EXPLANATIONS } from '../src/utils/executionType';
@@ -152,10 +152,13 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
   }, [users]);
 
   const canSelectOthers = useMemo(() => {
-    return user.role === Role.Rank || user.category === '系统管理员' || user.role === Role.Admin;
+    return isCenterManagerUser(user) || user.category === '系统管理员' || user.role === Role.Admin;
   }, [user]);
 
-  const businessUnitManagers = useMemo(() => users.filter(u => u.role === Role.Rank || u.category === '系统管理员' || user.role === Role.Admin), [users, user.role]);
+  const businessUnitManagers = useMemo(() => {
+    const managers = users.filter(u => isCenterManagerUser(u) || u.category === '系统管理员' || u.role === Role.Admin);
+    return sortCenterManagers(managers);
+  }, [users]);
 
   // 获取当前选中的矿山详情
   const selectedResource = useMemo(() => {
@@ -549,8 +552,9 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                       const options: { id: string, center: string }[] = [];
                       
                       // 优先展示经理/管理员作为代表
-                      const managers = users.filter(u => u.role === Role.Rank || u.category === '系统管理员' || u.role === Role.Admin);
-                      managers.forEach(u => {
+                      const managers = users.filter(u => isCenterManagerUser(u) || u.category === '系统管理员' || u.role === Role.Admin);
+                      const sortedManagers = sortCenterManagers(managers);
+                      sortedManagers.forEach(u => {
                         if (u.center && !seenCenters.has(u.center)) {
                           seenCenters.add(u.center);
                           options.push({ id: u.id, center: u.center });

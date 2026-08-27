@@ -120,7 +120,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
     id: '', 
     userId: '',
     name: '', 
-    role: Role.Rank, 
+    role: Role.RevenueCollector, 
     center: '',
     category: '初款专',
     secondaryRoles: [],
@@ -150,7 +150,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
     if (activeCategory === '采集主体') {
       result = users.filter(u => 
         u.category !== 'NPC' && u.category !== '系统管理员' && u.category !== 'VP' && u.category !== '经管员NPC' &&
-        (['初款专', '中款专', '高款专', '初产专', '中产专', '高产专', '经管员高款专', '经管员高产专'].includes(u.category || '') || [Role.Rank, Role.RevenueCollector, Role.ValueCollector].includes(u.role))
+        (['初款专', '中款专', '高款专', '初产专', '中产专', '高产专', '经管员高款专', '经管员高产专'].includes(u.category || '') || [Role.RevenueCollector, Role.ValueCollector].includes(u.role))
       );
     } else if (activeCategory === '管理与VP') {
       result = users.filter(u => ['VP', 'NPC', '系统管理员', '经管员NPC'].includes(u.category || '') || u.role === Role.Admin || u.role === Role.ReservoirManager);
@@ -197,7 +197,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       isSyncing.current = true;
 
       const currentMonth = getLocalMonthString();
-      let role = Role.Rank;
+      let role = Role.RevenueCollector;
       const cat = newUserFormData.category;
       if (cat === '初款专' || cat === '中款专' || cat === '高款专' || cat === '经管员高款专') role = Role.RevenueCollector;
       else if (cat === '初产专' || cat === '中产专' || cat === '高产专' || cat === '经管员高产专') role = Role.ValueCollector;

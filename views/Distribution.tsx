@@ -3,11 +3,8 @@ import React, { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 import { TIER_COEFFICIENTS } from "../src/constants/coefficients";
-import {
-  calculateBonusAllocation,
-  isExpertCategory,
-  aggregateUserMonthMetrics,
-} from "../src/utils/bonusAllocation";
+import { calculateBonusAllocation, isExpertCategory, aggregateUserMonthMetrics } from "../src/utils/bonusAllocation";
+import { isCenterManagerUser } from "../src/utils/centerScope";
 import { getUserSalaryByMonth } from "../src/utils/business";
 import { resolveLogBusinessMonth, getLocalMonthString, getLocalDateString, resolveLogBusinessDate, isDateInRange } from "../src/utils/dateUtils";
 import { formatAmount, formatRatio, formatPercent } from "../src/utils/formatters";
@@ -439,7 +436,7 @@ const Distribution: React.FC<DistributionProps> = ({
         const sRoles = u.secondaryRoles || [];
 
         const isExpert =
-          cat.includes("款专") || cat.includes("产专") || u.role === Role.Rank;
+          cat.includes("款专") || cat.includes("产专") || isCenterManagerUser(u);
         const hasExpertSecondaryRole = sRoles.some(
           (r) => r.includes("款专") || r.includes("产专"),
         );

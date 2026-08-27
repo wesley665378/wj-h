@@ -562,28 +562,46 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
             assignedToValue: (tx.valueAmount && tx.valueAmount > 0) 
               ? appendCenter(resource.assignedToValue, targetCenter) 
               : (resource.assignedToValue || ''),
-            revenueCapacity: receivedRevenue > 0 ? receivedRevenue : resource.revenueCapacity,
-            valueCapacity: receivedValue > 0 ? receivedValue : resource.valueCapacity,
-            initialRevenueCapacity: receivedRevenue > 0 ? receivedRevenue : resource.initialRevenueCapacity,
-            initialValueCapacity: receivedValue > 0 ? receivedValue : resource.initialValueCapacity,
-            quotas: (resource.quotas || []).map(q => {
-              if (businessUnitLabelsEqual(q.centerId, targetCenter)) {
-                return {
-                  ...q,
-                  revenueQuota: receivedRevenue > 0 ? receivedRevenue : q.revenueQuota,
-                  valueQuota: receivedValue > 0 ? receivedValue : q.valueQuota,
+            // 🛑 修复：严禁覆写矿山级容量字段 (revenueCapacity, valueCapacity 等)，保持物理上限不变
+            quotas: (() => {
+              // 识别发起单元 (用于从发起方扣减额度)
+              const sender = managerSource.find(u => u.id === tx.senderId);
+              const sourceCenter = resolveBusinessUnitName(sender?.center, units) || canonicalizeBusinessUnitLabel(sender?.center);
+              
+              let currentQuotas = [...(resource.quotas || [])];
+              
+              // 1. 处理接收方 (targetCenter): 增量累加额度
+              const targetIdx = currentQuotas.findIndex(q => businessUnitLabelsEqual(q.centerId, targetCenter));
+              if (targetIdx > -1) {
+                currentQuotas[targetIdx] = {
+                  ...currentQuotas[targetIdx],
+                  revenueQuota: (currentQuotas[targetIdx].revenueQuota || 0) + receivedRevenue,
+                  valueQuota: (currentQuotas[targetIdx].valueQuota || 0) + receivedValue,
                 };
+              } else {
+                currentQuotas.push({
+                  centerId: targetCenter,
+                  revenueQuota: receivedRevenue,
+                  valueQuota: receivedValue,
+                  minedRevenue: 0,
+                  minedValue: 0
+                });
               }
-              return q;
-            }).concat(
-              !(resource.quotas || []).some(q => businessUnitLabelsEqual(q.centerId, targetCenter)) ? [{
-                centerId: targetCenter,
-                revenueQuota: receivedRevenue,
-                valueQuota: receivedValue,
-                minedRevenue: 0,
-                minedValue: 0
-              }] : []
-            )
+
+              // 2. 处理发起方 (sourceCenter): 对应扣减额度 (确保矿山总额度在各单元间守恒)
+              if (sourceCenter && !businessUnitLabelsEqual(sourceCenter, targetCenter)) {
+                const sourceIdx = currentQuotas.findIndex(q => businessUnitLabelsEqual(q.centerId, sourceCenter));
+                if (sourceIdx > -1) {
+                  currentQuotas[sourceIdx] = {
+                    ...currentQuotas[sourceIdx],
+                    revenueQuota: Math.max(0, (currentQuotas[sourceIdx].revenueQuota || 0) - receivedRevenue),
+                    valueQuota: Math.max(0, (currentQuotas[sourceIdx].valueQuota || 0) - receivedValue),
+                  };
+                }
+              }
+              
+              return currentQuotas;
+            })()
           };
           console.log(`[内部交易] 矿山编号 ${tx.miningId} 已将接收单元 [${targetCenter}] 写入指派`);
         }

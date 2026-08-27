@@ -268,8 +268,8 @@ const Auditing: React.FC<AuditingProps> = ({
       {
         name: "工时对冲",
         value: approved
-          .filter((l) => l.type === RefineType.NonEffectiveHours)
-          .reduce((acc, curr) => acc + curr.dynamicCost, 0),
+          .filter((l) => isNonEffectiveHoursEffective(l))
+          .reduce((acc, curr) => acc + getNonEffectiveHoursDeduction(curr), 0),
         color: "#8b5cf6",
       },
     ].filter((item) => item.value > 0);

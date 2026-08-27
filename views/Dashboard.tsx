@@ -4,7 +4,8 @@ import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { ValueCreationLog, MiningResource, AuditStatus, RefineCategory, User, InternalTransaction, RefineType, Role, TransactionType, TransactionStatus, MeetingSample } from '../types';
 import { isAdminOrNpc, isGlobalReader, parseCenterList } from '@/utils/accessControl';
-import { isResourceAssignedToCenter } from '@/utils/centerScope';
+import { isResourceAssignedToCenter, isCenterManagerUser } from '@/utils/centerScope';
+import { businessUnitLabelsEqual } from '@/utils/businessUnitName';
 import { 
   Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend
@@ -98,7 +99,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
   const isGlobalReaderUser = useMemo(() => currentUser ? isGlobalReader(currentUser) : false, [currentUser]);
 
   const isManager = useMemo(() => 
-    currentUser?.category === '经管员高款专' || currentUser?.category === '经管员高产专',
+    currentUser ? isCenterManagerUser(currentUser) : false,
   [currentUser]);
 
   const handleRefresh = () => {
@@ -124,11 +125,12 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
 
   const resourceQuadrants = useMemo(() => {
     const map = new Map<string, ReturnType<typeof aggregateMiningQuadrantsFromLogs>>();
+    const activeCenter = isManager ? currentUser?.center : filterCenter;
     for (const r of resources) {
-      map.set(r.id, aggregateMiningQuadrantsFromLogs(activeJzczLogs, resources, r.id));
+      map.set(r.id, aggregateMiningQuadrantsFromLogs(activeJzczLogs, resources, r.id, activeCenter));
     }
     return map;
-  }, [activeJzczLogs, resources]);
+  }, [activeJzczLogs, resources, isManager, currentUser, filterCenter]);
 
   const filteredResources = useMemo(() => {
     return resources.filter(r => {
@@ -412,8 +414,53 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
           if (!centers[centerName]) {
             centers[centerName] = { name: centerName, value: 0, revenueLimit: 0, valueLimit: 0, revenue2Percent: 0, value5Percent: 0 };
           }
-          centers[centerName].revenueLimit += r.revenueCapacity;
-          centers[centerName].valueLimit += r.valueCapacity;
+          
+          // 修正口径：优先从配额表获取，无配额时按款/产指派获取
+          let hasUsedQuota = false;
+          if (r.quotas && r.quotas.length > 0) {
+            const q = r.quotas.find(qItem => businessUnitLabelsEqual(qItem.centerId, centerName));
+            if (q) {
+              centers[centerName].revenueLimit += (q.revenueQuota || 0);
+              centers[centerName].valueLimit += (q.valueQuota || 0);
+              hasUsedQuota = true;
+            }
+          }
+          
+          if (!hasUsedQuota) {
+            // 无配额分配时，按指派角色精准核算
+            if (parseCenterList(r.assignedToRevenue).includes(centerName)) {
+              centers[centerName].revenueLimit += r.revenueCapacity;
+            }
+            if (parseCenterList(r.assignedToValue).includes(centerName)) {
+              centers[centerName].valueLimit += r.valueCapacity;
+            }
+          }
+
+          // 叠加「已确权资源交易」产生的额度变动 (接后额度修正)
+          // ⚠️ DB-01-DUP-F 修复：采用单一数据源 (SSOT)。若 quotas 已包含内部交易，则不再遍历 verifiedTrans。
+          if (!hasUsedQuota && transactions) {
+            const verifiedTrans = transactions.filter(t => 
+              t.miningId === r.id && 
+              t.type === TransactionType.Resource && 
+              t.status === TransactionStatus.Verified
+            );
+            
+            verifiedTrans.forEach(t => {
+              const senderCenters = users.find(u => u.id === t.senderId)?.center || t.senderId;
+              const receiverCenters = users.find(u => u.id === t.receiverId)?.center || t.receiverId;
+              
+              // 单元作为接收方：增加初限
+              if (parseCenterList(receiverCenters).includes(centerName)) {
+                centers[centerName].revenueLimit += (t.revenueAmount || 0);
+                centers[centerName].valueLimit += (t.valueAmount || 0);
+              }
+              // 单元作为发起方：扣减初限
+              if (parseCenterList(senderCenters).includes(centerName)) {
+                centers[centerName].revenueLimit -= (t.revenueAmount || 0);
+                centers[centerName].valueLimit -= (t.valueAmount || 0);
+              }
+            });
+          }
         });
 
         // Calculate period-based extraction
@@ -639,8 +686,21 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
     const reservoirInflow = totalStoredWater;
 
     // 产值原料产量参考相关计算
-    const totalValueInitial = resources.reduce((acc, r) => acc + (r.initialValueCapacity || r.valueCapacity), 0);
-    const totalRevenueInitial = resources.reduce((acc, r) => acc + (r.initialRevenueCapacity || r.revenueCapacity), 0);
+    // 修正口径：平台级汇总应基于经营单元的「接后额度 (Quotas)」之和，而非整矿物理上限
+    // 这样能确保全局总指标与各单元看板之和完全对齐，避免因多单元共矿导致的统计虚高
+    const totalValueInitial = resources.reduce((acc, r) => {
+      if (r.quotas && r.quotas.length > 0) {
+        return acc + r.quotas.reduce((qSum, q) => qSum + (q.valueQuota || 0), 0);
+      }
+      return acc + (r.initialValueCapacity || r.valueCapacity || 0);
+    }, 0);
+
+    const totalRevenueInitial = resources.reduce((acc, r) => {
+      if (r.quotas && r.quotas.length > 0) {
+        return acc + r.quotas.reduce((qSum, q) => qSum + (q.revenueQuota || 0), 0);
+      }
+      return acc + (r.initialRevenueCapacity || r.revenueCapacity || 0);
+    }, 0);
     const totalMinedRevenue = revenueMinedAmount;
     const totalMinedValue = valueMinedAmount;
 
