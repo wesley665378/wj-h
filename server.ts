@@ -122,7 +122,10 @@ let MOCK_ACCEPTANCE_DB: any[] = [];
 let MOCK_JZFP_DB: any[] = [];
 let MOCK_RDQ_DB: any[] = [];
 let MOCK_MEETING_SAMPLES_DB: any[] = [];
-let MOCK_BUSINESS_UNITS_DB: string[] = ['RC', '经营单元-001'];
+let MOCK_JYDY_UNITS_DB: any[] = [
+  { id: 'RC', name: 'RC', category: '前台', status: 'active' },
+  { id: '经营单元-001', name: '经营单元-001', category: '前台', status: 'active' }
+];
 let MOCK_RESOURCES_DB: any[] = [
   { 
     id: 'KS001', 
@@ -311,9 +314,14 @@ async function startServer() {
               }))
             : MOCK_MEETING_SAMPLES_DB;
 
+          const parsedLogs = logs ? logs.map((l: any) => ({
+            ...l,
+            deleted: Boolean(l.deleted)
+          })) : [];
+
           return res.json({ 
             managedUsers: users, 
-            logs, 
+            logs: parsedLogs, 
             transactions, 
             miningResources: miningResources || [],
             valueEfficiencySnapshots: snapshots || [],
@@ -321,7 +329,6 @@ async function startServer() {
             circuitBreakers: rdqRows && rdqRows.length > 0 ? rdqRows : MOCK_RDQ_DB,
             rdq: rdqRows && rdqRows.length > 0 ? rdqRows : MOCK_RDQ_DB,
             meetingSamples: parsedMeetingSamples,
-            businessUnits: MOCK_BUSINESS_UNITS_DB
           });
         } catch (queryErr) {
           const err = queryErr as any;
@@ -337,16 +344,16 @@ async function startServer() {
           // Don't throw, just fall through to mock
         }
       }
-      res.json({ managedUsers: MOCK_USERS_DB, logs: MOCK_LOGS_DB, transactions: MOCK_TRANSACTIONS_DB, miningResources: MOCK_RESOURCES_DB, valueEfficiencySnapshots: MOCK_SNAPSHOTS_DB, acceptanceRecords: MOCK_ACCEPTANCE_DB, circuitBreakers: MOCK_RDQ_DB, rdq: MOCK_RDQ_DB, meetingSamples: MOCK_MEETING_SAMPLES_DB, businessUnits: MOCK_BUSINESS_UNITS_DB });
+      res.json({ managedUsers: MOCK_USERS_DB, logs: MOCK_LOGS_DB, transactions: MOCK_TRANSACTIONS_DB, miningResources: MOCK_RESOURCES_DB, valueEfficiencySnapshots: MOCK_SNAPSHOTS_DB, acceptanceRecords: MOCK_ACCEPTANCE_DB, circuitBreakers: MOCK_RDQ_DB, rdq: MOCK_RDQ_DB, meetingSamples: MOCK_MEETING_SAMPLES_DB });
     } catch (error) {
       console.error('Workspace recovery failure:', error);
-      res.json({ managedUsers: MOCK_USERS_DB, logs: MOCK_LOGS_DB, transactions: MOCK_TRANSACTIONS_DB, miningResources: MOCK_RESOURCES_DB, valueEfficiencySnapshots: MOCK_SNAPSHOTS_DB, acceptanceRecords: MOCK_ACCEPTANCE_DB, circuitBreakers: MOCK_RDQ_DB, rdq: MOCK_RDQ_DB, meetingSamples: MOCK_MEETING_SAMPLES_DB, businessUnits: MOCK_BUSINESS_UNITS_DB });
+      res.json({ managedUsers: MOCK_USERS_DB, logs: MOCK_LOGS_DB, transactions: MOCK_TRANSACTIONS_DB, miningResources: MOCK_RESOURCES_DB, valueEfficiencySnapshots: MOCK_SNAPSHOTS_DB, acceptanceRecords: MOCK_ACCEPTANCE_DB, circuitBreakers: MOCK_RDQ_DB, rdq: MOCK_RDQ_DB, meetingSamples: MOCK_MEETING_SAMPLES_DB });
     }
   });
 
   app.post("/api/workspace/sync", async (req, res) => {
     try {
-      const { users, logs, dtcb, transactions, miningResources, valueEfficiencySnapshots, acceptanceRecords, businessUnits } = req.body;
+      const { users, logs, dtcb, transactions, miningResources, valueEfficiencySnapshots, acceptanceRecords } = req.body;
       const combinedLogs = [...(logs || []), ...(dtcb || [])];
       const db = await getPool();
       
@@ -383,9 +390,17 @@ async function startServer() {
           if (combinedLogs && combinedLogs.length > 0) {
             for (const log of combinedLogs) {
               await connection.execute(
-                'INSERT INTO logs (id, miningId, rankId, recordedCollectorId, category, type, costCategory, amount, dynamicCost, cClassCost, cClassRatio, netValue, timestamp, status, confirmationType, month, businessDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE status=?, amount=?, netValue=?, month=?, businessDate=?',
-                [log.id, log.miningId, log.rankId, log.recordedCollectorId || '', log.category, log.type, log.costCategory || '', log.amount, log.dynamicCost, log.cClassCost || 0, log.cClassRatio || 0, log.netValue, log.timestamp, log.status, log.confirmationType || '', log.month || '', log.businessDate || '', log.status, log.amount, log.netValue, log.month || '', log.businessDate || '']
-              );
+                'INSERT INTO logs (id, miningId, rankId, recordedCollectorId, category, type, costCategory, amount, dynamicCost, cClassCost, cClassRatio, netValue, timestamp, status, confirmationType, month, businessDate, deleted, deletedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE status=?, amount=?, netValue=?, month=?, businessDate=?, deleted=?, deletedAt=?',
+                [
+                  log.id, log.miningId, log.rankId, log.recordedCollectorId || '', log.category, log.type, log.costCategory || '', log.amount, log.dynamicCost, log.cClassCost || 0, log.cClassRatio || 0, log.netValue, log.timestamp, log.status, log.confirmationType || '', log.month || '', log.businessDate || '', log.deleted ? 1 : 0, log.deletedAt || null,
+                  log.status, log.amount, log.netValue, log.month || '', log.businessDate || '', log.deleted ? 1 : 0, log.deletedAt || null
+                ]
+              ).catch(() => {
+                return connection.execute(
+                  'INSERT INTO logs (id, miningId, rankId, recordedCollectorId, category, type, costCategory, amount, dynamicCost, cClassCost, cClassRatio, netValue, timestamp, status, confirmationType, month, businessDate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE status=?, amount=?, netValue=?, month=?, businessDate=?',
+                  [log.id, log.miningId, log.rankId, log.recordedCollectorId || '', log.category, log.type, log.costCategory || '', log.amount, log.dynamicCost, log.cClassCost || 0, log.cClassRatio || 0, log.netValue, log.timestamp, log.status, log.confirmationType || '', log.month || '', log.businessDate || '', log.status, log.amount, log.netValue, log.month || '', log.businessDate || '']
+                );
+              });
             }
           }
 
@@ -506,7 +521,6 @@ async function startServer() {
       if (miningResources) MOCK_RESOURCES_DB = miningResources;
       if (valueEfficiencySnapshots) MOCK_SNAPSHOTS_DB = valueEfficiencySnapshots;
       if (acceptanceRecords) MOCK_ACCEPTANCE_DB = acceptanceRecords;
-      if (businessUnits && Array.isArray(businessUnits)) MOCK_BUSINESS_UNITS_DB = businessUnits;
       if (req.body.jzfp) MOCK_JZFP_DB = req.body.jzfp;
       if (req.body.circuitBreakers || req.body.rdq) MOCK_RDQ_DB = req.body.circuitBreakers || req.body.rdq;
       if (req.body.meetingSamples && Array.isArray(req.body.meetingSamples)) {
@@ -1133,6 +1147,20 @@ async function startServer() {
   }
 
   // 3. Distribution Read-Only API Endpoint (权威分配只读 API)
+  app.get("/api/jydy", async (req, res) => {
+    res.json({ data: MOCK_JYDY_UNITS_DB });
+  });
+
+  app.post("/api/jydy/sync", async (req, res) => {
+    const { units } = req.body;
+    if (units && Array.isArray(units)) {
+      MOCK_JYDY_UNITS_DB = units;
+      res.json({ data: { success: true } });
+    } else {
+      res.status(400).json({ error: "Invalid units data" });
+    }
+  });
+
   app.get("/api/distribution", async (req, res) => {
     try {
       const targetMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
@@ -1538,7 +1566,9 @@ async function startServer() {
           status VARCHAR(64) NOT NULL,
           confirmationType VARCHAR(64),
           month VARCHAR(7),
-          businessDate VARCHAR(10)
+          businessDate VARCHAR(10),
+          deleted TINYINT(1) DEFAULT 0,
+          deletedAt VARCHAR(64)
         )
       `);
 
@@ -1652,6 +1682,11 @@ async function startServer() {
       const [confCols]: any = await db.execute("SHOW COLUMNS FROM logs LIKE 'confirmedAt'");
       if (confCols.length === 0) {
         await db.execute("ALTER TABLE logs ADD COLUMN confirmedAt BIGINT");
+      }
+
+      const [delCols]: any = await db.execute("SHOW COLUMNS FROM logs LIKE 'deleted'");
+      if (delCols.length === 0) {
+        await db.execute("ALTER TABLE logs ADD COLUMN deleted TINYINT(1) DEFAULT 0, ADD COLUMN deletedAt VARCHAR(64)");
       }
 
       const [txCols]: any = await db.execute("SHOW COLUMNS FROM transactions LIKE 'month'");

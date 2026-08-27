@@ -41,7 +41,7 @@ interface ReservoirProps {
   resources: MiningResource[];
   users: User[];
   transactions?: InternalTransaction[];
-  businessUnits: string[];
+  units: string[];
   currentUser?: User;
 }
 
@@ -417,7 +417,7 @@ const ReservoirVisualizer: React.FC<{
   );
 };
 
-const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users, transactions = [], businessUnits, currentUser }) => {
+const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users, transactions = [], units, currentUser }) => {
   const [selectedMonth, setSelectedMonth] = useState(() => getLocalMonthString()); // YYYY-MM
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
@@ -462,7 +462,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
   }, [filteredLogs]);
 
   // 3. 经营单元明细计算
-  const centerMetrics = useMemo(() => businessUnits.map(center => {
+  const centerMetrics = useMemo(() => units.map(center => {
     const centerLogs = filteredLogs.filter(l => {
       const collector = users.find(u => u.id === l.recordedCollectorId);
       return collector?.center === center;
@@ -489,7 +489,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
       unitSalary,
       unitSupplement
     };
-  }).filter(m => m.confirmedRevenuePackage > 0 || m.unitSalary > 0), [businessUnits, filteredLogs, resources, users, effectiveMonth]);
+  }).filter(m => m.confirmedRevenuePackage > 0 || m.unitSalary > 0), [units, filteredLogs, resources, users, effectiveMonth]);
 
   // 排序与搜索过滤后的单元明细
   const sortedAndFilteredMetrics = useMemo(() => {
@@ -776,7 +776,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
 
       {/* 经营单元盈利排名榜 (全宽展示) */}
       <BusinessUnitProfitRankingTable
-        businessUnits={businessUnits}
+        units={units}
         selectedMonth={selectedMonth}
         users={users}
         auditLogs={auditLogs || logs}

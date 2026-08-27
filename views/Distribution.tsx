@@ -1,7 +1,7 @@
 import { UI_TOKENS } from '../src/constants/uiTokens';
 import React, { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import StandardModal from "../src/components/StandardModal";
+
 import { TIER_COEFFICIENTS } from "../src/constants/coefficients";
 import {
   calculateBonusAllocation,
@@ -252,12 +252,12 @@ const Distribution: React.FC<DistributionProps> = ({
           setServerDistribution(res.distribution);
         } else {
           setDistributionError("获取的分配数据格式不正确");
-          toast.error("获取的分配数据格式不正确");
+          showAlert("获取的分配数据格式不正确");
         }
       })
       .catch(err => {
         setDistributionError("无法加载分配数据");
-        toast.error("无法加载分配数据");
+        showAlert("无法加载分配数据");
       })
       .finally(() => {
         setDistributionLoading(false);
@@ -1821,13 +1821,12 @@ const Distribution: React.FC<DistributionProps> = ({
       </div>
 
       {/* 登记承兑发放 Modal */}
-      <StandardModal
-        isOpen={!!bonusTarget}
-        onClose={() => setBonusTarget(null)}
-        title="城市守护者"
-        subtitle={`登记承兑发放 - ${bonusTarget?.userName || ""}`}
-      >
-        {bonusTarget && (
+      <CityGuardianModal 
+        state={{
+          isOpen: !!bonusTarget && !modalState.isOpen,
+          type: 'custom',
+          title: `城市守护者 - 登记承兑发放 (${bonusTarget?.userName || ""})`,
+          content: (
           <div className="space-y-4">
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
               <div className="flex justify-between">
@@ -1961,8 +1960,10 @@ const Distribution: React.FC<DistributionProps> = ({
               </button>
             </div>
           </div>
-        )}
-      </StandardModal>
+          )
+        }}
+        onClose={() => setBonusTarget(null)}
+      />
       <CityGuardianModal state={modalState} onClose={closeModal} />
     </div>
   );

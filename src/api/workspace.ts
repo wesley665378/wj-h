@@ -20,7 +20,6 @@ export interface WorkspaceDataResponse {
   circuitBreakers?: CircuitBreaker[];
   rdq?: CircuitBreaker[];
   meetingSamples?: MeetingSample[];
-  businessUnits?: string[];
   valueEfficiencySnapshots?: any[];
   jzfp?: any[];
 }
@@ -37,7 +36,6 @@ export interface SyncWorkspacePayload {
   circuitBreakers?: CircuitBreaker[];
   rdq?: CircuitBreaker[];
   meetingSamples?: MeetingSample[];
-  businessUnits?: string[];
 }
 
 export const fetchWorkspaceData = async (): Promise<WorkspaceDataResponse> => {

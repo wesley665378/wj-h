@@ -28,7 +28,7 @@ export interface User {
   avatar?: string; // 头像
   role: Role;
   center?: string;
-  category?: '初产专' | '中产专' | '高产专' | '初款专' | '中款专' | '高款专' | '经管员高款专' | '经管员高产专' | 'NPC' | '系统管理员' | 'VP' | '经管员NPC';
+  category?: '初产专' | '中产专' | '高产专' | '初款专' | '中款专' | '高款专' | '经管员高款专' | '经管员高产专' | 'NPC' | '系统管理员' | 'VP' | '经管员NPC' | '水库管理员' | '统筹水库管理员';
   secondaryRoles?: ('高款专' | '高产专')[]; // 兼任专家
   salaryPackageType?: '收款工资包' | '产值工资包' | '经管员工资包' | 'NPC工资包' | 'VP工资包';
   salaryPackage?: number; // 工资包（三方核定固定）
@@ -39,6 +39,13 @@ export interface User {
   mustChangePassword?: boolean; // 首次登录强制改密标识
   isFirstLogin?: boolean; // 首次登录标识
   resignDate?: string; // 离职日期 YYYY-MM-DD
+}
+
+export interface JydyUnit {
+  id: string;
+  name: string;
+  category?: '前台' | '后台';
+  status?: 'active' | 'inactive';
 }
 
 export interface SystemOperationLog {

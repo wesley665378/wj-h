@@ -35,13 +35,16 @@ import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
 import { getExecutionType, getExecutionTypeBadgeColor, EXECUTION_TYPE_EXPLANATIONS } from '../src/utils/executionType';
 import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
-import TradingTab from './TradingTab';
+import { isCenterManagerUser, sortCenterManagers } from '../src/utils/centerManager';
 
 interface InternalTransactionsProps {
   currentUser: User;
   users: User[];
+  managerUsers?: User[];
   resources: MiningResource[];
+  allResources?: MiningResource[];
   logs: ValueCreationLog[];
+  jzczLogs?: ValueCreationLog[];
   transactions: InternalTransaction[];
   onSubmitTransaction: (tx: InternalTransaction | InternalTransaction[], updatedResources?: MiningResource[]) => void;
   onAuditTransaction: (txId: string | string[], status: TransactionStatus, updatedResource?: MiningResource | MiningResource[]) => void;
@@ -50,7 +53,7 @@ interface InternalTransactionsProps {
   circuitBreakers: CircuitBreaker[];
   onAddCircuitBreaker: (cb: CircuitBreaker) => void;
   onRecoverCircuitBreaker: (id: string) => void;
-  businessUnits: string[];
+  units: string[];
   persistWorkspaceNow?: () => Promise<void>;
   persistWorkspaceWithOverrides?: (overrides?: any) => Promise<void>;
 }
@@ -61,8 +64,11 @@ const WINDOW_MS = 60 * 1000;
 const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   currentUser,
   users,
+  managerUsers,
   resources,
+  allResources,
   logs,
+  jzczLogs,
   transactions,
   onSubmitTransaction,
   onAuditTransaction,
@@ -71,7 +77,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   circuitBreakers,
   onAddCircuitBreaker,
   onRecoverCircuitBreaker,
-  businessUnits,
+  units,
   persistWorkspaceNow,
   persistWorkspaceWithOverrides
 }) => {
@@ -190,55 +196,28 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     return false;
   };
 
+  const managerSource = useMemo(() => managerUsers ?? users, [managerUsers, users]);
+
   const userList = useMemo(() => {
     return users;
   }, [users]);
 
-  // SSOT: 以 businessUnits 为唯一清单基准构建经营单元列表与主责经管员
+  // SSOT: 以经营单元权威清单 (jydy 派生) 为唯一基准构建经营单元列表与主责经管员
   const unitSelectionList = useMemo(() => {
-    const rawUnits = Array.isArray(businessUnits) && businessUnits.length > 0 
-      ? Array.from(new Set(businessUnits.map(canonicalizeBusinessUnitLabel).filter(Boolean)))
-      : Array.from(new Set(userList.map(u => canonicalizeBusinessUnitLabel(u.center)).filter(Boolean)));
+    // units 此时已是由 App.tsx 统一由 jydy 派生的 effectiveBusinessUnits
+    const rawUnits = Array.isArray(units) && units.length > 0 
+      ? Array.from(new Set(units.map(canonicalizeBusinessUnitLabel).filter(Boolean)))
+      : Array.from(new Set(managerSource.map(u => canonicalizeBusinessUnitLabel(u.center)).filter(Boolean)));
 
     return rawUnits.map(unitName => {
-      const unitUsers = userList.filter(u => userCenterMatchesBusinessUnit(u.center, unitName) && u.userStatus !== 'inactive');
+      const unitUsers = managerSource.filter(u => userCenterMatchesBusinessUnit(u.center, unitName) && u.userStatus !== 'inactive');
       
-      // 负责人判定谓词：与后端 isCenterManagerUser 一致 (role=rank，或 category 包含经管员，或职级串含经管员)
-      const candidateManagers = unitUsers.filter(u => {
-        const r = u.role;
-        const cat = u.category || '';
-        const title = (u as any).roleTitle || '';
-        return (
-          r === Role.Rank ||
-          cat === '经管员高款专' ||
-          cat === '经管员高产专' ||
-          cat.includes('经管员') ||
-          cat.includes('经营单元管理员') ||
-          title.includes('经管员') ||
-          title.includes('经营单元管理员')
-        );
-      });
+      // SSOT 负责人判定谓词：排查 role=rank，仅纳入符合条件的经管员
+      const candidateManagers = unitUsers.filter(isCenterManagerUser);
 
       let manager: User | null = null;
       if (candidateManagers.length > 0) {
-        // 规则固定：优先 role=rank，其次经管员高款专，再经管员高产专；同级取 id / userId 字典序最小
-        const getPriorityScore = (u: User) => {
-          if (u.role === Role.Rank) return 1;
-          if (u.category === '经管员高款专') return 2;
-          if (u.category === '经管员高产专') return 3;
-          return 4;
-        };
-
-        candidateManagers.sort((a, b) => {
-          const scoreA = getPriorityScore(a);
-          const scoreB = getPriorityScore(b);
-          if (scoreA !== scoreB) return scoreA - scoreB;
-          const idA = a.userId || a.id || '';
-          const idB = b.userId || b.id || '';
-          return idA.localeCompare(idB);
-        });
-
-        manager = candidateManagers[0];
+        manager = sortCenterManagers(candidateManagers)[0];
       }
 
       const isSelfUnit = !!(currentUser.center && currentUser.center === unitName);
@@ -250,7 +229,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
         isSelfUnit
       };
     });
-  }, [businessUnits, userList, currentUser.center]);
+  }, [units, managerSource, currentUser.center]);
 
   const displayUnitList = useMemo(() => {
     // 跨单元流转：排除本账号所属单元（避免自己流转给自己）
@@ -272,11 +251,11 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     const names = receiverIds.map(rid => {
       const item = unitSelectionList.find(u => u.manager?.id === rid);
       if (item) return item.unitName;
-      const u = userList.find(usr => usr.id === rid);
+      const u = managerSource.find(usr => usr.id === rid);
       return u?.center || u?.name || rid;
     });
     return `已选择 ${receiverIds.length} 个单元: ${names.join(', ')}`;
-  }, [receiverIds, unitSelectionList, userList]);
+  }, [receiverIds, unitSelectionList, managerSource]);
 
   const availableMiningResources = useMemo(() => {
     if (isAdmin) return resources;
@@ -295,7 +274,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     return transactions.filter(t => {
       // 接收方确认阶段
       if (t.status === TransactionStatus.PendingTarget) {
-        const receiver = userList.find(u => u.id === t.receiverId);
+        const receiver = managerSource.find(u => u.id === t.receiverId);
         if (receiver && receiver.center && currentUser.center && receiver.center === currentUser.center) return true;
         if (t.receiverId === currentUser.id) return true;
       }
@@ -316,10 +295,14 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     return resources.find(r => r.id === miningId);
   }, [resources, miningId]);
 
+  const valueLogs = useMemo(() => {
+    return jzczLogs ?? logs.filter(l => l.confirmationType !== '手动确权');
+  }, [jzczLogs, logs]);
+
   const selectedResourceQuadrants = useMemo(() => {
     if (!selectedResource) return null;
-    return aggregateMiningQuadrantsFromLogs(logs, resources, selectedResource.id);
-  }, [selectedResource, logs, resources]);
+    return aggregateMiningQuadrantsFromLogs(valueLogs, resources, selectedResource.id);
+  }, [selectedResource, valueLogs, resources]);
 
   // 自动匹配经营单元逻辑
   useEffect(() => {
@@ -396,7 +379,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     const receiverNames = receiverIds.map(rid => {
       const item = unitSelectionList.find(u => u.manager?.id === rid);
       if (item) return item.unitName;
-      const u = userList.find(usr => usr.id === rid);
+      const u = managerSource.find(usr => usr.id === rid);
       return u?.center || u?.name || rid;
     }).join(', ');
 
@@ -405,16 +388,20 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       async () => {
         const newTxs: InternalTransaction[] = [];
         receiverIds.forEach((rid, index) => {
+          const revAmt = type === TransactionType.Resource ? ((sharedAllocations[rid]?.confirmedRevenue || 0) + (sharedAllocations[rid]?.unconfirmedRevenue || 0)) : (revenueAmount || 0);
+          const valAmt = type === TransactionType.Resource ? ((sharedAllocations[rid]?.pendingValue || 0) + (sharedAllocations[rid]?.confirmedValue || 0) + (sharedAllocations[rid]?.unconfirmedValue || 0)) : (valueAmount || 0);
+          const totalAmount = revAmt + valAmt > 0 ? (revAmt + valAmt) : amount;
+
           const newTx: InternalTransaction = {
             id: `TX${(Date.now() + index).toString().slice(-6)}`,
             type,
             senderId: currentUser.id,
             receiverId: rid,
             miningId: type === TransactionType.Resource ? miningId : undefined,
-            amount: amount,
+            amount: totalAmount,
             unitPrice: unitPrice > 0 ? unitPrice : undefined,
-            revenueAmount: type === TransactionType.Resource ? ((sharedAllocations[rid]?.confirmedRevenue || 0) + (sharedAllocations[rid]?.unconfirmedRevenue || 0)) : undefined,
-            valueAmount: type === TransactionType.Resource ? ((sharedAllocations[rid]?.pendingValue || 0) + (sharedAllocations[rid]?.confirmedValue || 0) + (sharedAllocations[rid]?.unconfirmedValue || 0)) : undefined,
+            revenueAmount: revAmt,
+            valueAmount: valAmt,
             confirmedRevenue: sharedAllocations[rid]?.confirmedRevenue,
             unconfirmedRevenue: sharedAllocations[rid]?.unconfirmedRevenue,
             pendingValue: sharedAllocations[rid]?.pendingValue,
@@ -455,8 +442,8 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     let list = transactions;
     if (!isAdmin) {
       list = list.filter(t => {
-        const sender = userList.find(u => u.id === t.senderId);
-        const receiver = userList.find(u => u.id === t.receiverId);
+        const sender = managerSource.find(u => u.id === t.senderId);
+        const receiver = managerSource.find(u => u.id === t.receiverId);
         return sender?.center === currentUser.center || receiver?.center === currentUser.center;
       });
     }
@@ -464,7 +451,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     list = list.filter(t => isLogInFilter(t, filterMonth, filterStartDate, filterEndDate));
     
     return list;
-  }, [transactions, currentUser.center, isAdmin, userList, filterMonth, filterStartDate, filterEndDate]);
+  }, [transactions, currentUser.center, isAdmin, managerSource, filterMonth, filterStartDate, filterEndDate]);
 
   const filteredExchangeTransactions = useMemo(() => {
     return transactions.filter(t => {
@@ -494,11 +481,14 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     else if (action === 'modify') {
       // 接收人修改后提交
       if (modifyingTx) {
+        const revAmt = modRevenueAmount || 0;
+        const valAmt = modValueAmount || 0;
+        const totalAmount = revAmt + valAmt > 0 ? (revAmt + valAmt) : modAmount;
         const updatedTx = {
           ...modifyingTx,
-          amount: modAmount,
-          revenueAmount: modRevenueAmount,
-          valueAmount: modValueAmount,
+          amount: totalAmount,
+          revenueAmount: revAmt,
+          valueAmount: valAmt,
           receiverId: modReceiverId,
           status: TransactionStatus.PendingInitiatorVerify // 待发起方验证
         };
@@ -536,15 +526,15 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
         
         // 当接收方确认时，执行矿山指派写入逻辑（矿山编号不变）
         if (tx.miningId) {
-          const globalResources = resources;
+          const globalResources = allResources || resources;
           const resource = globalResources.find(r => r.id === tx.miningId);
           if (!resource) {
             showAlert(`确认失败：未在全量资源库中找到矿山编号 [${tx.miningId}]。操作已中止，交易状态未变更。`);
             return;
           }
 
-          const receiver = userList.find(u => u.id === tx.receiverId);
-          const targetCenter = resolveBusinessUnitName(receiver?.center, businessUnits) || canonicalizeBusinessUnitLabel(receiver?.center);
+          const receiver = managerSource.find(u => u.id === tx.receiverId);
+          const targetCenter = resolveBusinessUnitName(receiver?.center, units) || canonicalizeBusinessUnitLabel(receiver?.center);
           if (!targetCenter) {
             showAlert(`确认失败：接收主体 [${receiver?.name || tx.receiverId}] 未配置所属经营单元。操作已中止。`);
             return;
@@ -560,6 +550,9 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
             return centers.join(',');
           };
 
+          const receivedRevenue = tx.revenueAmount !== undefined ? tx.revenueAmount : (tx.amount || 0);
+          const receivedValue = tx.valueAmount !== undefined ? tx.valueAmount : (tx.amount || 0);
+
           updatedResource = {
             ...resource,
             assignedTo: appendCenter(resource.assignedTo, targetCenter),
@@ -568,7 +561,29 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
               : (resource.assignedToRevenue || ''),
             assignedToValue: (tx.valueAmount && tx.valueAmount > 0) 
               ? appendCenter(resource.assignedToValue, targetCenter) 
-              : (resource.assignedToValue || '')
+              : (resource.assignedToValue || ''),
+            revenueCapacity: receivedRevenue > 0 ? receivedRevenue : resource.revenueCapacity,
+            valueCapacity: receivedValue > 0 ? receivedValue : resource.valueCapacity,
+            initialRevenueCapacity: receivedRevenue > 0 ? receivedRevenue : resource.initialRevenueCapacity,
+            initialValueCapacity: receivedValue > 0 ? receivedValue : resource.initialValueCapacity,
+            quotas: (resource.quotas || []).map(q => {
+              if (businessUnitLabelsEqual(q.centerId, targetCenter)) {
+                return {
+                  ...q,
+                  revenueQuota: receivedRevenue > 0 ? receivedRevenue : q.revenueQuota,
+                  valueQuota: receivedValue > 0 ? receivedValue : q.valueQuota,
+                };
+              }
+              return q;
+            }).concat(
+              !(resource.quotas || []).some(q => businessUnitLabelsEqual(q.centerId, targetCenter)) ? [{
+                centerId: targetCenter,
+                revenueQuota: receivedRevenue,
+                valueQuota: receivedValue,
+                minedRevenue: 0,
+                minedValue: 0
+              }] : []
+            )
           };
           console.log(`[内部交易] 矿山编号 ${tx.miningId} 已将接收单元 [${targetCenter}] 写入指派`);
         }
@@ -581,7 +596,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       }
 
       onAuditTransaction(tx.id, nextStatus, updatedResource);
-      showAlert(`交易 [${tx.id}] 确认成功！${updatedResource ? `矿山 [${tx.miningId}] 已同步指派给 [${userList.find(u => u.id === tx.receiverId)?.center || '接收单元'}]。` : ''}`);
+      showAlert(`交易 [${tx.id}] 确认成功！${updatedResource ? `矿山 [${tx.miningId}] 已同步指派给 [${managerSource.find(u => u.id === tx.receiverId)?.center || '接收单元'}]。` : ''}`);
       return;
     }
 
@@ -627,7 +642,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
 
   const startModify = (tx: InternalTransaction) => {
     setModifyingTx(tx);
-    setModAmount(tx.amount);
+    setModAmount((tx.revenueAmount || 0) + (tx.valueAmount || 0) || tx.amount);
     setModRevenueAmount(tx.revenueAmount || 0);
     setModValueAmount(tx.valueAmount || 0);
     setModReceiverId(tx.receiverId);
@@ -645,9 +660,11 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
         '提交时间': formatSubmissionTime ? formatSubmissionTime(tx.timestamp) : new Date(tx.timestamp).toLocaleTimeString(),
         '交易类型': tx.type,
         '关联矿山': tx.miningId || 'N/A',
-        '发起方': userList.find(u => u.id === tx.senderId)?.center || userList.find(u => u.id === tx.senderId)?.name || tx.senderId,
-        '经营单元': userList.find(u => u.id === tx.receiverId)?.center || userList.find(u => u.id === tx.receiverId)?.name || tx.receiverId,
-        '流转额度': tx.amount,
+        '发起方': managerSource.find(u => u.id === tx.senderId)?.center || managerSource.find(u => u.id === tx.senderId)?.name || tx.senderId,
+        '经营单元': managerSource.find(u => u.id === tx.receiverId)?.center || managerSource.find(u => u.id === tx.receiverId)?.name || tx.receiverId,
+        '收款额度': tx.revenueAmount || 0,
+        '产值额度': tx.valueAmount || 0,
+        '合计流转额度': (tx.revenueAmount || 0) + (tx.valueAmount || 0) || tx.amount,
         '状态': tx.status,
         '备注': tx.description
       }));
@@ -769,7 +786,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
             </button>
           )}
 
-          <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-inner">
+           <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-inner">
              <button 
               onClick={() => setActiveTab('apply')}
               className={`px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all ${activeTab === 'apply' ? 'bg-white text-slate-900 shadow-xl scale-105' : 'text-slate-400 hover:text-slate-600'}`}
@@ -787,12 +804,6 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
               className={`px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all ${activeTab === 'history' ? 'bg-white text-slate-900 shadow-xl scale-105' : 'text-slate-400 hover:text-slate-600'}`}
              >
                交易记录
-             </button>
-             <button 
-              onClick={() => setActiveTab('exchange')}
-              className={`px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all ${activeTab === 'exchange' ? 'bg-white text-slate-900 shadow-xl scale-105' : 'text-slate-400 hover:text-slate-600'}`}
-             >
-               资源交易
              </button>
           </div>
         </div>
@@ -969,7 +980,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                           t.miningId === selectedResource.id
                         );
                         pendingTxs.forEach(t => {
-                          const receiver = users.find(u => u.id === t.receiverId);
+                          const receiver = managerSource.find(u => u.id === t.receiverId);
                           const receiverName = receiver?.center || receiver?.name || '未知';
                           const shortName = receiverName.replace('中心', '');
                           unconfirmedValueByReceiver[shortName] = (unconfirmedValueByReceiver[shortName] || 0) + (t.valueAmount || 0);
@@ -1014,7 +1025,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                               <h5 className="text-[11px] font-black text-emerald-600 uppercase tracking-widest flex items-center">
                                 <span className="mr-2"></span> {UI_LABELS.VALUE}
                               </h5>
-                              <span className="text-[10px] font-bold text-slate-400">产初: {getInitialValueCapacity(selectedResource).toLocaleString()} | 产当: {getCurrentValueCapacity(selectedResource, logs).toLocaleString()}</span>
+                              <span className="text-[10px] font-bold text-slate-400">产初: {getInitialValueCapacity(selectedResource).toLocaleString()} | 产当: {getCurrentValueCapacity(selectedResource, valueLogs).toLocaleString()}</span>
                             </div>
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                               {[
@@ -1036,7 +1047,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                               <h5 className="text-[11px] font-black text-amber-600 uppercase tracking-widest flex items-center">
                                 <span className="mr-2"></span> {UI_LABELS.REVENUE}
                               </h5>
-                              <span className="text-[10px] font-bold text-slate-400">款初: {getInitialRevenueCapacity(selectedResource).toLocaleString()} | 款当: {getCurrentRevenueCapacity(selectedResource, logs).toLocaleString()}</span>
+                              <span className="text-[10px] font-bold text-slate-400">款初: {getInitialRevenueCapacity(selectedResource).toLocaleString()} | 款当: {getCurrentRevenueCapacity(selectedResource, valueLogs).toLocaleString()}</span>
                             </div>
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                               {[
@@ -1060,11 +1071,37 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
 
                 {miningId && receiverIds.length > 0 && (
                   <div className="space-y-6 mt-6">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">共享提炼分配 (多部门)</label>
+                    <div className="flex items-center justify-between ml-1 mr-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">共享提炼分配 (多部门)</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!miningId || receiverIds.length === 0) return;
+                          const q = aggregateMiningQuadrantsFromLogs(valueLogs, availableMiningResources, miningId);
+                          const count = receiverIds.length;
+                          const newAllocations: Record<string, any> = {};
+                          receiverIds.forEach((rid) => {
+                            const factor = 1 / count;
+                            newAllocations[rid] = {
+                              confirmedRevenue: Math.round((q.revenue.confirmed || 0) * factor),
+                              unconfirmedRevenue: Math.round((q.revenue.unconfirmed || 0) * factor),
+                              pendingValue: Math.round((q.value.pending || 0) * factor),
+                              confirmedValue: Math.round((q.value.confirmed || 0) * factor),
+                              unconfirmedValue: Math.round((q.value.unconfirmed || 0) * factor),
+                            };
+                          });
+                          setSharedAllocations(newAllocations);
+                          toast.success("已成功同步 价值动态流 内容至多部门共享分配");
+                        }}
+                        className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center space-x-1 shadow-sm"
+                      >
+                        <span>同步价值动态流内容</span>
+                      </button>
+                    </div>
                     <div className="space-y-4">
                       {receiverIds.map(rid => {
                         const unitItem = unitSelectionList.find(u => u.manager?.id === rid);
-                        const receiver = userList.find(u => u.id === rid);
+                        const receiver = managerSource.find(u => u.id === rid);
                         const unitTitle = unitItem ? `${unitItem.unitName} (${unitItem.manager?.name || '经管员'})` : (receiver?.center ? `${receiver.center} (${receiver.name})` : (receiver?.name || rid));
                         return (
                           <div key={rid} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
@@ -1209,32 +1246,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
            </div>
         </div>
       )}
-      {activeTab === 'trading' && (
-        <TradingTab
-          selectedMineId={miningId}
-          setSelectedMineId={setMiningId}
-          selectedMine={selectedMine}
-          availableMiningResources={availableMiningResources}
-          pendingTransactions={pendingTransactions}
-          filteredExchangeTransactions={filteredExchangeTransactions}
-          users={users}
-          selectedTx={selectedTx}
-          setSelectedTx={setSelectedTx}
-          onAuditTransaction={handleAudit}
-          startModify={startModify}
-          modifyingTx={modifyingTx}
-          setModifyingTx={setModifyingTx}
-          modRevenueAmount={modRevenueAmount}
-          setModRevenueAmount={setModRevenueAmount}
-          modValueAmount={modValueAmount}
-          setModValueAmount={setModValueAmount}
-          setShowConfirmModal={handleOpenConfirmModal}
-          selectedTxIds={selectedTxIds}
-          setSelectedTxIds={setSelectedTxIds}
-          exportToExcel={exportToExcel}
-          logs={logs}
-        />
-      )}
+
 
       {activeTab === 'breakers' && (
         <div className="space-y-8 animate-in slide-in-from-bottom-4">
@@ -1374,7 +1386,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                           </td>
                           <td className="px-6 py-6 font-mono font-black text-slate-900">{tx.amount}</td>
                           <td className="px-6 py-6 text-xs font-bold text-slate-800">
-                             {userList.find(u => u.id === tx.receiverId)?.center || userList.find(u => u.id === tx.receiverId)?.name || tx.receiverId}
+                             {managerSource.find(u => u.id === tx.receiverId)?.center || managerSource.find(u => u.id === tx.receiverId)?.name || tx.receiverId}
                           </td>
                           <td className="px-10 py-6 text-right">
                              <button onClick={() => setSelectedTx(tx)} className="text-indigo-600 hover:underline text-[10px] font-black uppercase">详情</button>
@@ -1452,9 +1464,9 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                           </td>
                           <td className="px-6 py-6">
                              <div className="flex items-center space-x-3 text-xs font-bold text-slate-800">
-                                <span>{userList.find(u => u.id === tx.senderId)?.center || userList.find(u => u.id === tx.senderId)?.name || tx.senderId}</span>
+                                <span>{managerSource.find(u => u.id === tx.senderId)?.center || managerSource.find(u => u.id === tx.senderId)?.name || tx.senderId}</span>
                                 <span className="text-slate-300">→</span>
-                                <span>{userList.find(u => u.id === tx.receiverId)?.center || userList.find(u => u.id === tx.receiverId)?.name || tx.receiverId}</span>
+                                <span>{managerSource.find(u => u.id === tx.receiverId)?.center || managerSource.find(u => u.id === tx.receiverId)?.name || tx.receiverId}</span>
                              </div>
                           </td>
                           <td className="px-6 py-6 text-right font-mono font-black text-slate-900">

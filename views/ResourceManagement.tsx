@@ -10,6 +10,7 @@ import { deriveProjectStatus } from '../src/utils/projectStatus';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
 import { roundMoney, formatMoney } from '../src/utils/formatMoney';
 import { toast } from 'sonner';
+import { deleteMiningResource, toastApiError } from '../src/api';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { MiningResourceQueryView, normalizeMiningId } from '../src/components/MiningResourceQueryView';
 import { formatProjectStatusLabel, formatRefineTypeLabel } from '../src/utils/statusDisplay';
@@ -26,8 +27,8 @@ interface ResourceManagementProps {
   managedUsers?: User[];
   onAddResource: (res: MiningResource) => void;
   onUpdateResource: (res: MiningResource) => void;
-  onDeleteResource: (id: string) => void;
-  businessUnits: string[];
+  onDeleteResource: (id: string) => Promise<boolean> | void;
+  units: string[];
 }
 
 const ResourceManagement: React.FC<ResourceManagementProps> = ({ 
@@ -40,7 +41,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
   onUpdateResource, 
   onDeleteResource, 
   user, 
-  businessUnits 
+  units 
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
@@ -56,7 +57,6 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
   const [refineTypeFactors, setRefineTypeFactors] = useState<Record<string, { customRevenueFactor?: number; customValueFactor?: number }>>({});
   const [totalMonths, setTotalMonths] = useState<number>(12);
   const [monthN, setMonthN] = useState<number>(1);
-  const [units, setUnits] = useState<string[]>([]);
 
   // 按矿山编号查询相关状态
   const [searchMiningId, setSearchMiningId] = useState('');
@@ -80,11 +80,6 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
     return currentLogged >= res.valueCapacity;
   }, [editingId, resources]);
 
-  useEffect(() => {
-    setUnits(businessUnits);
-  }, [businessUnits]);
-
-  // 矿山编号前缀与提炼类型映射
   useEffect(() => {
     if (newMiningId && !editingId) {
       const prefix = newMiningId.charAt(0).toUpperCase();
@@ -146,8 +141,15 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
   };
 
   const handleDelete = (id: string) => {
-    showConfirm('警告：确定要永久移除此矿山资源吗？此操作将同步导致相关未确权任务失效。', () => {
-      onDeleteResource(id);
+    if (!isAdmin) {
+      showAlert('权限不足：仅系统管理员有权执行此操作。');
+      return;
+    }
+    showConfirm('警告：确定要永久移除此矿山资源吗？此操作将同步导致相关未确权任务失效。', async () => {
+      const success = await onDeleteResource(id);
+      if (success !== false) {
+        showAlert('移除成功');
+      }
     });
   };
 
@@ -585,8 +587,8 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                           const revCap = roundMoney(rawRevCap * 0.933);
                           const valCap = roundMoney(rawValCap * 0.933);
                           
-                          const assRev = row['收款指派'] || row['执行单元'] || businessUnits[0];
-                          const assVal = row['产值指派'] || row['执行单元'] || businessUnits[0];
+                          const assRev = row['收款指派'] || row['执行单元'] || units[0];
+                          const assVal = row['产值指派'] || row['执行单元'] || units[0];
                           const cat = row['核算类别'] || '100%';
 
                           const newRes: MiningResource = {
@@ -913,7 +915,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
 
           <button 
             type="submit" 
-            disabled={businessUnits.length === 0 || isDepleted}
+            disabled={units.length === 0 || isDepleted}
             className={`w-full py-6 rounded-3xl font-black uppercase tracking-[0.5em] transition-all shadow-2xl flex items-center justify-center space-x-3 ${(units.length === 0 || isDepleted) ? 'bg-slate-100 text-slate-300 cursor-not-allowed' : (editingId ? 'bg-blue-600' : 'bg-slate-900') + ' text-white hover:-translate-y-1 active:translate-y-0'}`}
           >
             <span>{units.length === 0 ? '未检测到经营单元' : (isDepleted ? '该资源已满额录入' : (editingId ? '保存资源指令变更' : '注入提炼指令'))}</span>
@@ -1009,7 +1011,9 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                   )}
                   <div className="absolute top-4 right-4 flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                   <button onClick={() => handleEdit(res)} title="修改此矿山资源的资源配置与指派参数" className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-600 hover:text-white transition-all text-xs">编辑</button>
-                  <button onClick={() => handleDelete(res.id)} title="永久移除此矿山资源（不可逆）" className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-600 hover:text-white transition-all text-xs">移除</button>
+                  {isAdmin && (
+                    <button onClick={() => handleDelete(res.id)} title="永久移除此矿山资源（不可逆）" className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-600 hover:text-white transition-all text-xs">移除</button>
+                  )}
                   </div>
                   <div className="mb-4">
                     <div className="flex justify-between items-start mb-1">
@@ -1154,7 +1158,9 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                       <td className="p-4 text-right">
                         <div className="flex items-center justify-end space-x-2">
                           <button onClick={() => handleEdit(res)} className="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-600 hover:text-white transition-all text-[11px] font-bold">编辑</button>
-                          <button onClick={() => handleDelete(res.id)} className="px-2.5 py-1 bg-red-50 text-red-600 rounded-lg hover:bg-red-600 hover:text-white transition-all text-[11px] font-bold">移除</button>
+                          {isAdmin && (
+                            <button onClick={() => handleDelete(res.id)} className="px-2.5 py-1 bg-red-50 text-red-600 rounded-lg hover:bg-red-600 hover:text-white transition-all text-[11px] font-bold">移除</button>
+                          )}
                         </div>
                       </td>
                     </tr>

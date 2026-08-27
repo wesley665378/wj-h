@@ -3,34 +3,35 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { ValueCreationLog, MiningResource, AuditStatus, RefineCategory, User, InternalTransaction, RefineType, Role, TransactionType, TransactionStatus, MeetingSample } from '../types';
-import { isAdminOrNpc, isGlobalReader, parseCenterList } from '../src/utils/accessControl';
-import { isResourceAssignedToCenter } from '../src/utils/centerScope';
+import { isAdminOrNpc, isGlobalReader, parseCenterList } from '@/utils/accessControl';
+import { isResourceAssignedToCenter } from '@/utils/centerScope';
 import { 
   Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend
 } from 'recharts';
-import { InfoTip } from '../src/components/InfoTip';
-import { CostPrivacyToggle } from '../src/components/CostPrivacyToggle';
-import { UI_TOKENS } from '../src/constants/uiTokens';
+import { InfoTip } from '@/components/InfoTip';
+import { CostPrivacyToggle } from '@/components/CostPrivacyToggle';
+import { UI_TOKENS } from '@/constants/uiTokens';
 import { RefreshCw, Info, LayoutGrid, List, AlertTriangle, Wallet, FileSpreadsheet, Sparkles, Lock, CheckCircle2 } from 'lucide-react';
-import { useCostPrivacy } from '../src/hooks/useCostPrivacy';
-import { useCityGuardianModal, CityGuardianModal } from '../src/components/CityGuardianModal';
-import { XLSX, exportWorkbook } from '../src/utils/excelIo';
-import { Card, StatItem, ProgressBar } from '../src/components/UI';
-import { UI_LABELS } from '../src/constants/uiLabels';
-import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
-import { PURITY_RULES, LINKED_CONFIRMATION_RULES } from '../src/constants/businessRules';
-import { getPurityInfo, calculateHistoricalNetValue, getUserSalaryByMonth, computeValueOutput5Incentive, computeCollection2Incentive } from '../src/utils/business';
-import { isSalaryActiveForMonth, isNonEffectiveHoursEffective } from '../src/utils/employmentStatus';
+import { useCostPrivacy } from '@/hooks/useCostPrivacy';
+import { useCityGuardianModal, CityGuardianModal } from '@/components/CityGuardianModal';
+import { XLSX, exportWorkbook } from '@/utils/excelIo';
+import { Card, StatItem, ProgressBar } from '@/components/UI';
+import { UI_LABELS } from '@/constants/uiLabels';
+import { aggregateMiningQuadrantsFromLogs } from '@/utils/purification';
+import { PURITY_RULES, LINKED_CONFIRMATION_RULES } from '@/constants/businessRules';
+import { getPurityInfo, calculateHistoricalNetValue, getUserSalaryByMonth, computeValueOutput5Incentive, computeCollection2Incentive } from '@/utils/business';
+import { isSalaryActiveForMonth, isNonEffectiveHoursEffective } from '@/utils/employmentStatus';
+import { getNonEffectiveHoursDeduction } from '@/utils/nonEffectiveHours';
 import { 
   sumConfirmedRevenuePackage, 
   sumValueConversionPackage, 
   sumIncomeProductionPackage 
-} from '../src/utils/reconcileMiningFromLogs';
-import { getLocalMonthString, isLogInFilter } from '../src/utils/dateUtils';
-import { formatMoney, roundMoney } from '../src/utils/formatMoney';
-import { deriveProjectStatus } from '../src/utils/projectStatus';
-import { formatProjectStatusLabel, formatRefineTypeLabel } from '../src/utils/statusDisplay';
+} from '@/utils/reconcileMiningFromLogs';
+import { getLocalDateString, getLocalMonthString, isLogInFilter, resolveLogBusinessDate, isDateInRange } from '@/utils/dateUtils';
+import { formatMoney, roundMoney } from '@/utils/formatMoney';
+import { deriveProjectStatus } from '@/utils/projectStatus';
+import { formatProjectStatusLabel, formatRefineTypeLabel } from '@/utils/statusDisplay';
 
 const getProjectStatusBadgeClass = (status: string) => {
   switch (status) {
@@ -48,21 +49,25 @@ const getProjectStatusBadgeClass = (status: string) => {
 };
 
 interface DashboardProps {
-  logs: ValueCreationLog[];
+  logs?: ValueCreationLog[];
+  jzczLogs?: ValueCreationLog[];
+  auditLogs?: ValueCreationLog[];
   resources: MiningResource[];
   users: User[];
   currentUser: User;
   transactions?: InternalTransaction[];
   onSystemAdjustment?: (log: ValueCreationLog, details: string) => void;
   onSwitchTab?: (tab: string) => void;
-  businessUnits: string[];
+  units: string[];
   meetingSamples?: MeetingSample[];
   onSaveMeetingSample?: (sample: MeetingSample) => Promise<boolean>;
 }
 
 type PeriodType = 'month' | 'quarter' | 'half' | 'year';
 
-const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUser, transactions, onSystemAdjustment, onSwitchTab, businessUnits, meetingSamples, onSaveMeetingSample }) => {
+const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, users, resources, currentUser, transactions, onSystemAdjustment, onSwitchTab, units, meetingSamples, onSaveMeetingSample }) => {
+  const activeJzczLogs = jzczLogs || logs;
+  const activeAuditLogs = auditLogs || logs;
   const { isCostVisible, toggleCostVisible, maskMoney, maskText } = useCostPrivacy();
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const [now, setNow] = useState<Date>(() => new Date());
@@ -106,10 +111,10 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
   const uniqueCenters = useMemo(() => {
     if (isGlobalReaderUser) {
-      return Array.from(new Set(businessUnits.flatMap(b => parseCenterList(b)).filter(Boolean)));
+      return Array.from(new Set(units.flatMap(b => parseCenterList(b)).filter(Boolean)));
     }
     return currentUser?.center ? parseCenterList(currentUser.center) : [];
-  }, [businessUnits, currentUser, isGlobalReaderUser]);
+  }, [units, currentUser, isGlobalReaderUser]);
 
   const uniqueTypes = useMemo(() => {
     const types = new Set<string>();
@@ -120,10 +125,10 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
   const resourceQuadrants = useMemo(() => {
     const map = new Map<string, ReturnType<typeof aggregateMiningQuadrantsFromLogs>>();
     for (const r of resources) {
-      map.set(r.id, aggregateMiningQuadrantsFromLogs(logs, resources, r.id));
+      map.set(r.id, aggregateMiningQuadrantsFromLogs(activeJzczLogs, resources, r.id));
     }
     return map;
-  }, [logs, resources]);
+  }, [activeJzczLogs, resources]);
 
   const filteredResources = useMemo(() => {
     return resources.filter(r => {
@@ -224,7 +229,9 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       d.setFullYear(periodValue + 1);
       end = d.getTime();
     }
-    return { start, end };
+    const startDateStr = getLocalDateString(start);
+    const endDateStr = getLocalDateString(end - 1);
+    return { start, end, startDateStr, endDateStr };
   }, [periodType, periodValue, now]);
 
   const monthsInPeriod = useMemo(() => {
@@ -263,7 +270,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     }> = {};
     
     const targetUserCenter = currentUser?.center || '未分配';
-    const uniqueCentersSet = new Set(uniqueCenters.map(c => c.toUpperCase()));
+    const uniqueCentersSet = new Set(uniqueCenters.map(c => (c || '').toUpperCase()));
 
     if (!isGlobalReaderUser) {
       // 经营单元/经管员/VP 账号登录后，「经营单元效率看板」只显示本账号对应的 centers 的卡片
@@ -338,7 +345,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
         // 交集判断，禁止整串 has
         const matchedCenters = isGlobalReaderUser
           ? (uCenterList.length > 0 ? uCenterList : ['未分配'])
-          : uCenterList.filter(c => uniqueCentersSet.has(c.toUpperCase()));
+          : uCenterList.filter(c => uniqueCentersSet.has((c || '').toUpperCase()));
 
         if (matchedCenters.length === 0) return;
 
@@ -356,10 +363,9 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       });
 
     // 2. 扣除已核准的非有效工时对冲 (冲抵刚性工资包)
-    const approvedDeductions = logs.filter(l => 
+    const approvedDeductions = activeAuditLogs.filter(l => 
       isNonEffectiveHoursEffective(l) &&
-      l.timestamp >= periodRange.start &&
-      l.timestamp < periodRange.end
+      isDateInRange(resolveLogBusinessDate(l), periodRange.startDateStr, periodRange.endDateStr)
     );
 
     approvedDeductions.forEach(l => {
@@ -370,11 +376,11 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       // 交集判断，禁止整串 has
       const matchedCenters = isGlobalReaderUser
         ? (collectorCenterList.length > 0 ? collectorCenterList : ['未分配'])
-        : collectorCenterList.filter(c => uniqueCentersSet.has(c.toUpperCase()));
+        : collectorCenterList.filter(c => uniqueCentersSet.has((c || '').toUpperCase()));
 
       if (matchedCenters.length === 0) return;
 
-      const deduction = Number(l.dynamicCost) || Math.abs(Number(l.netValue)) || 0;
+      const deduction = getNonEffectiveHoursDeduction(l);
       matchedCenters.forEach(centerName => {
         if (!centers[centerName]) {
           centers[centerName] = { name: centerName, value: 0, revenueLimit: 0, valueLimit: 0, revenue2Percent: 0, value5Percent: 0 };
@@ -384,7 +390,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     });
 
     // 3. Revenue & Value Limits & Special Pools (Period-based)
-    const periodLogs = logs.filter(l => l.timestamp >= periodRange.start && l.timestamp < periodRange.end);
+    const periodLogs = activeAuditLogs.filter(l => isDateInRange(resolveLogBusinessDate(l), periodRange.startDateStr, periodRange.endDateStr));
     
     resources
       .filter(r => isGlobalReaderUser || isResourceAssignedToCenter(r, currentUser?.center))
@@ -396,7 +402,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
         if (isGlobalReaderUser) {
           targetCentersForResource = assignedList.length > 0 ? Array.from(new Set(assignedList)) : ['未分配'];
         } else {
-          targetCentersForResource = Array.from(new Set(assignedList.filter(c => uniqueCentersSet.has(c.toUpperCase()))));
+          targetCentersForResource = Array.from(new Set(assignedList.filter(c => uniqueCentersSet.has((c || '').toUpperCase()))));
           if (targetCentersForResource.length === 0 && uniqueCenters.length > 0) {
             targetCentersForResource = [uniqueCenters[0]];
           }
@@ -438,7 +444,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     return Object.values(centers)
       .filter(c => isGlobalReaderUser ? c.name !== '未分配' : true)
       .sort((a, b) => b.value - a.value);
-  }, [users, logs, periodRange, monthsInPeriod, resources, currentUser, isGlobalReaderUser, uniqueCenters]);
+  }, [users, activeAuditLogs, periodRange, monthsInPeriod, resources, currentUser, isGlobalReaderUser, uniqueCenters]);
 
   const totalSalaryFlow = useMemo(() => {
     return salaryByCenter.reduce((acc, curr) => acc + curr.value, 0);
@@ -468,15 +474,14 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     const userMap = new Map<string, User>();
     users.forEach(u => userMap.set(u.id, u));
 
-    for (const l of logs) {
-      const isInPeriod = l.timestamp >= periodRange.start && l.timestamp < periodRange.end;
+    for (const l of activeJzczLogs) {
+      const isInPeriod = isDateInRange(resolveLogBusinessDate(l), periodRange.startDateStr, periodRange.endDateStr);
       const isApproved = l.status === AuditStatus.Approved;
       const isConfirmed = l.status === AuditStatus.Confirmed;
       const isPending = l.status === AuditStatus.Pending;
 
       if (isInPeriod) {
         const netValue = calculateHistoricalNetValue(l, resources, users);
-        // 统一基准：不再进行二次提纯，直接使用 amount 或者 dynamicCost (四舍五入整数口径)
         const logAmount = l.amount ? Math.round(l.amount) : Math.round(l.dynamicCost || 0);
 
         if (isApproved) {
@@ -487,20 +492,6 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
           if (l.category === RefineCategory.Value) {
             valueGrossAmount += logAmount;
             valueMinedAmount += logAmount;
-          }
-          
-          if (l.costCategory === 'A') aCosts += l.dynamicCost;
-          if (l.costCategory === 'B' && l.valueConsumptionMode === 'B1') b1Costs += l.dynamicCost;
-          if (l.costCategory === 'B' && l.valueConsumptionMode === 'B2') b2Costs += l.dynamicCost;
-          if (l.costCategory === 'C') cCosts += Math.abs(netValue);
-        }
-
-        // 非有效工时对冲：仅 type === 非有效工时对冲 且状态为 已确权/入库 才扣
-        if (isNonEffectiveHoursEffective(l)) {
-          const collector = userMap.get(l.recordedCollectorId || '');
-          if (collector?.category !== 'VP') {
-            const deduction = Number(l.dynamicCost) || Math.abs(Number(l.netValue)) || 0;
-            totalRigidDeduction -= deduction;
           }
         }
 
@@ -529,31 +520,47 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
         // Collector Stats
         const collector = userMap.get(l.recordedCollectorId || '');
         const isCollectorAllowed = isGlobalReaderUser || 
-          (collector?.center && uniqueCenters.map(c => c.toUpperCase()).includes(collector.center.toUpperCase()));
+          (collector?.center && uniqueCenters.map(c => (c || '').toUpperCase()).includes((collector.center || '').toUpperCase()));
 
         if (isCollectorAllowed && (!isManager || (collector?.center && collector.center === currentUser.center))) {
           const collectorName = collector?.name || l.recordedCollectorId || '系统/未知';
           const category = collector?.category;
+          
+          if (!collectorData[collectorName]) collectorData[collectorName] = 0;
+          
+          if (isApproved) {
+            if (category === '经管员高款专' || category === '初款专') {
+              if (l.category === RefineCategory.Revenue) collectorData[collectorName] += logAmount;
+            } else if (category === '经管员高产专' || category === '初产专') {
+              if (l.category === RefineCategory.Value) collectorData[collectorName] += logAmount;
+            } else if (category === '中款专' || category === '中产专') {
+              collectorData[collectorName] += logAmount;
+            }
+          }
+        }
+      }
+    }
 
-          if (category?.includes('款专')) {
-            if (l.category === RefineCategory.Revenue && (isConfirmed || isApproved)) {
-              const key = `${collectorName} (已确权收款)`;
-              collectorData[key] = (collectorData[key] || 0) + netValue;
-            }
-          } else if (category?.includes('产专')) {
-            if (l.category === RefineCategory.Value) {
-              if (isConfirmed || isApproved) {
-                const key = `${collectorName} (已确权产值)`;
-                collectorData[key] = (collectorData[key] || 0) + netValue;
-              } else if (isPending) {
-                const key = `${collectorName} (未确权产值)`;
-                collectorData[key] = (collectorData[key] || 0) + netValue;
-              }
-            }
-          } else {
-            if (isApproved) {
-              collectorData[collectorName] = (collectorData[collectorName] || 0) + netValue;
-            }
+    for (const l of activeAuditLogs) {
+      const isInPeriod = isDateInRange(resolveLogBusinessDate(l), periodRange.startDateStr, periodRange.endDateStr);
+      const isApproved = l.status === AuditStatus.Approved;
+
+      if (isInPeriod) {
+        if (isApproved) {
+          if (l.costCategory === 'A') aCosts += l.dynamicCost;
+          if (l.costCategory === 'B' && l.valueConsumptionMode === 'B1') b1Costs += l.dynamicCost;
+          if (l.costCategory === 'B' && l.valueConsumptionMode === 'B2') b2Costs += l.dynamicCost;
+          if (l.costCategory === 'C') {
+            const netValue = calculateHistoricalNetValue(l, resources, users);
+            cCosts += Math.abs(netValue);
+          }
+        }
+
+        if (isNonEffectiveHoursEffective(l)) {
+          const collector = userMap.get(l.recordedCollectorId || '');
+          if (collector?.category !== 'VP') {
+            const deduction = Number(l.dynamicCost) || Math.abs(Number(l.netValue)) || 0;
+            totalRigidDeduction -= deduction;
           }
         }
       }
@@ -568,7 +575,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     const valueSalaryPackage = users.filter(u => u.salaryPackageType === '产值工资包' || (u.salaryPackageType === '经管员工资包' && (u.category === '经管员高产专' || u.category?.includes('产')))).reduce((acc, u) => acc + (u.salaryPackage || 0), 0) * periodMonths;
 
     // ----- NEW COMPUTATION BASED ON PORTFOLIO PACKAGES (netValue 口径) -----
-    const periodLogs = logs.filter(l => l.timestamp >= periodRange.start && l.timestamp < periodRange.end);
+    const periodLogs = activeJzczLogs.filter(l => isDateInRange(resolveLogBusinessDate(l), periodRange.startDateStr, periodRange.endDateStr));
     const revenueWater = sumConfirmedRevenuePackage(periodLogs, resources, users);
     const valueWater = sumValueConversionPackage(periodLogs, resources, users);
     const incomeWaterPool = sumIncomeProductionPackage(periodLogs, resources, users);
@@ -590,8 +597,8 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     // 3. 运营直接损耗 (operatingLoss) - 包含 A, B1, B2, C(收集 C 的 dynamicCost) 且 D 类
     // 收集 Approved 状态下 C 类的 dynamicCost 累加
     let cCostsDynamic = 0;
-    for (const l of logs) {
-      const isInPeriod = l.timestamp >= periodRange.start && l.timestamp < periodRange.end;
+    for (const l of activeAuditLogs) {
+      const isInPeriod = isDateInRange(resolveLogBusinessDate(l), periodRange.startDateStr, periodRange.endDateStr);
       const isApproved = l.status === AuditStatus.Approved;
       if (isInPeriod && isApproved) {
         if (l.costCategory === 'C') {
@@ -604,11 +611,10 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
     // 4. 已产出总奖金池 (totalBonusPool) - 遍历并累加全量采集专家的【专项计提】
     let totalRedundancySum = 0;
     users.forEach(u => {
-      const uLogs = logs.filter(l => 
+      const uLogs = activeAuditLogs.filter(l => 
         l.recordedCollectorId === u.id && 
         (l.status === AuditStatus.Approved || l.status === AuditStatus.Confirmed) && 
-        l.timestamp >= periodRange.start &&
-        l.timestamp < periodRange.end
+        isDateInRange(resolveLogBusinessDate(l), periodRange.startDateStr, periodRange.endDateStr)
       );
       
       const kuanContribution = uLogs.reduce((sum, l) => sum + computeCollection2Incentive(l, u), 0);
@@ -666,7 +672,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
       totalBonusPool, acceptancePool: totalBonusPool, revenueStored, valueStored
     };
 
-  }, [logs, periodRange, totalSalaryFlow, resources, users, currentUser, sourceView, transactions, isManager]);
+  }, [activeJzczLogs, activeAuditLogs, periodRange, totalSalaryFlow, resources, users, currentUser, sourceView, transactions, isManager]);
 
   // 统筹池兜底操作：须用户明确确认后写库，杜绝 useEffect 静默执行
   const handleTriggerCoordinationAdjustment = useCallback(() => {
@@ -751,7 +757,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
   // 生成会务留样处理
   const handleGenerateMeetingSample = () => {
     if (!isSampleSupported) return;
-    const periodLogs = logs.filter(l => l.timestamp >= periodRange.start && l.timestamp < periodRange.end);
+    const periodLogs = activeAuditLogs.filter(l => isDateInRange(resolveLogBusinessDate(l), periodRange.startDateStr, periodRange.endDateStr));
     const isOverwrite = Boolean(currentMeetingSample);
 
     showConfirm(
@@ -809,7 +815,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
 
   // 导出 Excel 报告底层函数
   const doExportExcel = (isFrozen: boolean, sample: MeetingSample | null) => {
-    const periodLogs = logs.filter(l => l.timestamp >= periodRange.start && l.timestamp < periodRange.end);
+    const periodLogs = activeAuditLogs.filter(l => isDateInRange(resolveLogBusinessDate(l), periodRange.startDateStr, periodRange.endDateStr));
     const frozenDateStr = sample ? new Date(sample.frozenAt).toISOString().slice(0, 10) : '';
     const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -1606,7 +1612,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                      {salaryByCenter.map(c => {
-                       const isExcludedUnit = ['HR', 'FIN', 'QA'].some(dept => c.name.trim().toUpperCase().includes(dept));
+                       const isExcludedUnit = ['HR', 'FIN', 'QA'].some(dept => (c.name || '').trim().toUpperCase().includes(dept));
                        return (
                          <div key={c.name} className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-blue-400 transition-all shadow-sm hover:shadow-md space-y-3">
                             <div className="flex justify-between items-start">
@@ -1615,7 +1621,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                               </div>
                               <div className="text-right">
                                 <span className="text-[10px] font-black font-mono text-slate-700 block">{maskMoney(Math.round(c.value))}</span>
-                                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter">月刚性工资包</span>
+                                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter">刚性包</span>
                               </div>
                             </div>
                             
@@ -1726,7 +1732,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                     onClick={() => setFilterType(filterType === type ? null : type)}
                     className={`px-4 py-2 rounded-full text-[10px] font-black whitespace-nowrap transition-all ${filterType === type ? 'bg-emerald-600 text-white shadow-lg' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
                   >
-                    {type} ({resources.filter(r => r.types.includes(type as RefineType)).length})
+                    {type} ({resources.filter(r => r.types?.includes(type as RefineType)).length})
                   </button>
                 ))}
 
@@ -1746,7 +1752,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                       onClick={() => setFilterPurity(filterPurity === purity ? null : purity)}
                       className={`px-4 py-2 rounded-full text-[10px] font-black whitespace-nowrap transition-all ${filterPurity === purity ? `${colorClass} text-white shadow-lg` : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
                     >
-                      {purity} ({resources.filter(r => getPurityInfo(r.confirmedRevenue, r.confirmedValue, r.pendingValue, r.valueCapacity).label.includes(purity)).length})
+                      {purity} ({resources.filter(r => (getPurityInfo(r.confirmedRevenue, r.confirmedValue, r.pendingValue, r.valueCapacity)?.label || '').includes(purity)).length})
                     </button>
                   );
                 })}
@@ -1863,7 +1869,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs, users, resources, currentUs
                 });
 
                 // 2. 已接收但处于“待确权”状态的产值 (联动确权注入的积分)
-                const pendingLogs = logs.filter(l => 
+                const pendingLogs = activeJzczLogs.filter(l => 
                   l.miningId === resource.id && 
                   l.category === RefineCategory.Value && 
                   l.status === AuditStatus.Pending

@@ -4,8 +4,11 @@ import { UI_LABELS } from '../constants/uiLabels';
 
 export interface CityGuardianModalState {
   isOpen: boolean;
-  type: 'alert' | 'confirm';
-  message: string;
+  type: 'alert' | 'confirm' | 'custom';
+  title?: string;
+  content?: React.ReactNode;
+  maxWidthClassName?: string;
+  message?: string;
   onConfirm?: () => void;
   onCancel?: () => void;
   confirmText?: string;
@@ -40,14 +43,14 @@ export const CityGuardianModal: React.FC<CityGuardianModalProps> = ({ state, onC
       onClick={handleCancel}
     >
       <div 
-        className="w-full max-w-md bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden transform transition-all scale-100"
+        className={`w-full ${state.maxWidthClassName || 'max-w-md'} bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden transform transition-all scale-100 flex flex-col max-h-[90vh]`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 bg-slate-900 text-white">
           <div className="flex items-center gap-2.5">
             <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0" />
-            <h3 className="font-bold text-base tracking-wide">城市守护者</h3>
+            <h3 className="font-bold text-base tracking-wide">{state.title || '城市守护者'}</h3>
           </div>
           <button 
             onClick={handleCancel}

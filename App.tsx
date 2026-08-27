@@ -1,11 +1,12 @@
 
-import { safeSetItem, safeGetItem } from './src/utils/safeLocalStorage';
+import { safeSetItem, safeGetItem, safeRemoveItem } from './src/utils/safeLocalStorage';
 import React, { useState, useEffect, useMemo } from 'react';
 import { isAdminOrNpc, isGlobalReader, isSystemAdmin, parseCenterList } from './src/utils/accessControl';
-import { filterUsersByCenter, filterResourcesByCenter, filterLogsByCenter, filterTransactionsByCenter, isResourceAssignedToCenter } from './src/utils/centerScope';
+import { filterUsersByCenter, filterResourcesByCenter, filterLogsByCenter, filterAuditLogsByCenter, filterTransactionsByCenter, isResourceAssignedToCenter, isCenterManagerUser } from './src/utils/centerScope';
+import { isVirtualDeductionMiningId } from './src/utils/virtualDeduction';
 import { TERM_FILTERED_LOGS, TERM_AUDIT_LOGS } from './src/constants/terminology';
 import { useCityGuardianModal, CityGuardianModal } from './src/components/CityGuardianModal';
-import { User, Role, MiningResource, ValueCreationLog, AuditStatus, RefineCategory, RefineType, InternalTransaction, TransactionStatus, SystemOperationLog, CircuitBreaker, ResourceStatus, QuotaSnapshot, AcceptanceRecord, MeetingSample } from './types';
+import { User, Role, MiningResource, ValueCreationLog, AuditStatus, RefineCategory, RefineType, InternalTransaction, TransactionStatus, SystemOperationLog, CircuitBreaker, ResourceStatus, QuotaSnapshot, AcceptanceRecord, MeetingSample, JydyUnit } from './types';
 import { canonicalizeBusinessUnitLabel, resolveBusinessUnitName } from './src/utils/businessUnitName';
 import Dashboard from './views/Dashboard';
 import ValueCreation from './views/ValueCreation';
@@ -36,11 +37,14 @@ import {
   loginWithApi, 
   saveMeetingSampleApi,
   toastApiError,
+  deleteMiningResource,
   setAuthToken,
   clearAuthToken,
   fetchSessionUser,
   changePasswordApi,
-  getAuthToken
+  getAuthToken,
+  fetchJydyList,
+  syncJydyList
 } from './src/api';
 import { useSessionMeta } from './src/hooks/useSessionMeta';
 import { buildSyncPayload, buildAppSyncPayload } from './src/app/workspaceSync';
@@ -92,19 +96,7 @@ const App: React.FC = () => {
     return null;
   });
   
-  const [businessUnits, setBusinessUnits] = useState<string[]>(() => {
-    if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
-      try {
-        const saved = safeGetItem('shihe_business_units');
-        const parsed = saved ? JSON.parse(saved) : ['RC', '经营单元-001'];
-        return Array.isArray(parsed) ? parsed : ['RC', '经营单元-001'];
-      } catch (e) {
-        console.error('Failed to parse business units', e);
-        return ['RC', '经营单元-001'];
-      }
-    }
-    return ['RC', '经营单元-001'];
-  });
+  const [jydyUnits, setJydyUnits] = useState<JydyUnit[]>([]);
 
   const [managedUsers, setManagedUsers] = useState<User[]>(INITIAL_USERS);
   const [meetingSamples, setMeetingSamples] = useState<MeetingSample[]>([]);
@@ -114,7 +106,7 @@ const App: React.FC = () => {
 
   // Unified session sync hook (IP, time, operation logs, clear state)
   const { clientIp, currentTime, systemLogs, addSystemLog, clearSessionState } = useSessionMeta(currentUser);
-  const { modalState, showConfirm, closeModal } = useCityGuardianModal();
+  const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
 
   const handleOpenLegal = (tab: 'agreement' | 'privacy') => {
     setLegalTab(tab);
@@ -134,19 +126,25 @@ const App: React.FC = () => {
       setLogs([]);
       setTransactions([]);
       setMiningResources([]);
-      setBusinessUnits(['RC', '经营单元-001']);
+      setJydyUnits([]);
       setMeetingSamples([]);
 
       try {
-        const data = await fetchWorkspaceData();
+        const [data, jydyData] = await Promise.all([
+          fetchWorkspaceData(),
+          fetchJydyList().catch(err => {
+            console.error('Failed to fetch jydy list:', err);
+            return [];
+          })
+        ]);
+
+        if (jydyData && Array.isArray(jydyData)) {
+          setJydyUnits(jydyData);
+        }
 
         if (data) {
           // 原子化更新数据
-          let fetchedUnits = businessUnits;
-          if (data.businessUnits && Array.isArray(data.businessUnits)) {
-            fetchedUnits = Array.from(new Set(data.businessUnits.map(canonicalizeBusinessUnitLabel).filter(Boolean)));
-            setBusinessUnits(fetchedUnits);
-          }
+          let fetchedUnits = jydyData.length > 0 ? jydyData.map(u => u.name) : [];
           if (data.managedUsers && Array.isArray(data.managedUsers)) {
             const backfilledUsers = data.managedUsers.map((u: any) => ({
               ...u,
@@ -159,7 +157,7 @@ const App: React.FC = () => {
           const rawLogs = [...(data.logs || []), ...(data.dtcb || [])];
           if (rawLogs.length > 0) {
             const backfilledLogs = rawLogs
-              .filter((l: any) => l !== null)
+              .filter((l: any) => l !== null && !l.deleted && l.deleted !== 1)
               .map((l: any) => {
                 const recalculatedNetValue = calculateHistoricalNetValue(l, data.miningResources || [], data.managedUsers || []);
                 return {
@@ -240,20 +238,7 @@ const App: React.FC = () => {
     
     // 清除已废弃的数据
     if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
-      const currentUnits = safeGetItem('shihe_business_units');
-      if (currentUnits) {
-        try {
-          let units = JSON.parse(currentUnits);
-          const toRemove = ['经营单元-001', '经营单元-002', '统筹池'];
-          if (units.some((t: string) => toRemove.includes(t))) {
-            units = units.filter((t: string) => !toRemove.includes(t));
-            safeSetItem('shihe_business_units', JSON.stringify(units));
-            setBusinessUnits(units);
-          }
-        } catch (e) {
-          console.warn(e);
-        }
-      }
+      safeRemoveItem('shihe_business_units');
     }
     
     return () => {};
@@ -289,7 +274,7 @@ const App: React.FC = () => {
     circuitBreakers?: CircuitBreaker[];
     meetingSamples?: MeetingSample[];
     acceptanceRecords?: AcceptanceRecord[];
-    businessUnits?: string[];
+    jydyUnits?: JydyUnit[];
   }) => {
     if (!currentUser) return;
     if (!workspaceLoaded) {
@@ -302,7 +287,6 @@ const App: React.FC = () => {
       logs,
       transactions,
       miningResources,
-      businessUnits,
       circuitBreakers,
       systemLogs,
       meetingSamples,
@@ -310,16 +294,24 @@ const App: React.FC = () => {
       filterMonth,
       currentUser,
       overrides,
-      includePassword: (overrides?.users || managedUsers).some(u => typeof (u as any).password === 'string' && (u as any).password.length > 0)
+      includePassword: overrides?.users ? overrides.users.some(u => typeof (u as any).password === 'string' && (u as any).password.length > 0) : false
     });
 
     try {
-      await syncWorkspace(payload);
+      const results = await Promise.all([
+        syncWorkspace(payload),
+        overrides?.jydyUnits ? syncJydyList(overrides.jydyUnits) : Promise.resolve({ success: true }),
+      ]);
+      const [syncRes] = results;
+      if (syncRes && (syncRes as any).success === false) {
+        throw new Error((syncRes as any).error || '数据同步失败');
+      }
     } catch (err: any) {
       console.error('Data sync error:', err);
       toastApiError(err, '工作区数据同步失败');
+      throw err;
     }
-  }, [currentUser, workspaceLoaded, managedUsers, logs, transactions, miningResources, circuitBreakers, meetingSamples, filterMonth, acceptanceRecords, businessUnits, systemLogs]);
+  }, [currentUser, workspaceLoaded, managedUsers, logs, transactions, miningResources, circuitBreakers, meetingSamples, filterMonth, acceptanceRecords, systemLogs]);
 
   const persistWorkspaceNow = React.useCallback(async () => {
     await persistWorkspaceWithOverrides();
@@ -496,7 +488,7 @@ const App: React.FC = () => {
           const validRecal = recalibratedLogs.filter(Boolean);
           const recalMap = new Map(validRecal.map(l => [l.id, l]));
           updatedLogs = updatedLogs.map(l => (l && recalMap.has(l.id)) ? { ...l, ...recalMap.get(l.id)! } : l);
-        } else if (targetLog && targetLog.miningId && targetLog.miningId !== 'SYSTEM_DEDUCTION' && targetLog.miningId !== '统筹池') {
+        } else if (targetLog && targetLog.miningId && !isVirtualDeductionMiningId(targetLog.miningId) && targetLog.miningId !== '统筹池') {
           // 前端对冲补算: 使用 applyConsumptionHedgeToLogs 传入完整的 jzcz 和 dtcb
           const currentResources = [...miningResources.map(r => (resource && r && r.id === resource.id) ? resource : r)];
           const dtcbLogs = updatedLogs.filter(l => l && l.confirmationType === '手动确权');
@@ -561,7 +553,7 @@ const App: React.FC = () => {
     });
   }, [processLogsSubmission, addSystemLog]);
 
-  const onSubmitTransaction = React.useCallback((txOrTxs: InternalTransaction | InternalTransaction[], updatedResources?: MiningResource[]) => {
+  const onSubmitTransaction = React.useCallback(async (txOrTxs: InternalTransaction | InternalTransaction[], updatedResources?: MiningResource[]) => {
     const txList = Array.isArray(txOrTxs) ? txOrTxs : [txOrTxs];
     if (txList.length === 0) return;
 
@@ -584,13 +576,17 @@ const App: React.FC = () => {
     if (updatedResources) {
       setMiningResources(updatedResources);
     }
-    persistWorkspaceWithOverrides({ transactions: nextTxs, miningResources: nextRes });
+    try {
+      await persistWorkspaceWithOverrides({ transactions: nextTxs, miningResources: nextRes });
+    } catch (err: any) {
+      toastApiError(err, '内部交易同步失败');
+    }
     for (const tx of txList) {
       addSystemLog('内部交易', `发起了/修改了 ${tx.amount} 额度的 ${tx.type} 交易 (${tx.id})`);
     }
   }, [miningResources, addSystemLog, persistWorkspaceWithOverrides]);
 
-  const onAuditTransaction = React.useCallback((txIdOrList: string | string[], status: TransactionStatus, updatedResource?: MiningResource | MiningResource[]) => {
+  const onAuditTransaction = React.useCallback(async (txIdOrList: string | string[], status: TransactionStatus, updatedResource?: MiningResource | MiningResource[]) => {
     const idList = Array.isArray(txIdOrList) ? txIdOrList : [txIdOrList];
     let nextTxs: InternalTransaction[] = [];
     setTransactions(prev => {
@@ -606,76 +602,134 @@ const App: React.FC = () => {
       });
       setMiningResources(nextRes);
     }
-    persistWorkspaceWithOverrides({ transactions: nextTxs, miningResources: nextRes });
+    try {
+      await persistWorkspaceWithOverrides({ transactions: nextTxs, miningResources: nextRes });
+    } catch (err: any) {
+      toastApiError(err, '交易审核同步失败');
+    }
     idList.forEach(id => addSystemLog('交易审核', `将交易 ${id} 的状态更新为 ${status}`));
   }, [miningResources, addSystemLog, persistWorkspaceWithOverrides]);
 
-  const onAddCircuitBreaker = React.useCallback((cb: CircuitBreaker) => {
+  const onAddCircuitBreaker = React.useCallback(async (cb: CircuitBreaker) => {
+    let nextCBs: CircuitBreaker[] = [];
     setCircuitBreakers(prev => {
       const exists = prev.some(item => item.id === cb.id);
-      const next = exists ? prev.map(item => item.id === cb.id ? cb : item) : [...prev, cb];
+      nextCBs = exists ? prev.map(item => item.id === cb.id ? cb : item) : [...prev, cb];
       if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
         try {
-          safeSetItem('shihe_circuit_breakers', JSON.stringify(next));
+          safeSetItem('shihe_circuit_breakers', JSON.stringify(nextCBs));
         } catch (e) {
           console.warn(e);
         }
       }
-      persistWorkspaceWithOverrides({ circuitBreakers: next });
-      return next;
+      return nextCBs;
     });
+    try {
+      await persistWorkspaceWithOverrides({ circuitBreakers: nextCBs });
+    } catch (err: any) {
+      toastApiError(err, '熔断触发同步失败');
+    }
     addSystemLog('熔断触发', `对 ${cb.targetName} 触发了熔断，原因：${cb.reason}`);
   }, [addSystemLog, persistWorkspaceWithOverrides]);
 
-  const onRecoverCircuitBreaker = React.useCallback((id: string) => {
+  const onRecoverCircuitBreaker = React.useCallback(async (id: string) => {
+    let nextCBs: CircuitBreaker[] = [];
+    let cbItem: CircuitBreaker | undefined;
     setCircuitBreakers(prev => {
-      const next = prev.map(cb => cb.id === id ? { ...cb, status: 'recovered' as const } : cb);
+      cbItem = prev.find(c => c.id === id);
+      nextCBs = prev.map(cb => cb.id === id ? { ...cb, status: 'recovered' as const } : cb);
       if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
         try {
-          safeSetItem('shihe_circuit_breakers', JSON.stringify(next));
+          safeSetItem('shihe_circuit_breakers', JSON.stringify(nextCBs));
         } catch (e) {
           console.warn(e);
         }
       }
-      persistWorkspaceWithOverrides({ circuitBreakers: next });
-      const cbItem = prev.find(c => c.id === id);
-      if (cbItem && cbItem.status === 'active') {
-        addSystemLog('熔断恢复', `恢复了 ${cbItem.targetName} 的熔断`);
-      }
-      return next;
+      return nextCBs;
     });
+    try {
+      await persistWorkspaceWithOverrides({ circuitBreakers: nextCBs });
+    } catch (err: any) {
+      toastApiError(err, '熔断恢复同步失败');
+    }
+    if (cbItem && cbItem.status === 'active') {
+      addSystemLog('熔断恢复', `恢复了 ${cbItem.targetName} 的熔断`);
+    }
   }, [addSystemLog, persistWorkspaceWithOverrides]);
 
-  const onAddResource = React.useCallback((res: MiningResource) => {
+  const onAddResource = React.useCallback(async (res: MiningResource) => {
+    let nextRes: MiningResource[] = [];
     setMiningResources(prev => {
-      const next = [...prev, res];
-      persistWorkspaceWithOverrides({ miningResources: next });
-      return next;
+      nextRes = [...prev, res];
+      return nextRes;
     });
+    try {
+      await persistWorkspaceWithOverrides({ miningResources: nextRes });
+    } catch (err: any) {
+      toastApiError(err, '新增资源同步失败');
+    }
     addSystemLog('资源管理', `新增了矿山资源 ${res.id}`);
   }, [addSystemLog, persistWorkspaceWithOverrides]);
 
-  const onUpdateResource = React.useCallback((res: MiningResource) => {
+  const onUpdateResource = React.useCallback(async (res: MiningResource) => {
+    let nextRes: MiningResource[] = [];
     setMiningResources(prev => {
-      const next = prev.map(r => r.id === res.id ? res : r);
-      persistWorkspaceWithOverrides({ miningResources: next });
-      return next;
+      nextRes = prev.map(r => r.id === res.id ? res : r);
+      return nextRes;
     });
+    try {
+      await persistWorkspaceWithOverrides({ miningResources: nextRes });
+    } catch (err: any) {
+      toastApiError(err, '更新资源同步失败');
+    }
     addSystemLog('资源管理', `更新了矿山资源 ${res.id}`);
   }, [addSystemLog, persistWorkspaceWithOverrides]);
 
-  const onDeleteResource = React.useCallback((id: string) => {
-    setMiningResources(prev => prev.filter(r => r.id !== id));
+  const onDeleteResource = React.useCallback(async (id: string) => {
+    try {
+      await deleteMiningResource(id);
+    } catch (err: any) {
+      toastApiError(err, '删除矿山资源失败');
+      return false;
+    }
+
+    let nextRes: MiningResource[] = [];
+    setMiningResources(prev => {
+      nextRes = prev.filter(r => r.id !== id);
+      return nextRes;
+    });
+    try {
+      await persistWorkspaceWithOverrides({ miningResources: nextRes });
+    } catch (err: any) {
+      toastApiError(err, '删除资源同步失败');
+    }
     addSystemLog('资源管理', `删除了矿山资源 ${id}`);
-  }, [addSystemLog]);
+    return true;
+  }, [addSystemLog, persistWorkspaceWithOverrides]);
 
   const onDeleteLog = React.useCallback((logId: string) => {
-    showConfirm(`确定要删除审计记录 #${logId} 吗？此操作不可逆！`, () => {
+    showConfirm(`确定要删除审计记录 #${logId} 吗？此操作不可逆！`, async () => {
       const nowStr = new Date().toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      setLogs(prev => prev.map(l => l.id === logId ? { ...l, deleted: true, deletedAt: nowStr } : l));
+      let previousLogs: ValueCreationLog[] = [];
+      let nextLogs: ValueCreationLog[] = [];
+
+      setLogs(prev => {
+        previousLogs = prev;
+        nextLogs = prev.map(l => l.id === logId ? { ...l, deleted: true, deletedAt: nowStr } : l);
+        return nextLogs;
+      });
+
       addSystemLog("删除审计记录", "删除编号 #" + logId + "，时间: " + nowStr);
+
+      try {
+        await persistWorkspaceWithOverrides({ logs: nextLogs });
+        showAlert('已删除');
+      } catch (err: any) {
+        setLogs(previousLogs);
+        toastApiError(err, '删除流水失败');
+      }
     });
-  }, [addSystemLog, showConfirm]);
+  }, [addSystemLog, showConfirm, showAlert, persistWorkspaceWithOverrides]);
 
   const onUpdateUsers = React.useCallback((newUsers: User[]) => {
     setManagedUsers(newUsers);
@@ -793,7 +847,6 @@ const App: React.FC = () => {
           logs,
           transactions,
           miningResources,
-          businessUnits,
           circuitBreakers,
           systemLogs,
           meetingSamples,
@@ -817,12 +870,11 @@ const App: React.FC = () => {
       if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
         // E′-6 规则澄清: shihe_* 本地缓存仅作为客户端前端暂存与开发环境保底，非权威主账本；服务端 API 接口及工作区同步 payload 为权威源。
         safeSetItem('shihe_managed_users', JSON.stringify(managedUsers));
-        safeSetItem('shihe_business_units', JSON.stringify(businessUnits));
       }
 
       return () => clearTimeout(timer);
     }
-  }, [managedUsers, logs, transactions, businessUnits, miningResources, circuitBreakers, systemLogs, meetingSamples, acceptanceRecords, filterMonth, currentUser, workspaceLoaded]);
+  }, [managedUsers, logs, transactions, miningResources, circuitBreakers, systemLogs, meetingSamples, acceptanceRecords, filterMonth, currentUser, workspaceLoaded]);
 
   useEffect(() => {
     if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
@@ -879,7 +931,6 @@ const App: React.FC = () => {
     setLogs([]);
     setTransactions([]);
     setMiningResources([]);
-    setBusinessUnits(['RC', '经营单元-001']);
     setMeetingSamples([]);
   };
 
@@ -931,24 +982,8 @@ const App: React.FC = () => {
 
   // 日志网关 2：${TERM_AUDIT_LOGS} (jzcz ∪ dtcb 动态消耗，供成本确权待办与审计)
   const auditLogs = useMemo(() => {
-    if (!currentUser) return [];
-    if (isGlobal) return logs;
-    const centerUserIds = new Set(filteredUsers.map(u => u.id));
-    
-    return logs.filter(l => {
-      // 1. 本经营单元人员提交/关联的算力与成本记录 (确保 DTCB 不被漏掉)
-      if (l.recordedCollectorId && centerUserIds.has(l.recordedCollectorId)) return true;
-      if (l.rankId && centerUserIds.has(l.rankId)) return true;
-      
-      // 2. 本经营单元关联的矿山资源记录 (JZCZ 产出)
-      if (l.miningId) {
-        const resource = miningResources.find(r => r.id === l.miningId);
-        if (!resource) return false;
-        return isResourceAssignedToCenter(resource, currentUser.center);
-      }
-      return false;
-    });
-  }, [logs, miningResources, filteredUsers, currentUser, isGlobal]);
+    return filterAuditLogsByCenter(logs, miningResources, currentUser, managedUsers);
+  }, [logs, miningResources, currentUser, managedUsers]);
 
   const filteredTransactions = useMemo(() => {
     return filterTransactionsByCenter(transactions, currentUser, managedUsers);
@@ -987,18 +1022,24 @@ const App: React.FC = () => {
     }
   }, [addSystemLog, persistWorkspaceWithOverrides]);
 
+  const effectiveBusinessUnits = useMemo(() => {
+    return jydyUnits.map(u => u.name);
+  }, [jydyUnits]);
+
   const tabProps = useMemo(() => {
     if (!currentUser) return {} as any;
     return {
       kanban: { 
         logs: auditLogs, 
+        jzczLogs: filteredLogs,
+        auditLogs: auditLogs,
         resources: filteredResources, 
         users: filteredUsers, 
         currentUser, 
         transactions: filteredTransactions,
         onSystemAdjustment,
         onSwitchTab: setActiveTab,
-        businessUnits: businessUnits,
+        units: effectiveBusinessUnits,
         meetingSamples,
         onSaveMeetingSample
       },
@@ -1045,15 +1086,12 @@ const App: React.FC = () => {
               if (data.transactions) setTransactions(data.transactions);
               if (data.miningResources) setMiningResources(data.miningResources);
               if (data.acceptanceRecords) setAcceptanceRecords(data.acceptanceRecords);
-              let refreshedUnits = businessUnits;
-              if (data.businessUnits && Array.isArray(data.businessUnits)) {
-                refreshedUnits = Array.from(new Set(data.businessUnits.map(canonicalizeBusinessUnitLabel).filter(Boolean)));
-                setBusinessUnits(refreshedUnits);
-              }
+              
+              const currentUnits = jydyUnits.map(u => u.name);
               if (data.managedUsers) {
                 setManagedUsers(data.managedUsers.map((u: any) => ({
                   ...u,
-                  center: resolveBusinessUnitName(u.center, refreshedUnits) || u.center,
+                  center: resolveBusinessUnitName(u.center, currentUnits) || u.center,
                 })));
               }
             }
@@ -1065,9 +1103,12 @@ const App: React.FC = () => {
       transactions: { 
         currentUser, 
         users: filteredUsers, 
+        managerUsers: managedUsers,
         resources: filteredResources, 
+        allResources: miningResources,
         transactions: filteredTransactions, 
         logs: auditLogs,
+        jzczLogs: filteredLogs,
         onSubmitTransaction,
         onAuditTransaction,
         onUpdateResource,
@@ -1075,7 +1116,7 @@ const App: React.FC = () => {
         circuitBreakers: filteredCircuitBreakers,
         onAddCircuitBreaker,
         onRecoverCircuitBreaker,
-        businessUnits: businessUnits,
+        units: effectiveBusinessUnits,
         persistWorkspaceNow,
         persistWorkspaceWithOverrides
       },
@@ -1085,11 +1126,11 @@ const App: React.FC = () => {
         logs: auditLogs,
         dtcbLogs: auditLogs.filter(l => l.confirmationType === '手动确权' || !!l.costCategory || !!(l as any).consumptionType),
         transactions: filteredTransactions,
-        managedUsers: filteredUsers,
+        managedUsers: managedUsers,
         onAddResource,
         onUpdateResource,
         onDeleteResource,
-        businessUnits: businessUnits
+        units: effectiveBusinessUnits
       },
       reservoir: { 
         logs: filteredLogs,
@@ -1097,7 +1138,7 @@ const App: React.FC = () => {
         resources: filteredResources,
         users: filteredUsers,
         transactions: filteredTransactions,
-        businessUnits,
+        units: effectiveBusinessUnits,
         currentUser
       },
       evaluation: { 
@@ -1106,7 +1147,8 @@ const App: React.FC = () => {
         auditLogs: auditLogs, 
         resources: filteredResources, 
         currentTime,
-        onFilterMonthChange: setFilterMonth
+        onFilterMonthChange: setFilterMonth,
+        currentUser: currentUser
       },
       distribution: { 
         logs: auditLogs, 
@@ -1114,7 +1156,7 @@ const App: React.FC = () => {
         currentUser, 
         transactions: filteredTransactions, 
         resources: filteredResources, 
-        onSubmitTransaction
+        onSubmitTransaction,
       },
       account: { currentUser, logs: auditLogs, transactions: filteredTransactions, resources: filteredResources, users: filteredUsers },
       personnel: { 
@@ -1123,16 +1165,20 @@ const App: React.FC = () => {
         onUpdateUsers,
         onUpdatePassword,
         onClearTestData,
-        businessUnits: businessUnits,
-        onUpdateBusinessUnits: setBusinessUnits,
+        jydyUnits: jydyUnits,
+        onUpdateJydyUnits: setJydyUnits,
         persist: persistWorkspaceWithOverrides,
-        allLogs: isSystemAdmin(currentUser) ? logs : [],
+        allLogs: auditLogs,
         onAppendLog: (log: ValueCreationLog) => {
-          setLogs(prev => [...prev, log]);
+          setLogs(prev => {
+            const next = [...prev, log];
+            persistWorkspaceWithOverrides({ logs: next });
+            return next;
+          });
         }
       }
     };
-  }, [filteredLogs, auditLogs, filteredResources, filteredUsers, managedUsers, businessUnits, transactions, currentUser, currentTime, logs,
+  }, [filteredLogs, auditLogs, filteredResources, filteredUsers, managedUsers, miningResources, jydyUnits, transactions, currentUser, currentTime, logs,
        onSystemAdjustment, onLogSubmit, onConsumptionSubmit, processAudit, onSubmitTransaction, 
        onAuditTransaction, onAddResource, onUpdateResource, onDeleteResource, onUpdateUsers, onClearTestData,
        circuitBreakers, onAddCircuitBreaker, onRecoverCircuitBreaker, persistWorkspaceWithOverrides]);

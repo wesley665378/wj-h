@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { TIER_COEFFICIENTS } from '../src/constants/coefficients';
+import { TIER_COEFFICIENTS } from '@/constants/coefficients';
 import { 
   User, MiningResource, ValueCreationLog, RefineCategory, AuditStatus, Role, RefineType,
   InternalTransaction, TransactionStatus, TransactionType, CircuitBreaker, QuotaSnapshot,
@@ -11,34 +11,34 @@ import {
   sumConfirmedRevenuePackage, 
   sumValueConversionPackage, 
   sumIncomeProductionPackage 
-} from '../src/utils/reconcileMiningFromLogs';
+} from '@/utils/reconcileMiningFromLogs';
 import { USER_LIST } from '../constants';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
   Cell, Legend, CartesianGrid, ComposedChart, Line, PieChart, Pie
 } from 'recharts';
-import { Card, ProgressBar, Badge, ProjectStatusBadge } from '../src/components/UI';
-import StandardModal from '../src/components/StandardModal';
-import { UI_LABELS } from '../src/constants/uiLabels';
-import { TERMINOLOGY } from '../src/constants/terminology';
-import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
-import { XLSX, exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
-import { calculateHistoricalNetValue, calculateDualTrackCoreMatrices, calculateT1PlusValue, calculateT1PlusRevenue } from '../src/utils/business';
-import { calculateHedgeCapacitiesAndWeights } from '../src/utils/consumptionHedge';
-import { deriveProjectStatus, isProjectWritable } from '../src/utils/projectStatus';
-import { isAdminOrNpc, parseCenterList } from '../src/utils/accessControl';
-import { userCenterMatchesBusinessUnit } from '../src/utils/businessUnitName';
-import { labelBusinessUnit } from '../src/utils/statusDisplay';
+import { Card, ProgressBar, Badge, ProjectStatusBadge } from '@/components/UI';
+import StandardModal from '@/components/StandardModal';
+import { UI_LABELS } from '@/constants/uiLabels';
+import { TERMINOLOGY } from '@/constants/terminology';
+import { aggregateMiningQuadrantsFromLogs } from '@/utils/purification';
+import { XLSX, exportWorkbook, buildExcelFilename } from '@/utils/excelIo';
+import { calculateHistoricalNetValue, calculateDualTrackCoreMatrices, calculateT1PlusValue, calculateT1PlusRevenue } from '@/utils/business';
+import { calculateHedgeCapacitiesAndWeights } from '@/utils/consumptionHedge';
+import { deriveProjectStatus, isProjectWritable } from '@/utils/projectStatus';
+import { isAdminOrNpc, parseCenterList } from '@/utils/accessControl';
+import { userCenterMatchesBusinessUnit } from '@/utils/businessUnitName';
+import { labelBusinessUnit } from '@/utils/statusDisplay';
 import { toast } from 'sonner';
-import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
+import { CityGuardianModal, useCityGuardianModal } from '@/components/CityGuardianModal';
 import { Info, AlertCircle, CheckCircle2, X } from 'lucide-react';
 import {
   getInitialRevenueCapacity,
   getInitialValueCapacity,
   getCurrentRevenueCapacity,
   getCurrentValueCapacity
-} from '../src/utils/miningCapacity';
-import { getExecutionType, getExecutionTypeBadgeColor, EXECUTION_TYPE_EXPLANATIONS } from '../src/utils/executionType';
+} from '@/utils/miningCapacity';
+import { getExecutionType, getExecutionTypeBadgeColor, EXECUTION_TYPE_EXPLANATIONS } from '@/utils/executionType';
 import {
   getLocalDateString,
   getLocalMonthString,
@@ -48,10 +48,10 @@ import {
   formatSubmissionTime,
   isDateInRange,
   isLogInFilter,
-} from '../src/utils/dateUtils';
-import { formatAmount, formatMoney, roundMoney } from '../src/utils/formatMoney';
-import { InfoTip } from '../src/components/InfoTip';
-import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
+} from '@/utils/dateUtils';
+import { formatMoney, roundMoney } from '@/utils/formatMoney';
+import { InfoTip } from '@/components/InfoTip';
+import { BusinessDateFilter } from '@/components/BusinessDateFilter';
 
 // Audit Modal Component
 const AuditModal: React.FC<{
@@ -174,7 +174,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   useEffect(() => {
     const resource = resources.find(r => r.id === selectedMiningId);
     if (resource) {
-      const prefix = resource.id.charAt(0).toUpperCase();
+      const prefix = (resource.id || '').charAt(0).toUpperCase();
       if (prefix === 'A') {
         setSelectedTier('A');
         setSelectedSubCategory('企业项目');
@@ -1243,9 +1243,9 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                   onChange={(e) => {
                     const term = e.target.value;
                     setMiningSearchTerm(term);
-                    if (term.trim() === '') return;
+                    if ((term || '').trim() === '') return;
                     const match = availableResources.find(r => 
-                      r.id.toLowerCase().includes(term.toLowerCase())
+                      r.id?.toLowerCase().includes((term || '').toLowerCase())
                     );
                     if (match) {
                       setSelectedMiningId(match.id);
@@ -1431,7 +1431,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                       <label className="text-[10px] font-bold text-blue-600 uppercase">注入积分主体</label>
                       <div className="flex items-center bg-white border border-slate-200 rounded-sm px-3 py-1.5 h-10">
                         <span className="text-xs font-bold text-slate-700">
-                          {user?.id.startsWith('M') ? '产值 ' : (user?.id.startsWith('J') ? '收款 ' : '')}
+                          {user?.id?.startsWith('M') ? '产值 ' : (user?.id?.startsWith('J') ? '收款 ' : '')}
                           {user?.name} | ****
                         </span>
                       </div>

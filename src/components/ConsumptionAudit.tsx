@@ -4,7 +4,7 @@ import { Check, X, AlertTriangle, ShieldCheck, Landmark, Coins, HelpCircle, Refr
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatMoney } from '../utils/formatMoney';
 import { useCostPrivacy } from '../hooks/useCostPrivacy';
-import StandardModal from './StandardModal';
+import { CityGuardianModal, useCityGuardianModal } from './CityGuardianModal';
 
 /**
  * Backend/API Raw Data Model representation
@@ -94,6 +94,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
 }) => {
   const [formData, setFormData] = useState<ConsumptionFormState | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { modalState, showAlert, closeModal } = useCityGuardianModal();
 
   // Sync state whenever auditData changes or is received
   useEffect(() => {
@@ -122,26 +123,26 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
     setIsSubmitting(true);
     try {
       await onConfirm(formData.id, auditSum, formData.notes || '人工对账确认一致');
-      toast.success(`申报 #${formData.id} 消耗确权对冲核销成功`);
-      onClose();
+      showAlert(`申报 #${formData.id} 消耗确权对冲核销成功`, onClose);
     } catch (error) {
       console.error(error);
-      toast.error('系统结算异常，对账记录存回缓存，请重试');
+      showAlert('系统结算异常，对账记录存回缓存，请重试');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <StandardModal 
-      isOpen={isOpen} 
-      onClose={onClose} 
-      maxWidthClassName="max-w-2xl"
-      title="城市守护者"
-      subtitle="消耗确权对账稽核 (系统版本 v2)"
-      icon={<Landmark className="w-5 h-5 text-slate-100" />}
-    >
-      <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-5 max-h-[80vh]">
+    <>
+      <CityGuardianModal state={modalState} onClose={closeModal} />
+      <CityGuardianModal 
+        state={{
+          isOpen: isOpen && !modalState.isOpen,
+          type: 'custom',
+          title: '城市守护者 - 消耗确权对账稽核 (系统版本 v2)',
+          maxWidthClassName: 'max-w-2xl',
+          content: (
+            <form onSubmit={handleSubmit} className="p-6 space-y-5">
             
             {/* 1. Metadata Grid Layout - Requirement: grid-cols-2 */}
             <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 space-y-4">
@@ -491,6 +492,10 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
             </div>
 
           </form>
-    </StandardModal>
+        )
+      }} 
+      onClose={onClose} 
+    />
+    </>
   );
 };

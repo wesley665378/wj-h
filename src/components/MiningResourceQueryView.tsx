@@ -18,6 +18,7 @@ import { exportWorkbook, buildExcelFilename, XLSX } from '../utils/excelIo';
 import { BusinessDateFilter } from './BusinessDateFilter';
 import { isLogInFilter, getLocalMonthString } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatMoney';
+import { isVirtualDeductionMiningId } from '../utils/virtualDeduction';
 import { UI_LABELS } from '../constants/uiLabels';
 
 export const normalizeMiningId = (id: string | undefined | null): string => {
@@ -148,7 +149,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
     const map = new Map<string, ValueCreationLog>();
     combined.forEach(l => {
       if (normalizeMiningId(l.miningId) === normQueryId && (l.confirmationType === '手动确权' || !!l.costCategory || !!(l as any).consumptionType)) {
-        if (l.miningId !== 'SYSTEM_DEDUCTION') {
+        if (!isVirtualDeductionMiningId(l.miningId)) {
           map.set(l.id, l);
         }
       }

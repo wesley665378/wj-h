@@ -254,7 +254,7 @@ export function computeUnitSingleMonth(
  * 主计算函数：计算所有经营单元的双行数据与盈利排名
  */
 export function computeBusinessUnitProfitRanking(
-  businessUnits: string[],
+  units: string[],
   selectedMonth: string, // YYYY-MM
   users: User[],
   auditLogs: ValueCreationLog[],
@@ -263,7 +263,7 @@ export function computeBusinessUnitProfitRanking(
   startDate?: string,
   endDate?: string
 ): UnitRankingRow[] {
-  if (!businessUnits || businessUnits.length === 0) return [];
+  if (!units || units.length === 0) return [];
 
   // 解析年份与选择月份的 1~m 月列表
   const [yearStr, monthNumStr] = selectedMonth.split('-');
@@ -276,14 +276,14 @@ export function computeBusinessUnitProfitRanking(
   }
 
   // 1. 计算每个单元在选定月份的单月指标
-  const currentMonthMetrics = businessUnits.map(unitName => 
+  const currentMonthMetrics = units.map(unitName => 
     computeUnitSingleMonth(unitName, selectedMonth, users, auditLogs, resources, transactions, selectedMonth, startDate, endDate)
   );
 
   // 2. 计算每个单元从当年 1 月至选定月的年度累计盈亏 (区分口径)
   const yearlyConfirmedProfitMap: Record<string, number> = {};
   const yearlyTotalProfitMap: Record<string, number> = {};
-  businessUnits.forEach(unitName => {
+  units.forEach(unitName => {
     let row1YearSum = 0;
     let row2YearSum = 0;
     monthsInYearToSelected.forEach(mStr => {

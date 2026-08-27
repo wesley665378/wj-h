@@ -20,7 +20,6 @@ export interface BuildSyncPayloadInput {
   dtcbLogs?: ValueCreationLog[];
   transactions?: InternalTransaction[];
   miningResources?: MiningResource[];
-  businessUnits?: string[];
   circuitBreakers?: CircuitBreaker[];
   systemLogs?: any[];
   fhctzRecords?: any[];
@@ -36,7 +35,6 @@ export function buildSyncPayload(input: BuildSyncPayloadInput) {
     dtcb: input.dtcbLogs,
     transactions: input.transactions,
     miningResources: input.miningResources,
-    businessUnits: input.businessUnits,
     circuitBreakers: input.circuitBreakers,
     systemLogs: input.systemLogs,
     fhctzRecords: input.fhctzRecords,
@@ -51,7 +49,6 @@ export interface BuildAppSyncPayloadInput {
   logs: ValueCreationLog[];
   transactions: InternalTransaction[];
   miningResources: MiningResource[];
-  businessUnits: string[];
   circuitBreakers: CircuitBreaker[];
   systemLogs: SystemOperationLog[];
   meetingSamples: MeetingSample[];
@@ -64,7 +61,6 @@ export interface BuildAppSyncPayloadInput {
     logs: ValueCreationLog[];
     transactions: InternalTransaction[];
     miningResources: MiningResource[];
-    businessUnits: string[];
     circuitBreakers: CircuitBreaker[];
     meetingSamples: MeetingSample[];
     acceptanceRecords: AcceptanceRecord[];
@@ -73,10 +69,26 @@ export interface BuildAppSyncPayloadInput {
 
 /** 从 App 当前 state 构建 sync payload，persist 与防抖 sync 共用 */
 export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<string, unknown> {
-  const { overrides, includePassword } = input;
+  const { overrides, includePassword, currentUser } = input;
+  const isAdmin = isSystemAdmin(currentUser);
+
   const nextUsers = overrides?.users ?? input.managedUsers;
-  // Use utility to handle password stripping based on includePassword option
-  const cleanedUsers = nextUsers.map(u => pickUserForWorkspaceSync(u, { includePassword }));
+  
+  // 1. 数据清洗：确保同步给后端的 center/category 是标准口径（还原回填）
+  // 即使是 admin 同步，也要确保不把展示层的“水库管理员”写回数据库的“统筹水库管理员”
+  const sanitizedUsers = nextUsers.map(u => {
+    let rawCenter = u.center;
+    // 如果 center 包含括号（resolveBusinessUnitName 的典型特征），尝试还原
+    if (rawCenter?.includes(' (')) {
+      rawCenter = rawCenter.split(' (')[0].trim();
+    }
+    
+    return {
+      ...pickUserForWorkspaceSync(u, { includePassword }),
+      center: rawCenter,
+      category: u.category === '水库管理员' ? '统筹水库管理员' : u.category // 逆向还原：水库管理员 -> 统筹水库管理员
+    };
+  });
 
   const nextLogs = overrides?.logs ?? input.logs;
   const nextTxs = overrides?.transactions ?? input.transactions;
@@ -84,27 +96,23 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
   const nextCBs = overrides?.circuitBreakers ?? input.circuitBreakers;
   const nextSamples = overrides?.meetingSamples ?? input.meetingSamples;
   const nextAcc = overrides?.acceptanceRecords ?? input.acceptanceRecords;
-  const nextUnits = overrides?.businessUnits ?? input.businessUnits;
 
   const dtcbLogs = nextLogs.filter(l => l.confirmationType === '手动确权');
   const jzczLogs = nextLogs.filter(l => l.confirmationType !== '手动确权');
-  const snapshots = buildValueEfficiencySnapshots(cleanedUsers, nextLogs, nextRes, input.filterMonth);
-  const jzfpSnapshots = buildJzfpSnapshot(cleanedUsers, nextLogs, input.filterMonth);
-
-  const canSendBusinessUnits = isSystemAdmin(input.currentUser) && nextUnits && nextUnits.length > 0;
+  const snapshots = buildValueEfficiencySnapshots(sanitizedUsers as User[], nextLogs, nextRes, input.filterMonth);
+  const jzfpSnapshots = buildJzfpSnapshot(sanitizedUsers as User[], nextLogs, input.filterMonth);
 
   const isInitialUsersPlaceholder = 
-    cleanedUsers.length === 0 || 
-    (cleanedUsers.length <= 3 && cleanedUsers.every(u => u.id === 'admin' || u.id === '1635' || u.id === 'npcxie'));
+    sanitizedUsers.length === 0 || 
+    (sanitizedUsers.length <= 3 && sanitizedUsers.every(u => u.id === 'admin' || u.id === '1635' || u.id === 'npcxie'));
 
   const payload: Record<string, any> = {
     ...buildSyncPayload({
-      managedUsers: cleanedUsers,
+      managedUsers: sanitizedUsers as User[],
       logs: jzczLogs,
       dtcbLogs: dtcbLogs,
       transactions: nextTxs,
       miningResources: nextRes,
-      businessUnits: canSendBusinessUnits ? nextUnits : undefined,
       circuitBreakers: nextCBs,
       systemLogs: input.systemLogs,
       fhctzRecords: [],
@@ -118,41 +126,17 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
     meetingSamples: nextSamples,
   };
 
-  if (!canSendBusinessUnits) {
-    delete payload.businessUnits;
-    delete payload.townCenters;
-  }
-
-  if (isInitialUsersPlaceholder) {
+  // 关键修复：非 Admin 用户强制省略 users 字段，防止触发后端快照比对 403
+  if (!isAdmin || isInitialUsersPlaceholder) {
     delete payload.users;
   }
 
   // Anti-Data-Loss (防清库) Safeguard:
-  // "sync 禁止传 [] 给 settlementPayouts/cdtz、dtcb、fhctz、jzfp、zhjzpj"
-  // "无数据必须省略字段，不得写死 settlementPayouts:[]、fhctzRecords:[]"
-  const keysToOmitIfEmpty = [
-    'settlementPayouts',
-    'miningResources',   // cdtz
-    'dtcb',
-    'fhctzRecords',      // fhctz
-    'fhctz',
-    'jzfp',
-    'valueEfficiencySnapshots', // zhjzpj
-    'logs',
-    'transactions',
-    'circuitBreakers',
-    'rdq',
-    'meetingSamples',
-    'acceptanceRecords'
-  ];
-
-  for (const key of keysToOmitIfEmpty) {
-    if (payload[key] !== undefined) {
-      if (Array.isArray(payload[key]) && payload[key].length === 0) {
-        delete payload[key];
-      }
+  Object.keys(payload).forEach(key => {
+    if (Array.isArray(payload[key]) && payload[key].length === 0) {
+      delete payload[key];
     }
-  }
+  });
 
   return payload;
 }

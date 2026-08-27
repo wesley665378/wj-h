@@ -9,7 +9,7 @@ import { Trophy, ChevronDown, ChevronUp, Info } from 'lucide-react';
 import { UI_LABELS } from '../constants/uiLabels';
 
 interface BusinessUnitProfitRankingTableProps {
-  businessUnits: string[];
+  units: string[];
   selectedMonth: string; // YYYY-MM
   users: User[];
   auditLogs: ValueCreationLog[];
@@ -21,7 +21,7 @@ interface BusinessUnitProfitRankingTableProps {
 }
 
 export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingTableProps> = ({
-  businessUnits,
+  units,
   selectedMonth,
   users,
   auditLogs,
@@ -37,7 +37,7 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
   // 计算榜单数据
   const rankingRows = useMemo(() => {
     return computeBusinessUnitProfitRanking(
-      businessUnits,
+      units,
       selectedMonth,
       users,
       auditLogs,
@@ -46,7 +46,7 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
       startDate,
       endDate
     );
-  }, [businessUnits, selectedMonth, users, auditLogs, resources, transactions, startDate, endDate]);
+  }, [units, selectedMonth, users, auditLogs, resources, transactions, startDate, endDate]);
 
   // 将扁平数组按经营单元聚合成对（便于渲染 rowSpan）
   const pairedRows = useMemo(() => {

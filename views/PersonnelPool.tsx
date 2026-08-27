@@ -1,6 +1,6 @@
 import { UI_TOKENS } from '../src/constants/uiTokens';
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { User, Role, ValueCreationLog } from '../types';
+import { User, Role, ValueCreationLog, JydyUnit } from '../types';
 import { XLSX, exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
 import { Card, Badge } from '../src/components/UI';
 import { UserTableRow } from '../src/components/UserTableRow';
@@ -39,11 +39,11 @@ interface PersonnelPoolProps {
   onUpdateUsers: (users: User[]) => void;
   onUpdatePassword: (userId: string, newPassword: string) => Promise<boolean>;
   onClearTestData?: () => void;
-  businessUnits: string[];
-  onUpdateBusinessUnits: (units: string[]) => void;
+  jydyUnits: JydyUnit[];
+  onUpdateJydyUnits: (units: JydyUnit[]) => void;
   persist?: (overrides?: {
     users?: User[];
-    businessUnits?: string[];
+    jydyUnits?: JydyUnit[];
     logs?: ValueCreationLog[];
   }) => Promise<void>;
   allLogs?: ValueCreationLog[];
@@ -58,14 +58,19 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
   onUpdateUsers, 
   onUpdatePassword, 
   onClearTestData, 
-  businessUnits, 
-  onUpdateBusinessUnits,
+  jydyUnits,
+  onUpdateJydyUnits,
   persist,
   allLogs = [],
   onAppendLog
 }) => {
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const isSyncing = useRef(false);
+
+  // 统一权威数据源判断：经营单元 SSOT 为 jydyUnits
+  const effectiveBusinessUnits = useMemo(() => {
+    return jydyUnits.map(u => u.name);
+  }, [jydyUnits]);
 
   const persistOrAlert = async (overrides: Parameters<NonNullable<typeof persist>>[0]) => {
     if (!persist) { showAlert('工作区同步未就绪，请刷新后重试'); return false; }
@@ -400,17 +405,27 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
     }
 
     const canonicalFormatted = canonicalizeBusinessUnitLabel(formattedName);
-    if (businessUnitListHas(businessUnits, canonicalFormatted) || businessUnitListHas(businessUnits, rawName)) {
+    // 使用 jydyUnits 作为权威判断依据
+    const existingNames = jydyUnits.map(u => u.name);
+    if (businessUnitListHas(existingNames, canonicalFormatted) || businessUnitListHas(existingNames, rawName)) {
       showAlert('该经营单元已存在');
       return;
     }
-    const updatedUnits = [...businessUnits, canonicalFormatted];
+    
+    const newUnit: JydyUnit = {
+      id: canonicalFormatted,
+      name: canonicalFormatted,
+      category: newCenterCategory,
+      status: 'active'
+    };
+    const updatedJydyUnits = [...jydyUnits, newUnit];
     
     isSyncing.current = true;
     try {
-      const ok = await persistOrAlert({ businessUnits: updatedUnits });
+      // 权威写入走 jydyUnits
+      const ok = await persistOrAlert({ jydyUnits: updatedJydyUnits });
       if (!ok) return;
-      onUpdateBusinessUnits(updatedUnits);
+      onUpdateJydyUnits(updatedJydyUnits);
       setNewCenterName('');
       showAlert(`成功新增单元: ${formattedName}`);
     } catch (err) {
@@ -438,18 +453,22 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       return;
     }
     const canonicalNewName = canonicalizeBusinessUnitLabel(newName);
-    if (businessUnitListHas(businessUnits, canonicalNewName)) {
+    const existingNames = jydyUnits.map(u => u.name);
+    if (businessUnitListHas(existingNames, canonicalNewName)) {
       showAlert('该经营单元已存在');
       return;
     }
-    const updatedUnits = businessUnits.map(unit => businessUnitLabelsEqual(unit, oldName) ? canonicalNewName : unit);
+    
+    const updatedJydyUnits = jydyUnits.map(unit => 
+      businessUnitLabelsEqual(unit.name, oldName) ? { ...unit, name: canonicalNewName, id: canonicalNewName } : unit
+    );
     const updatedUsers = users.map(u => businessUnitLabelsEqual(u.center, oldName) ? { ...u, center: canonicalNewName } : u);
 
     isSyncing.current = true;
     try {
-      const ok = await persistOrAlert({ businessUnits: updatedUnits, users: updatedUsers });
+      const ok = await persistOrAlert({ jydyUnits: updatedJydyUnits, users: updatedUsers });
       if (!ok) return;
-      onUpdateBusinessUnits(updatedUnits);
+      onUpdateJydyUnits(updatedJydyUnits);
       onUpdateUsers(updatedUsers);
       setEditingCenter(null);
       showAlert(`单元 [${oldName}] 已重命名为 [${newName}]`);
@@ -467,9 +486,9 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
     showConfirm(`确定要注销单元 [${name}] 及其关联别名吗？`, async () => {
       if (isSyncing.current) return;
 
-      const updatedUnits = removeBusinessUnitFromList(businessUnits, name);
+      const updatedJydyUnits = jydyUnits.filter(u => !businessUnitLabelsEqual(u.name, name));
 
-      if (updatedUnits.length === 0) {
+      if (updatedJydyUnits.length === 0) {
         return showAlert('注销失败：系统至少须保留一个经营单元，经营单元列表不可为空。');
       }
 
@@ -484,9 +503,9 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       });
       
       try {
-        const ok = await persistOrAlert({ businessUnits: updatedUnits, users: updatedUsers });
+        const ok = await persistOrAlert({ jydyUnits: updatedJydyUnits, users: updatedUsers });
         if (!ok) return;
-        onUpdateBusinessUnits(updatedUnits);
+        onUpdateJydyUnits(updatedJydyUnits);
         onUpdateUsers(updatedUsers);
         showAlert(`已成功注销单元 [${name}] 及其关联别名，并已清空关联人员归属。`);
       } catch (err) {
@@ -555,7 +574,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
         const name = String(findValue(['名称', '姓名', 'Name', 'name', '采集主体']) || '').trim();
         const roleStr = String(findValue(['角色', 'Role', 'role']) || '').toLowerCase().trim();
         const rawCenter = String(findValue(['责任人（单元负责）', '责任人', '经营单元', 'Center', 'center', '所属单元']) || '').trim();
-        const center = resolveBusinessUnitName(rawCenter, businessUnits);
+        const center = resolveBusinessUnitName(rawCenter, effectiveBusinessUnits);
         const rawCategory = String(findValue(['职级', '分类', 'Category', 'category', '人格分类', '人格等级分类']) || '').trim();
         
         let category: User['category'] = '初款专';
@@ -647,20 +666,30 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
           const uniqueNewUsers = newUsers.filter(u => !existingIds.has(u.id));
           const finalUsers = [...mergedUsers, ...uniqueNewUsers].map(u => ({
             ...u,
-            center: resolveBusinessUnitName(u.center, businessUnits),
+            center: resolveBusinessUnitName(u.center, effectiveBusinessUnits),
           }));
 
           const unitsToAdd = finalUsers
             .map(u => u.center)
-            .filter(c => c && !businessUnitListHas(businessUnits, c));
-          const finalUnits = [...businessUnits, ...unitsToAdd];
+            .filter(c => c && !businessUnitListHas(effectiveBusinessUnits, c));
+          
+          const newJydyUnitsFromImport = unitsToAdd.map(name => ({
+            id: name,
+            name: name,
+            category: '前台' as const, // 默认前台
+            status: 'active' as const
+          }));
+          const finalJydyUnits = [...jydyUnits, ...newJydyUnitsFromImport];
 
           try {
-            const ok = await persistOrAlert({ users: finalUsers, businessUnits: finalUnits });
+            const ok = await persistOrAlert({ 
+              users: finalUsers, 
+              jydyUnits: finalJydyUnits 
+            });
             if (!ok) return;
             onUpdateUsers(stripUsersPasswords(finalUsers));
             if (unitsToAdd.length > 0) {
-              onUpdateBusinessUnits(finalUnits);
+              onUpdateJydyUnits(finalJydyUnits);
             }
             showAlert('批量导入成功。');
           } catch (err) {
@@ -746,7 +775,6 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
           hedgeAmount,
           user.id // 操作管理员 ID
         );
-        overrides.logs = [...allLogs, hedgeLog];
       }
 
       const ok = await persistOrAlert(overrides);
@@ -919,7 +947,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                   </p>
                   {newUserFormData.category === 'VP' ? (
                     <div className="bg-white border border-slate-200 rounded-xl p-2 space-y-1">
-                      {businessUnits.map(unit => {
+                      {effectiveBusinessUnits.map(unit => {
                         const selectedCenters = parseCenterList(newUserFormData.center);
                         const unitUpper = unit.trim().toUpperCase();
                         const isChecked = selectedCenters.includes(unitUpper);
@@ -947,7 +975,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                   ) : (
                     <select value={newUserFormData.center} onChange={e => setNewUserFormData({...newUserFormData, center: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none text-[10px]">
                       <option value="">指派单元...</option>
-                      {businessUnits.map(c => <option key={c} value={c}>{c}</option>)}
+                      {effectiveBusinessUnits.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   )}
                 </div>
@@ -1013,7 +1041,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                       </p>
                       {formData.category === 'VP' ? (
                         <div className="bg-slate-50 border border-slate-200 rounded-xl p-2 space-y-1">
-                          {businessUnits.map(unit => {
+                          {effectiveBusinessUnits.map(unit => {
                             const selectedCenters = parseCenterList(formData.center);
                             const unitUpper = unit.trim().toUpperCase();
                             const isChecked = selectedCenters.includes(unitUpper);
@@ -1041,7 +1069,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                       ) : (
                         <select value={formData.center} onChange={e => setFormData({...formData, center: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs">
                           <option value="">未分类 / 全域</option>
-                          {businessUnits.map(c => <option key={c} value={c}>{c}</option>)}
+                          {effectiveBusinessUnits.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                       )}
                     </div>
@@ -1128,9 +1156,9 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                {(() => {
                   const collectors = filteredUsers.filter(u => u.category?.includes('专') || u.role === Role.Rank || u.role === Role.RevenueCollector || u.role === Role.ValueCollector || activeCategory !== '采集主体');
                   const groups: Record<string, User[]> = {};
-                  businessUnits.forEach(unit => { groups[unit] = []; });
+                  effectiveBusinessUnits.forEach(unit => { groups[unit] = []; });
                   collectors.forEach(u => {
-                    const resolved = resolveBusinessUnitName(u.center, businessUnits);
+                    const resolved = resolveBusinessUnitName(u.center, effectiveBusinessUnits);
                     const center = resolved || u.center || '未分配经营单元';
                     if (!groups[center]) groups[center] = [];
                     groups[center].push(u);
@@ -1257,7 +1285,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                 </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {businessUnits.map((center, index) => {
+                {effectiveBusinessUnits.map((center, index) => {
                   const centerUsers = users.filter(u => u.center === center);
                   const collectors = centerUsers.filter(u => u.category?.includes('专') || u.role === Role.Rank || u.role === Role.RevenueCollector || u.role === Role.ValueCollector);
                   const totalCost = centerUsers.reduce((acc, u) => acc + (u.salaryPackage || 0), 0);

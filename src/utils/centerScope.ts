@@ -1,7 +1,9 @@
 import { User, MiningResource, ValueCreationLog, InternalTransaction } from '../../types';
 import { isGlobalReader, parseCenterList } from './accessControl';
+import { isVirtualDeductionMiningId } from './virtualDeduction';
 
 export { isSystemAdmin, isGlobalReader as isGlobalScope, isGlobalReader, isAdminOrNpc, parseCenterList } from './accessControl';
+export { isCenterManagerUser, sortCenterManagers, findCenterManager } from './centerManager';
 
 /**
  * 经营单元数据隔离及作用域过滤工具 (附录 D.7 / E′-0 / A′-7)
@@ -47,14 +49,15 @@ export function isResourceAssignedToCenter(resource: MiningResource, center: str
 }
 
 /**
- * 按经营单元过滤矿山资源
+ * 按经营单元过滤矿山资源（禁止为 FXDC 等虚拟占位矿山建主档）
  */
 export function filterResourcesByCenter(resources: MiningResource[], currentUser: User | null | undefined): MiningResource[] {
   if (!currentUser) return [];
-  if (isGlobalReader(currentUser)) return resources;
+  const validResources = (resources || []).filter(r => r && !isVirtualDeductionMiningId(r.id));
+  if (isGlobalReader(currentUser)) return validResources;
   const centers = parseCenterList(currentUser.center);
   if (centers.length === 0) return [];
-  return resources.filter(r => isResourceAssignedToCenter(r, currentUser.center));
+  return validResources.filter(r => isResourceAssignedToCenter(r, currentUser.center));
 }
 
 /**
@@ -71,10 +74,64 @@ export function filterLogsByCenter(
   if (centers.length === 0) return [];
   
   return logs.filter(l => {
+    if (!l) return false;
+    if (isVirtualDeductionMiningId(l.miningId)) return false; // jzcz 不含 FXDC 类虚拟对冲流水
     const resource = resources.find(r => r.id === l.miningId);
     if (!resource) return false;
     return isResourceAssignedToCenter(resource, currentUser.center);
   });
+}
+
+/**
+ * 判断单条日志的人员归属 (recordedCollectorId / rankId) 或矿山资源归属是否属于本经营单元
+ */
+export function isLogLinkedToCenterUser(
+  log: ValueCreationLog | null | undefined,
+  centerUserIds: Set<string>,
+  resources: MiningResource[] = [],
+  userCenter?: string
+): boolean {
+  if (!log) return false;
+
+  // 1. 虚拟占位矿山流水 (FXDC / SYSTEM_DEDUCTION): 仅按人员归属
+  if (isVirtualDeductionMiningId(log.miningId)) {
+    if (log.recordedCollectorId && centerUserIds?.has(log.recordedCollectorId)) return true;
+    if (log.rankId && centerUserIds?.has(log.rankId)) return true;
+    return false;
+  }
+
+  // 2. 常规流水: 检查人员归属 OR 矿山资源归属
+  if (log.recordedCollectorId && centerUserIds?.has(log.recordedCollectorId)) return true;
+  if (log.rankId && centerUserIds?.has(log.rankId)) return true;
+  if (log.miningId && resources.length > 0 && userCenter) {
+    const resource = resources.find(r => r.id === log.miningId);
+    if (resource && isResourceAssignedToCenter(resource, userCenter)) return true;
+  }
+  return false;
+}
+
+/**
+ * dtcb / auditLogs 收窄：必须用 filterAuditLogsByCenter（人员归属优先），禁止对 FXDC 类流水用纯 filterLogsByCenter
+ */
+export function filterAuditLogsByCenter(
+  logs: ValueCreationLog[],
+  resources: MiningResource[],
+  currentUser: User | null | undefined,
+  users: User[] = []
+): ValueCreationLog[] {
+  if (!currentUser) return [];
+  if (isGlobalReader(currentUser)) return logs;
+  const centers = parseCenterList(currentUser.center);
+  if (centers.length === 0) return [];
+
+  const centerUserIds = new Set(users.filter(u => {
+    if (!u) return false;
+    const uCenters = parseCenterList(u.center);
+    return uCenters.some(c => centers.includes(c));
+  }).map(u => u.id));
+  centerUserIds.add(currentUser.id);
+
+  return (logs || []).filter(l => isLogLinkedToCenterUser(l, centerUserIds, resources, currentUser.center));
 }
 
 /**

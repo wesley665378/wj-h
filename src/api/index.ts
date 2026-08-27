@@ -5,3 +5,6 @@ export * from './audit';
 export * from './distribution';
 export * from './cdtz';
 export * from './meetingSamples';
+export * from './resources';
+export * from './ai';
+export * from './jydy';

@@ -64,12 +64,12 @@ export function resolveLogBusinessMonth(log?: { month?: string; businessDate?: s
  * 统一过滤逻辑：判断日志是否落在筛选范围
  */
 export function isLogInFilter(
-  log?: { month?: string; businessDate?: string; timestamp?: number | string | Date } | null,
+  log?: { month?: string; businessDate?: string; timestamp?: number | string | Date; deleted?: boolean } | null,
   filterMonth?: string,
   filterStartDate?: string,
   filterEndDate?: string
 ): boolean {
-  if (!log) return false;
+  if (!log || log.deleted) return false;
   if (filterStartDate || filterEndDate) {
     const bDate = resolveLogBusinessDate(log);
     return isDateInRange(bDate, filterStartDate, filterEndDate);

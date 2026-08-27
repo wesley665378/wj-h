@@ -48,7 +48,7 @@ export function userCenterMatchesBusinessUnit(userCenter: string | undefined | n
 }
 
 /**
- * 将用户输入/Excel 原文解析为 businessUnits 中已有规范名；
+ * 将用户输入/Excel 原文解析为 units 中已有规范名；
  * 若无匹配则返回 canonicalizeBusinessUnitLabel(raw) 作为新名。
  */
 export function resolveBusinessUnitName(

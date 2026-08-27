@@ -109,8 +109,8 @@ export const StandardModal: React.FC<StandardModalProps> & {
               </button>
             </div>
 
-            {/* Scrollable Body */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-8">
+            {/* Non-scrollable Body by default */}
+            <div className="flex-1 p-6 md:p-8">
               {children}
             </div>
 
@@ -162,7 +162,7 @@ StandardModal.Header = ({ title, subtitle, icon, onClose }) => (
 );
 
 StandardModal.Body = ({ children, className = '' }) => (
-  <div className={`flex-1 overflow-y-auto custom-scrollbar p-6 md:p-8 ${className}`}>
+  <div className={`flex-1 p-6 md:p-8 ${className}`}>
     {children}
   </div>
 );

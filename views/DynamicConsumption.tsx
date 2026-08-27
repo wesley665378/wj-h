@@ -41,6 +41,7 @@ import {
 } from '../src/utils/dateUtils';
 import { formatAmount, formatRatio, formatPercent } from '../src/utils/formatters';
 import { calculateHedgeCapacitiesAndWeights } from '../src/utils/consumptionHedge';
+import { filterAuditLogsByCenter, isLogLinkedToCenterUser, isGlobalReader, parseCenterList } from '../src/utils/centerScope';
 import { InfoTip } from '../src/components/InfoTip';
 import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
 import { getExecutionType, getExecutionTypeBadgeColor, EXECUTION_TYPE_EXPLANATIONS } from '../src/utils/executionType';
@@ -400,7 +401,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
       async () => {
           const deductionLog: ValueCreationLog = {
             id: `J${(Date.now() % 100000000).toString().padStart(8, '0')}`,
-            miningId: 'SYSTEM_DEDUCTION',
+            miningId: 'FXDC',
             rankId: deductionOperatorId,
             recordedCollectorId: deductionCollectorId,
             category: RefineCategory.Revenue, 
@@ -485,13 +486,30 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
   const consumptionLogs = useMemo(() => {
     let list = dtcbLogsToUse.filter(l => (l.dynamicCost > 0 || l.type === RefineType.NonEffectiveHours));
-    if (selectedOperatorId && (user.role !== Role.Admin && user.category !== '系统管理员')) {
+    const isAdmin = isGlobalReader(user);
+    if (!isAdmin) {
+      const centers = parseCenterList(user.center);
+      const centerUserIds = new Set(
+        users.filter(u => {
+          if (!u) return false;
+          const uCenters = parseCenterList(u.center);
+          return uCenters.some(c => centers.includes(c));
+        }).map(u => u.id)
+      );
+      if (user.id) centerUserIds.add(user.id);
+
+      list = list.filter(l => isLogLinkedToCenterUser(l, centerUserIds, resources, user.center));
+
+      if (selectedOperatorId) {
+        list = list.filter(l => l.rankId === selectedOperatorId || l.recordedCollectorId === selectedOperatorId);
+      }
+    } else if (selectedOperatorId) {
       list = list.filter(l => l.rankId === selectedOperatorId || l.recordedCollectorId === selectedOperatorId);
     }
     list = list.slice().reverse();
     list = list.filter(l => isLogInFilter(l, filterMonth, filterStartDate, filterEndDate));
     return list;
-  }, [dtcbLogsToUse, selectedOperatorId, user, filterStartDate, filterEndDate, filterMonth]);
+  }, [dtcbLogsToUse, resources, user, users, selectedOperatorId, filterStartDate, filterEndDate, filterMonth]);
 
   return (
     <div className="w-full space-y-6 md:space-y-10 animate-in fade-in duration-500 pb-6 text-sm md:text-base">

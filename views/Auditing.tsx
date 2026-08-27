@@ -8,7 +8,7 @@ import {
   RefineType,
   MiningResource,
 } from "../types";
-import { calculateConsumptionMirrorFields } from "../src/utils/business";
+import { calculateConsumptionMirrorFields } from "@/utils/business";
 import {
   BarChart,
   Bar,
@@ -21,21 +21,23 @@ import {
   Pie,
   CartesianGrid,
 } from "recharts";
-import { Card, StatItem, Badge, ProjectStatusBadge } from "../src/components/UI";
-import { UI_TOKENS } from "../src/constants/uiTokens";
-import { CostPrivacyToggle } from "../src/components/CostPrivacyToggle";
-import { useCostPrivacy } from "../src/hooks/useCostPrivacy";
-import { PieChartCard } from "../src/components/PieChartCard";
-import { XLSX, exportWorkbook, buildExcelFilename } from "../src/utils/excelIo";
-import { formatMoney } from "../src/utils/formatMoney";
-import { TERMINOLOGY } from "../src/constants/terminology";
-import { UI_LABELS } from "../src/constants/uiLabels";
-import { isSystemAdmin } from "../src/utils/accessControl";
-import { ConsumptionAudit, AuditApiData } from "../src/components/ConsumptionAudit";
-import { isProjectWritable } from "../src/utils/projectStatus";
-import { isNonEffectiveHoursEffective } from "../src/utils/employmentStatus";
-import { formatCollectorDisplay } from "../src/utils/collector";
-import { formatAuditStatusLabel } from "../src/utils/statusDisplay";
+import { Card, StatItem, Badge, ProjectStatusBadge } from "@/components/UI";
+import { UI_TOKENS } from "@/constants/uiTokens";
+import { CostPrivacyToggle } from "@/components/CostPrivacyToggle";
+import { useCostPrivacy } from "@/hooks/useCostPrivacy";
+import { PieChartCard } from "@/components/PieChartCard";
+import { XLSX, exportWorkbook, buildExcelFilename } from "@/utils/excelIo";
+import { formatMoney } from "@/utils/formatMoney";
+import { TERMINOLOGY } from "@/constants/terminology";
+import { UI_LABELS } from "@/constants/uiLabels";
+import { isSystemAdmin } from "@/utils/accessControl";
+import { isVirtualDeductionMiningId } from "@/utils/virtualDeduction";
+import { ConsumptionAudit, AuditApiData } from "@/components/ConsumptionAudit";
+import { isProjectWritable } from "@/utils/projectStatus";
+import { isNonEffectiveHoursEffective } from "@/utils/employmentStatus";
+import { getNonEffectiveHoursDeduction } from "@/utils/nonEffectiveHours";
+import { formatCollectorDisplay } from "@/utils/collector";
+import { formatAuditStatusLabel } from "@/utils/statusDisplay";
 import {
   getLocalDateString,
   getLocalMonthString,
@@ -45,14 +47,13 @@ import {
   formatSubmissionTime,
   isDateInRange,
   isLogInFilter,
-} from "../src/utils/dateUtils";
-import { formatAmount } from "../src/utils/formatters";
-import { InfoTip } from "../src/components/InfoTip";
-import { BusinessDateFilter } from "../src/components/BusinessDateFilter";
+} from "@/utils/dateUtils";
+import { InfoTip } from "@/components/InfoTip";
+import { BusinessDateFilter } from "@/components/BusinessDateFilter";
 
-import { fetchWorkspaceData } from "../src/api/workspace";
+import { fetchWorkspaceData } from "@/api/workspace";
 import { toast } from "sonner";
-import { CityGuardianModal, useCityGuardianModal } from "../src/components/CityGuardianModal";
+import { CityGuardianModal, useCityGuardianModal } from "@/components/CityGuardianModal";
 
 interface AuditingProps {
   user: User;
@@ -197,6 +198,8 @@ const Auditing: React.FC<AuditingProps> = ({
         acc +
         (curr.costCategory === "C"
           ? Math.abs(curr.netValue)
+          : isNonEffectiveHoursEffective(curr)
+          ? getNonEffectiveHoursDeduction(curr)
           : curr.dynamicCost || 0),
       0,
     );
@@ -210,7 +213,7 @@ const Auditing: React.FC<AuditingProps> = ({
         const collector = users.find((u) => u.id === l.recordedCollectorId);
         return collector?.category !== "VP";
       })
-      .reduce((acc, curr) => acc + curr.netValue, 0);
+      .reduce((acc, curr) => acc + getNonEffectiveHoursDeduction(curr), 0);
 
     const categoryStats = [
       {
@@ -283,11 +286,11 @@ const Auditing: React.FC<AuditingProps> = ({
       .map(([name, value]) => ({
         name,
         value,
-        color: (name.includes("经理") || name === 'rank')
+        color: (name?.includes("经理") || name === 'rank')
           ? "#3B82F6"
-          : name.includes("NPC")
+          : name?.includes("NPC")
             ? "#8B5CF6"
-            : name.includes("责任人")
+            : name?.includes("责任人")
               ? "#F59E0B"
               : "#10B981",
       }))
