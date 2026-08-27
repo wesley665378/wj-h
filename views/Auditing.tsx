@@ -398,7 +398,7 @@ const Auditing: React.FC<AuditingProps> = ({
           '矿山编号': log.miningId,
           '采集主体': users.find(u => u.id === log.recordedCollectorId)?.name || log.recordedCollectorId,
           '经营单元': users.find(u => u.id === log.rankId)?.center || "未分配",
-          '非效对冲': (log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? (log.dynamicCost || log.amount || 0) : '-',
+          '非效对冲': (log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? getNonEffectiveHoursDeduction(log) : '-',
           'A': log.costCategory === 'A' ? log.dynamicCost : '-',
           'C积分': log.costCategory === 'C' ? log.dynamicCost : '-',
           'C权': cWeightValue,
@@ -994,7 +994,7 @@ const Auditing: React.FC<AuditingProps> = ({
                         </td>
                         <td className="px-4 py-6 font-bold text-slate-900 text-xs">{collectorDisplay}</td>
                         <td className="px-3 py-6 text-right font-mono font-bold text-indigo-600">
-                          {(log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? maskMoney(Math.round(log.dynamicCost || log.amount || 0)) : '-'}
+                          {(log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? maskMoney(Math.round(getNonEffectiveHoursDeduction(log))) : '-'}
                         </td>
                         <td className="px-3 py-6 text-right font-mono font-bold text-blue-600">
                           {log.costCategory === 'A' ? maskMoney(Math.round(log.dynamicCost)) : '-'}

@@ -29,6 +29,7 @@ import {
   getHedgedRevenueCapacity,
   getHedgedValueCapacity
 } from '../src/utils/miningCapacity';
+import { getNonEffectiveHoursDeduction } from '../src/utils/nonEffectiveHours';
 import {
   getLocalDateString,
   getLocalMonthString,
@@ -463,7 +464,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
         '提报时间': formatSubmissionTime(log.timestamp),
         '矿山编号': log.miningId,
         '采集主体': formatCollectorDisplay(log.recordedCollectorId, users),
-        '非效对冲': (log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? Math.round(log.dynamicCost || log.amount || 0) : 0,
+        '非效对冲': (log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? Math.round(getNonEffectiveHoursDeduction(log)) : 0,
         'A': log.costCategory === 'A' ? Math.round(log.dynamicCost) : 0,
         'C': log.costCategory === 'C' ? Math.round(log.dynamicCost) : 0,
         'C权': cWeightValue,
@@ -1019,7 +1020,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                       </div>
                     </td>
                     <td className="px-3 py-6 text-right font-mono font-bold text-indigo-600">
-                      {(log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? maskMoney(Math.round(log.dynamicCost || log.amount || 0)) : '-'}
+                      {(log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? maskMoney(Math.round(getNonEffectiveHoursDeduction(log))) : '-'}
                     </td>
                     <td className="px-3 py-6 text-right font-mono font-bold text-blue-600">
                       {log.costCategory === 'A' ? maskMoney(Math.round(log.dynamicCost)) : '-'}
