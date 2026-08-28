@@ -1,6 +1,7 @@
 
-import React, { useMemo, useState } from 'react';
-import { Search } from 'lucide-react';
+import React, { useMemo, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { Search, ChevronDown } from 'lucide-react';
 import { useCostPrivacy } from '../src/hooks/useCostPrivacy';
 import { CostPrivacyToggle } from '../src/components/CostPrivacyToggle';
 import { User, ValueCreationLog, MiningResource, AuditStatus, Role } from '../types';
@@ -18,6 +19,162 @@ interface EvaluationProps {
   currentTime?: Date;
   onFilterMonthChange?: (month: string) => void;
 }
+
+const CostTooltipIcon: React.FC<{ tooltip: string }> = ({ tooltip }) => {
+  const [show, setShow] = useState(false);
+  const [coords, setCoords] = useState<{ x: number; y: number } | null>(null);
+  const triggerRef = useRef<HTMLSpanElement>(null);
+
+  const handleMouseEnter = () => {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setCoords({
+        x: rect.left + rect.width / 2,
+        y: rect.top - 6,
+      });
+      setShow(true);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setShow(false);
+  };
+
+  return (
+    <span
+      ref={triggerRef}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      className="inline-flex items-center justify-center w-[14px] h-[14px] rounded-full bg-[#e2e8f0] text-[#475569] text-[10px] font-medium leading-none cursor-help mx-[2px] shrink-0 select-none align-middle"
+    >
+      i
+      {show && coords && typeof document !== 'undefined' && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            left: `${coords.x}px`,
+            top: `${coords.y}px`,
+            transform: 'translate(-50%, -100%)',
+            zIndex: 9999,
+            backgroundColor: '#1e293b',
+            color: '#ffffff',
+            borderRadius: '6px',
+            padding: '8px 12px',
+            width: '220px',
+            fontSize: '12px',
+            lineHeight: '1.5',
+            boxShadow: '0 10px 15px -3px rgba(0,0,0,0.3)',
+            pointerEvents: 'none',
+            whiteSpace: 'normal',
+            textAlign: 'left',
+            fontWeight: 'normal',
+          }}
+          className="animate-in fade-in zoom-in-95 duration-100 font-sans"
+        >
+          {tooltip}
+          <div
+            style={{
+              position: 'absolute',
+              top: '100%',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              width: 0,
+              height: 0,
+              borderLeft: '4px solid transparent',
+              borderRight: '4px solid transparent',
+              borderTop: '4px solid #1e293b',
+            }}
+          />
+        </div>,
+        document.body
+      )}
+    </span>
+  );
+};
+
+const CostDetailCard: React.FC<{
+  evaluation: {
+    monthlyCost: number;
+    baseSalary: number;
+    category: string;
+    aCost: number;
+    b1Cost: number;
+    dCost?: number;
+    nonEffectiveDeduction?: number;
+  };
+  maskMoney: (amount: number | string | null | undefined) => string;
+}> = ({ evaluation: e, maskMoney }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  const isRevenue = e.category.includes('款专');
+  const dynamicCategoryLabel = isRevenue ? 'A类' : 'B1类';
+  const dynamicCategoryCost = isRevenue ? e.aCost : e.b1Cost;
+
+  return (
+    <div className="bg-white rounded-[8px] p-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.05)] border border-slate-200/80 transition-all text-left w-full min-w-[220px]">
+      {/* 顶部：总成本标题、明细展开按钮及总成本金额 */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-1.5">
+          <span className="text-[13px] font-bold text-slate-800">总成本</span>
+          <button
+            type="button"
+            onClick={() => setExpanded(prev => !prev)}
+            className="inline-flex items-center space-x-1 text-[11px] text-[#1a56db] hover:text-blue-700 bg-blue-50/80 hover:bg-blue-100 px-2 py-0.5 rounded-[4px] font-medium transition-colors cursor-pointer select-none"
+          >
+            <span>{expanded ? '收起' : '明细'}</span>
+            <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
+        <span className="text-[16px] font-bold font-mono text-slate-900 [font-variant-numeric:tabular-nums]">
+          {maskMoney(e.monthlyCost)}
+        </span>
+      </div>
+
+      {/* 可折叠轻量明细区域 */}
+      {expanded && (
+        <div className="mt-2 pt-2 border-t border-slate-100 bg-[#fafbfc] rounded-[6px] p-2 space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+          {/* 工资 */}
+          <div className="flex items-center justify-between text-[12px]">
+            <span className="text-slate-600 font-medium">工资</span>
+            <span className="font-mono text-slate-800 font-semibold [font-variant-numeric:tabular-nums]">
+              {maskMoney(e.baseSalary || 0)}
+            </span>
+          </div>
+
+          {/* A类或B1类 */}
+          <div className="flex items-center justify-between text-[12px]">
+            <span className="text-slate-600 font-medium">{dynamicCategoryLabel}</span>
+            <span className="font-mono text-slate-800 font-semibold [font-variant-numeric:tabular-nums]">
+              {maskMoney(dynamicCategoryCost || 0)}
+            </span>
+          </div>
+
+          {/* D类 */}
+          <div className="flex items-center justify-between text-[12px]">
+            <span className="text-slate-600 font-medium inline-flex items-center">
+              D类
+              <CostTooltipIcon tooltip="中心开支，无项目列支，按实际发生月人员平均分摊" />
+            </span>
+            <span className="font-mono text-slate-800 font-semibold [font-variant-numeric:tabular-nums]">
+              {maskMoney(e.dCost || 0)}
+            </span>
+          </div>
+
+          {/* FXDC */}
+          <div className="flex items-center justify-between text-[12px]">
+            <span className="text-slate-600 font-medium inline-flex items-center">
+              FXDC
+              <CostTooltipIcon tooltip="非有效工时对冲，冲抵刚性工资包" />
+            </span>
+            <span className="font-mono text-slate-800 font-semibold [font-variant-numeric:tabular-nums]">
+              {maskMoney(e.nonEffectiveDeduction || 0)}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, resources, currentTime, onFilterMonthChange }) => {
   const { isCostVisible, toggleCostVisible, maskMoney, maskText } = useCostPrivacy();
@@ -250,15 +407,8 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                       <span className="font-mono font-bold text-slate-900 text-xs">{formatAmount(e.monthlyIncome)}</span>
                     </td>
                     <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                      <div className="flex flex-col items-center">
-                        <span className="font-mono font-bold text-slate-900 text-xs">{maskMoney(Math.round(e.monthlyCost))}</span>
-                        <span className="text-[9px] text-slate-400 mt-0.5">
-                          {maskText(e.category.includes('款专') 
-                            ? `工资 ${formatAmount(e.baseSalary)} + A ${formatAmount(e.aCost)}` 
-                            : (e.category.includes('产专') || e.category === '经管员高产专' 
-                              ? `工资 ${formatAmount(e.baseSalary)} + B1 ${formatAmount(e.b1Cost)}` 
-                              : `工资 ${formatAmount(e.baseSalary)}`))}
-                        </span>
+                      <div className="inline-block text-left w-full max-w-[320px]">
+                        <CostDetailCard evaluation={e} maskMoney={maskMoney} />
                       </div>
                     </td>
                     <td className="py-2.5 px-3 text-center whitespace-nowrap">

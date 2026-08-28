@@ -4,8 +4,8 @@ import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { ValueCreationLog, MiningResource, AuditStatus, RefineCategory, User, InternalTransaction, RefineType, Role, TransactionType, TransactionStatus, MeetingSample } from '../types';
 import { isAdminOrNpc, isGlobalReader, parseCenterList } from '@/utils/accessControl';
-import { isResourceAssignedToCenter, isCenterManagerUser } from '@/utils/centerScope';
-import { businessUnitLabelsEqual } from '@/utils/businessUnitName';
+import { isResourceAssignedToCenter, isCenterManagerUser, centerMatch } from '@/utils/centerScope';
+import { businessUnitLabelsEqual, userCenterMatchesBusinessUnit } from '@/utils/businessUnitName';
 import { 
   Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend
@@ -127,10 +127,10 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
     const map = new Map<string, ReturnType<typeof aggregateMiningQuadrantsFromLogs>>();
     const activeCenter = isManager ? currentUser?.center : filterCenter;
     for (const r of resources) {
-      map.set(r.id, aggregateMiningQuadrantsFromLogs(activeJzczLogs, resources, r.id, activeCenter));
+      map.set(r.id, aggregateMiningQuadrantsFromLogs(activeJzczLogs, resources, r.id, activeCenter, users));
     }
     return map;
-  }, [activeJzczLogs, resources, isManager, currentUser, filterCenter]);
+  }, [activeJzczLogs, resources, isManager, currentUser, filterCenter, users]);
 
   const filteredResources = useMemo(() => {
     return resources.filter(r => {
@@ -139,9 +139,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
         ? getPurityInfo(q.revenue.confirmed, q.value.confirmed, q.value.pending, q.value.capacity)
         : getPurityInfo(r.confirmedRevenue, r.confirmedValue, r.pendingValue, r.valueCapacity);
       const restrictCenter = isManager ? currentUser?.center : filterCenter;
-      const restrictCentersList = parseCenterList(restrictCenter);
-      const resCentersList = [r.assignedTo, r.assignedToRevenue, r.assignedToValue].flatMap(c => parseCenterList(c));
-      const matchesCenter = restrictCentersList.length === 0 || resCentersList.some(c => restrictCentersList.includes(c));
+      const matchesCenter = !restrictCenter || isResourceAssignedToCenter(r, restrictCenter);
       const matchesType = !filterType || r.types.includes(filterType as RefineType);
       const matchesPurity = !filterPurity || purityInfo.label.includes(filterPurity);
       return matchesCenter && matchesType && matchesPurity;
@@ -344,10 +342,10 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
       .filter(u => u.category !== 'VP')
       .forEach(u => {
         const uCenterList = parseCenterList(u.center);
-        // 交集判断，禁止整串 has
+        // 交集判断，支持基名匹配
         const matchedCenters = isGlobalReaderUser
           ? (uCenterList.length > 0 ? uCenterList : ['未分配'])
-          : uCenterList.filter(c => uniqueCentersSet.has((c || '').toUpperCase()));
+          : uCenterList.filter(c => uniqueCenters.some(uc => userCenterMatchesBusinessUnit(uc, c)));
 
         if (matchedCenters.length === 0) return;
 
@@ -375,10 +373,10 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
       if (collector?.category === 'VP') return;
       
       const collectorCenterList = parseCenterList(collector?.center);
-      // 交集判断，禁止整串 has
+      // 交集判断，支持基名匹配
       const matchedCenters = isGlobalReaderUser
         ? (collectorCenterList.length > 0 ? collectorCenterList : ['未分配'])
-        : collectorCenterList.filter(c => uniqueCentersSet.has((c || '').toUpperCase()));
+        : collectorCenterList.filter(c => uniqueCenters.some(uc => userCenterMatchesBusinessUnit(uc, c)));
 
       if (matchedCenters.length === 0) return;
 
@@ -404,62 +402,61 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
         if (isGlobalReaderUser) {
           targetCentersForResource = assignedList.length > 0 ? Array.from(new Set(assignedList)) : ['未分配'];
         } else {
-          targetCentersForResource = Array.from(new Set(assignedList.filter(c => uniqueCentersSet.has((c || '').toUpperCase()))));
+          targetCentersForResource = Array.from(new Set(assignedList.filter(c => uniqueCenters.some(uc => userCenterMatchesBusinessUnit(uc, c)))));
           if (targetCentersForResource.length === 0 && uniqueCenters.length > 0) {
             targetCentersForResource = [uniqueCenters[0]];
           }
         }
+
+        const hasAnyQuota = r.quotas && r.quotas.length > 0;
 
         targetCentersForResource.forEach(centerName => {
           if (!centers[centerName]) {
             centers[centerName] = { name: centerName, value: 0, revenueLimit: 0, valueLimit: 0, revenue2Percent: 0, value5Percent: 0 };
           }
           
-          // 修正口径：优先从配额表获取，无配额时按款/产指派获取
-          let hasUsedQuota = false;
-          if (r.quotas && r.quotas.length > 0) {
-            const q = r.quotas.find(qItem => businessUnitLabelsEqual(qItem.centerId, centerName));
+          if (hasAnyQuota) {
+            // ⚠️ SSOT 修复 (DB-01-DUP-F): 若存在 quotas，则 quotas 为唯一接后额度口径，不再叠加交易汇总
+            const q = r.quotas!.find(qItem => userCenterMatchesBusinessUnit(qItem.centerId, centerName));
             if (q) {
               centers[centerName].revenueLimit += (q.revenueQuota || 0);
               centers[centerName].valueLimit += (q.valueQuota || 0);
-              hasUsedQuota = true;
             }
-          }
-          
-          if (!hasUsedQuota) {
-            // 无配额分配时，按指派角色精准核算
-            if (parseCenterList(r.assignedToRevenue).includes(centerName)) {
+          } else {
+            // 无 quotas 时，采用指派口径 + 内部交易汇总 (DB-03-F 精准匹配)
+            const isRevenueTarget = centerMatch(r.assignedToRevenue, centerName);
+            const isValueTarget = centerMatch(r.assignedToValue, centerName);
+            
+            if (isRevenueTarget) {
               centers[centerName].revenueLimit += r.revenueCapacity;
             }
-            if (parseCenterList(r.assignedToValue).includes(centerName)) {
+            if (isValueTarget) {
               centers[centerName].valueLimit += r.valueCapacity;
             }
-          }
 
-          // 叠加「已确权资源交易」产生的额度变动 (接后额度修正)
-          // ⚠️ DB-01-DUP-F 修复：采用单一数据源 (SSOT)。若 quotas 已包含内部交易，则不再遍历 verifiedTrans。
-          if (!hasUsedQuota && transactions) {
-            const verifiedTrans = transactions.filter(t => 
-              t.miningId === r.id && 
-              t.type === TransactionType.Resource && 
-              t.status === TransactionStatus.Verified
-            );
-            
-            verifiedTrans.forEach(t => {
-              const senderCenters = users.find(u => u.id === t.senderId)?.center || t.senderId;
-              const receiverCenters = users.find(u => u.id === t.receiverId)?.center || t.receiverId;
+            if (transactions) {
+              const verifiedTrans = transactions.filter(t => 
+                t.miningId === r.id && 
+                t.type === TransactionType.Resource && 
+                t.status === TransactionStatus.Verified
+              );
               
-              // 单元作为接收方：增加初限
-              if (parseCenterList(receiverCenters).includes(centerName)) {
-                centers[centerName].revenueLimit += (t.revenueAmount || 0);
-                centers[centerName].valueLimit += (t.valueAmount || 0);
-              }
-              // 单元作为发起方：扣减初限
-              if (parseCenterList(senderCenters).includes(centerName)) {
-                centers[centerName].revenueLimit -= (t.revenueAmount || 0);
-                centers[centerName].valueLimit -= (t.valueAmount || 0);
-              }
-            });
+              verifiedTrans.forEach(t => {
+                const senderCenters = users.find(u => u.id === t.senderId)?.center || t.senderId;
+                const receiverCenters = users.find(u => u.id === t.receiverId)?.center || t.receiverId;
+                
+                // 单元作为接收方：增加初限 (DB-03-F: 仅当 centerName 在接收列表中时)
+                if (centerMatch(receiverCenters, centerName)) {
+                  centers[centerName].revenueLimit += (t.revenueAmount || 0);
+                  centers[centerName].valueLimit += (t.valueAmount || 0);
+                }
+                // 单元作为发起方：扣减初限
+                if (centerMatch(senderCenters, centerName)) {
+                  centers[centerName].revenueLimit -= (t.revenueAmount || 0);
+                  centers[centerName].valueLimit -= (t.valueAmount || 0);
+                }
+              });
+            }
           }
         });
 

@@ -29,6 +29,7 @@ import { deriveProjectStatus, isProjectWritable } from '@/utils/projectStatus';
 import { isAdminOrNpc, parseCenterList } from '@/utils/accessControl';
 import { userCenterMatchesBusinessUnit, businessUnitLabelsEqual } from '@/utils/businessUnitName';
 import { isCenterManagerUser, sortCenterManagers } from '@/utils/centerManager';
+import { centerMatch } from '@/utils/centerScope';
 import { labelBusinessUnit } from '@/utils/statusDisplay';
 import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '@/components/CityGuardianModal';
@@ -129,7 +130,7 @@ interface ValueCreationProps {
   onAddCircuitBreaker?: (cb: CircuitBreaker) => void;
   quotaSnapshots?: Record<string, QuotaSnapshot>;
   processingLogIds?: Set<string>;
-  persistWorkspaceWithOverrides?: (overrides?: { logs?: ValueCreationLog[] }) => Promise<void>;
+  persistWorkspaceWithOverrides?: (overrides?: { logs?: ValueCreationLog[] }, options?: { silent?: boolean; successMessage?: string; loadingMessage?: string; toastId?: string | number }) => Promise<void>;
 }
 
 type TimePeriod = 'monthly' | 'quarterly' | 'yearly';
@@ -263,9 +264,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   }, [user]);
 
   const businessUnitManagers = useMemo(() => {
-    const managers = managedUsers.filter(u => 
-      isCenterManagerUser(u) || u.category === '系统管理员' || u.role === Role.Admin
-    );
+    const managers = managedUsers.filter(u => isCenterManagerUser(u));
     return sortCenterManagers(managers);
   }, [managedUsers]);
 
@@ -273,15 +272,16 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     // 自动匹配当前智能体账号所属经营单元
     if (user.center) {
       // Search within businessUnitManagers to ensure we only pick valid ones
-      const userCenters = parseCenterList(user.center);
       const businessUnitRep = businessUnitManagers.find(u => {
-        const uCenters = parseCenterList(u.center);
-        return isCenterManagerUser(u) && userCenters.some(c => uCenters.includes(c));
+        return isCenterManagerUser(u) && centerMatch(u.center, user.center);
       });
       if (businessUnitRep) {
         setSelectedOperatorId(businessUnitRep.id);
-      } else {
+      } else if (isCenterManagerUser(user) || user.category === '系统管理员' || user.role === Role.Admin) {
         setSelectedOperatorId(user.id);
+      } else {
+        // 如果当前用户不是负责人且没找到对应负责人，清空以防止非法提交
+        setSelectedOperatorId('');
       }
     } else {
       setSelectedOperatorId(user.id);
@@ -296,9 +296,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     if (u.userStatus === 'inactive') return false;
     // 注入积分 采集主体 只显示 同一 经营单元 采集主体列表
     if (user.center) {
-      const userCenters = parseCenterList(user.center);
-      const uCenters = parseCenterList(u.center);
-      if (!userCenters.some(c => uCenters.includes(c))) return false;
+      if (!centerMatch(u.center, user.center)) return false;
     }
     return true;
   }), [managedUsers, user.center]);
@@ -343,17 +341,10 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       // 仅进行中状态可提报
       if (!isProjectWritable(r)) return false;
       
-      const isAssigned = (assigned: string | undefined, center: string | undefined) => {
-        if (!assigned || !center) return false;
-        const assignedList = parseCenterList(assigned);
-        const centerList = parseCenterList(center);
-        return centerList.some(c => assignedList.includes(c));
-      };
-
       if (selectedCategory === RefineCategory.Revenue) {
-        return isAssigned(r.assignedToRevenue, selectedOperator.center) || isAssigned(r.assignedTo, selectedOperator.center);
+        return centerMatch(r.assignedToRevenue, selectedOperator.center) || centerMatch(r.assignedTo, selectedOperator.center);
       } else {
-        return isAssigned(r.assignedToValue, selectedOperator.center) || isAssigned(r.assignedTo, selectedOperator.center);
+        return centerMatch(r.assignedToValue, selectedOperator.center) || centerMatch(r.assignedTo, selectedOperator.center);
       }
     });
   }, [resources, selectedOperator, selectedCategory]);
@@ -371,87 +362,39 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
   // 矿山占用同源：基于实际流水 logs 统一计算已确权、待确权及已提炼占用量，避免与 JSON 分叉
   const mineralOccupancy = useMemo(() => {
-    if (!selectedResource) {
-      return { confirmedRevenue: 0, pendingRevenue: 0, confirmedValue: 0, pendingValue: 0, minedRevenue: 0, minedValue: 0 };
-    }
-
-    const resourceLogs = logs.filter(l => 
-      l && l.miningId === selectedResource.id && 
-      l.costCategory !== 'C' && 
-      !(l.costCategory === 'B' && l.valueConsumptionMode === 'B2')
-    );
-
-    const confirmedRevenue = resourceLogs
-      .filter(l => l.category === RefineCategory.Revenue && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved))
-      .reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
-
-    const pendingRevenue = resourceLogs
-      .filter(l => l.category === RefineCategory.Revenue && l.status === AuditStatus.Pending)
-      .reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
-
-    const confirmedValue = resourceLogs
-      .filter(l => l.category === RefineCategory.Value && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved))
-      .reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
-
-    const pendingValue = resourceLogs
-      .filter(l => l.category === RefineCategory.Value && l.status === AuditStatus.Pending)
-      .reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
-
-    const minedRevenue = Number(selectedResource.minedRevenue) || 0;
-    const minedValue = Number(selectedResource.minedValue) || 0;
-
+    // VC-03-F: 使用 SSOT 统一口径
+    const q = aggregateMiningQuadrantsFromLogs(logs, resources, selectedResource?.id, user.center, managedUsers);
     return {
-      confirmedRevenue,
-      pendingRevenue,
-      confirmedValue,
-      pendingValue,
-      minedRevenue,
-      minedValue
+      confirmedRevenue: q.revenue.confirmed,
+      pendingRevenue: q.revenue.pending,
+      confirmedValue: q.value.confirmed,
+      pendingValue: q.value.pending,
+      minedRevenue: q.revenue.mined,
+      minedValue: q.value.mined,
+      unconfirmedRevenue: q.revenue.unconfirmed,
+      unconfirmedValue: q.value.unconfirmed
     };
-  }, [selectedResource, logs]);
+  }, [selectedResource, logs, resources, user.center, managedUsers]);
 
   // 计算最高可提炼量（剩余额度）
   const maxAllowed = useMemo(() => {
-    // 优先使用后端快照数据
-    if (selectedMiningId && quotaSnapshots[selectedMiningId]) {
-      const snap = quotaSnapshots[selectedMiningId];
-      return selectedCategory === RefineCategory.Revenue ? snap.revenue.available : snap.value.available;
-    }
-
     if (!selectedResource) return 0;
-    
-    if (selectedCategory === RefineCategory.Revenue) {
-      const initial = getInitialRevenueCapacity(selectedResource);
-      return Math.max(0, Number(initial) - mineralOccupancy.minedRevenue - mineralOccupancy.confirmedRevenue - mineralOccupancy.pendingRevenue);
-    } else {
-      const initial = getInitialValueCapacity(selectedResource);
-      return Math.max(0, Number(initial) - mineralOccupancy.minedValue - mineralOccupancy.confirmedValue - mineralOccupancy.pendingValue);
-    }
-  }, [selectedResource, selectedMiningId, selectedCategory, quotaSnapshots, mineralOccupancy]);
+    return selectedCategory === RefineCategory.Revenue ? mineralOccupancy.unconfirmedRevenue : mineralOccupancy.unconfirmedValue;
+  }, [selectedResource, selectedCategory, mineralOccupancy]);
 
   // 计算从内部交易中接收到的积分上限 (仅针对接收方)
   const isOriginalOwner = useMemo(() => {
     if (!selectedResource || !user.center) return false;
-    const userCenters = parseCenterList(user.center);
-    const checkMatch = (assigned?: string) => {
-      if (!assigned) return false;
-      const assignedList = parseCenterList(assigned);
-      return userCenters.some(c => assignedList.includes(c));
-    };
     if (selectedCategory === RefineCategory.Revenue) {
-      return checkMatch(selectedResource.assignedToRevenue) || checkMatch(selectedResource.assignedTo);
+      return centerMatch(selectedResource.assignedToRevenue, user.center) || centerMatch(selectedResource.assignedTo, user.center);
     } else {
-      return checkMatch(selectedResource.assignedToValue) || checkMatch(selectedResource.assignedTo);
+      return centerMatch(selectedResource.assignedToValue, user.center) || centerMatch(selectedResource.assignedTo, user.center);
     }
   }, [selectedResource, user.center, selectedCategory]);
 
   const userCenterUsers = useMemo(() => {
     if (!user.center) return new Set([user.id]);
-    const userCenters = parseCenterList(user.center);
-    return new Set(managedUsers.filter(u => {
-      const uCenters = parseCenterList(u.center);
-      return userCenters.some(c => uCenters.includes(c));
-    }).map(u => u.id));
+    return new Set(managedUsers.filter(u => centerMatch(u.center, user.center)).map(u => u.id));
   }, [managedUsers, user.center, user.id]);
 
   const receivedLimit = useMemo(() => {
@@ -721,8 +664,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
     if (!isAdminOrNpc(user) && selectedResource) {
       const allowedStr = selectedCategory === RefineCategory.Revenue ? selectedResource.assignedToRevenue : selectedResource.assignedToValue;
-      const allowedCenters = (allowedStr || '').split(',').map(s => s.trim()).filter(Boolean);
-      if (!allowedCenters.some(c => userCenterMatchesBusinessUnit(user.center, c))) {
+      if (!centerMatch(allowedStr, user.center) && !centerMatch(selectedResource.assignedTo, user.center)) {
         showAlert(`权限不足：矿山 [${selectedResource.id}] 的${selectedCategory === RefineCategory.Revenue ? '收款' : '产值'}权限未指派给您所在的单元 [${user.center}]。`);
         return;
       }
@@ -920,16 +862,14 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
     if (logsToSubmit.length > 0) {
       onLogSubmit(logsToSubmit);
-      const nextLogs = [...(logs ?? []), ...logsToSubmit];
       try {
         if (!persistWorkspaceWithOverrides) {
-          showAlert('工作区同步未就绪，请刷新后重试');
+          toast.error('工作区同步未就绪，请刷新后重试');
           return;
         }
-        await persistWorkspaceWithOverrides({ logs: nextLogs });
-        showAlert(`提报指令提交成功并已落库！共提交 ${logsToSubmit.length} 条数据，预审中...`);
+        await persistWorkspaceWithOverrides({ logs: logsToSubmit }, { loadingMessage: '提报落库中…', successMessage: '已落库' });
       } catch (err) {
-        showAlert('提报落库失败，请稍后重试');
+        // Handled inside persistWorkspaceWithOverrides via toast
       }
     }
 
@@ -956,8 +896,8 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   }, [scopeLogs, resources, managedUsers]);
 
   const quadrantData = useMemo(() => {
-    return aggregateMiningQuadrantsFromLogs(logs, resources, selectedResource?.id);
-  }, [logs, resources, selectedResource]);
+    return aggregateMiningQuadrantsFromLogs(logs, resources, selectedResource?.id, user.center, managedUsers);
+  }, [logs, resources, selectedResource, user.center, managedUsers]);
 
   const filteredLogs = useMemo(() => {
     let list = logs.filter(l => l && (l.rankId === selectedOperatorId || l.recordedCollectorId === selectedOperatorId)).reverse();
@@ -1212,13 +1152,20 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                   <option value="">自动匹配矿山编号...</option>
                   {availableResources.map(r => {
                     const { status } = deriveProjectStatus(r);
-                    const userCenters = parseCenterList(user.center);
-                    const q = r.quotas?.find(qItem => userCenters.some(uc => businessUnitLabelsEqual(qItem.centerId, uc)));
-                    const quotaInfo = q ? ` | 接后: ${selectedCategory === RefineCategory.Value ? formatMoney(q.valueQuota) : formatMoney(q.revenueQuota)}` : '';
+                    // VC-01-F: 下拉框数值对齐单元 quotas 口径
+                    const q = r.quotas?.find(qItem => centerMatch(qItem.centerId, user.center));
+                    
+                    // 获取单元视角的四象限数据 (DB-02-GAP-F: 无 quota 时回退 0)
+                    const uq = aggregateMiningQuadrantsFromLogs(logs, resources, r.id, user.center, managedUsers);
+                    const unitRemaining = selectedCategory === RefineCategory.Value ? uq.value.unconfirmed : uq.revenue.unconfirmed;
+                    const unitConfirmed = selectedCategory === RefineCategory.Value ? uq.value.confirmed : uq.revenue.confirmed;
+
+                    const quotaInfo = q ? ` | 款当: ${formatMoney(selectedCategory === RefineCategory.Value ? q.valueQuota : q.revenueQuota)}` : '';
+                    const remainingInfo = ` | 产当: ${formatMoney(unitRemaining)}`;
                     
                     return (
-                      <option key={r.id} value={r.id} disabled={selectedCategory === RefineCategory.Value && r.valueDepleted}>
-                        {r.id} | [{status}]{quotaInfo} | 产当: {getCurrentValueCapacity(r)} (已确: {r.confirmedValue}) | 款当: {getCurrentRevenueCapacity(r)} (已确: {r.confirmedRevenue}) {selectedCategory === RefineCategory.Value && r.valueDepleted ? '[已满]' : ''}
+                      <option key={r.id} value={r.id} disabled={selectedCategory === RefineCategory.Value && unitRemaining <= 0 && status === ProjectStatus.InProgress}>
+                        {r.id} | [{status}]{quotaInfo}{remainingInfo} | 已确: {formatMoney(unitConfirmed)} {selectedCategory === RefineCategory.Value && unitRemaining <= 0 && status === ProjectStatus.InProgress ? '[已满]' : ''}
                       </option>
                     );
                   })}

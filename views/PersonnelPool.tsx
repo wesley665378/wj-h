@@ -37,7 +37,7 @@ interface PersonnelPoolProps {
   user: User;
   users: User[];
   onUpdateUsers: (users: User[]) => void;
-  onUpdatePassword: (userId: string, newPassword: string) => Promise<boolean>;
+  onUpdatePassword: (userId: string, newPassword: string, oldPassword?: string) => Promise<boolean>;
   onClearTestData?: () => void;
   jydyUnits: JydyUnit[];
   onUpdateJydyUnits: (units: JydyUnit[]) => void;
@@ -79,7 +79,6 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
   };
 
   const [newCenterName, setNewCenterName] = useState('');
-  const [newCenterCategory, setNewCenterCategory] = useState<'前台' | '后台'>('前台');
   const [editingCenter, setEditingCenter] = useState<string | null>(null);
   const [editCenterValue, setEditCenterValue] = useState('');
   
@@ -115,6 +114,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
     salaryPackage: number;
     password?: string;
     confirmPassword?: string;
+    oldPassword?: string;
     permissions?: string[];
   }>({ 
     id: '', 
@@ -128,6 +128,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
     salaryPackage: 0,
     password: '',
     confirmPassword: '',
+    oldPassword: '',
     permissions: []
   });
 
@@ -265,6 +266,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       salaryPackage: user.salaryPackage || 0,
       password: '',
       confirmPassword: '',
+      oldPassword: '',
       permissions: user.permissions || []
     });
     setEditingUserId(user.id);
@@ -350,7 +352,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       
       // If editing existing user, still use onUpdatePassword for clarity/legacy
       if (editingUserId && formData.password) {
-        const pwSuccess = await onUpdatePassword(formData.id, formData.password);
+        const pwSuccess = await onUpdatePassword(formData.id, formData.password, formData.oldPassword);
         if (!pwSuccess) {
           throw new Error('密码修改失败，请重试');
         }
@@ -373,7 +375,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       id: '', 
       userId: '',
       name: '', 
-      role: Role.Rank, 
+      role: Role.RevenueCollector, 
       center: '',
       category: '初款专',
       secondaryRoles: [],
@@ -381,6 +383,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       salaryPackage: 0,
       password: '',
       confirmPassword: '',
+      oldPassword: '',
       permissions: []
     });
     setEditingUserId(null);
@@ -399,12 +402,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       return;
     }
 
-    let formattedName = rawName;
-    if (!rawName.endsWith('(前台)') && !rawName.endsWith('(后台)')) {
-      formattedName = `${rawName} (${newCenterCategory})`;
-    }
-
-    const canonicalFormatted = canonicalizeBusinessUnitLabel(formattedName);
+    const canonicalFormatted = canonicalizeBusinessUnitLabel(rawName);
     // 使用 jydyUnits 作为权威判断依据
     const existingNames = jydyUnits.map(u => u.name);
     if (businessUnitListHas(existingNames, canonicalFormatted) || businessUnitListHas(existingNames, rawName)) {
@@ -415,7 +413,6 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
     const newUnit: JydyUnit = {
       id: canonicalFormatted,
       name: canonicalFormatted,
-      category: newCenterCategory,
       status: 'active'
     };
     const updatedJydyUnits = [...jydyUnits, newUnit];
@@ -427,7 +424,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       if (!ok) return;
       onUpdateJydyUnits(updatedJydyUnits);
       setNewCenterName('');
-      showAlert(`成功新增单元: ${formattedName}`);
+      showAlert(`成功新增单元: ${rawName}`);
     } catch (err) {
       showAlert('经营单元同步失败，请重试');
     } finally {
@@ -631,7 +628,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
         const resignDate = resignDateRaw ? String(resignDateRaw) : undefined;
         const userStatus = (resignDate || findValue(['状态', 'Status', 'userStatus']) === 'inactive') ? 'inactive' : 'active';
 
-        let role = Role.Rank;
+        let role = Role.RevenueCollector;
         if (roleStr.includes('admin') || roleStr.includes('管理员') || String(category).includes('管理员') || category === 'VP') role = Role.Admin;
         else if (roleStr.includes('xie') || roleStr.includes('核心') || category === 'NPC' || category === '经管员NPC') role = Role.npcxie;
         else if (roleStr.includes('revenue') || roleStr.includes('收款') || (category && (String(category).includes('款专')))) role = Role.RevenueCollector;
@@ -676,7 +673,6 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
           const newJydyUnitsFromImport = unitsToAdd.map(name => ({
             id: name,
             name: name,
-            category: '前台' as const, // 默认前台
             status: 'active' as const
           }));
           const finalJydyUnits = [...jydyUnits, ...newJydyUnitsFromImport];
@@ -1012,6 +1008,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                 </div>
               </div>
 
+              <div className="space-y-1">
+                <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">初始密码</p>
+                <input type="password" placeholder="设置初始密码 (默认66668888)" value={newUserFormData.password} onChange={e => setNewUserFormData({...newUserFormData, password: e.target.value})} className="bg-white border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none text-[10px] w-full" />
+              </div>
+
               <button onClick={handleCreateUser} className="w-full bg-blue-600 text-white font-black py-3 rounded-xl text-[10px] tracking-widest hover:bg-blue-700 transition-all mt-2">注入采集主体矩阵</button>
             </div>
           </Card>
@@ -1097,6 +1098,12 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                       <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">工资包金额</p>
                       <input type="number" placeholder="工资包金额" value={formData.salaryPackage === 0 ? '' : formData.salaryPackage} onChange={e => setFormData({...formData, salaryPackage: e.target.value === '' ? 0 : Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" />
                     </div>
+                    {editingUserId && formData.id === user.id && (
+                      <div className="space-y-1">
+                        <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">当前密码 (修改自己密码时必填)</p>
+                        <input type="password" placeholder="当前旧密码" value={formData.oldPassword || ''} onChange={e => setFormData({...formData, oldPassword: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" />
+                      </div>
+                    )}
                     <div className="space-y-1">
                       <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">重置密码 (留空则不修改)</p>
                       <input type="password" placeholder="新密码" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" />
@@ -1154,7 +1161,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
              </div>
              <div className="space-y-8">
                {(() => {
-                  const collectors = filteredUsers.filter(u => u.category?.includes('专') || u.role === Role.Rank || u.role === Role.RevenueCollector || u.role === Role.ValueCollector || activeCategory !== '采集主体');
+                  const collectors = filteredUsers.filter(u => u.category?.includes('专') || u.role === Role.RevenueCollector || u.role === Role.ValueCollector || activeCategory !== '采集主体');
                   const groups: Record<string, User[]> = {};
                   effectiveBusinessUnits.forEach(unit => { groups[unit] = []; });
                   collectors.forEach(u => {
@@ -1263,23 +1270,6 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                   placeholder="新经营单元名称..." 
                   className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none text-sm focus:ring-2 focus:ring-slate-900 transition-all min-w-[200px]" 
                 />
-                <div className="flex items-center space-x-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/80">
-                  <span className="text-[10px] font-bold text-slate-400 px-2">属性:</span>
-                  <button
-                    type="button"
-                    onClick={() => setNewCenterCategory('前台')}
-                    className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all ${newCenterCategory === '前台' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}
-                  >
-                    前台
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNewCenterCategory('后台')}
-                    className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all ${newCenterCategory === '后台' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}
-                  >
-                    后台
-                  </button>
-                </div>
                 <button onClick={addCenter} className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-xs hover:bg-blue-600 transition-all shadow-lg active:scale-95 whitespace-nowrap">
                   新增单元
                 </button>
@@ -1287,9 +1277,8 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {effectiveBusinessUnits.map((center, index) => {
                   const centerUsers = users.filter(u => u.center === center);
-                  const collectors = centerUsers.filter(u => u.category?.includes('专') || u.role === Role.Rank || u.role === Role.RevenueCollector || u.role === Role.ValueCollector);
+                  const collectors = centerUsers.filter(u => u.category?.includes('专') || u.role === Role.RevenueCollector || u.role === Role.ValueCollector);
                   const totalCost = centerUsers.reduce((acc, u) => acc + (u.salaryPackage || 0), 0);
-                  const isBackOffice = center.includes('后台') || ['HR', 'FIN', 'QA', '行政', 'IT'].some(dept => center.toUpperCase().includes(dept));
                   return (
                     <div key={index} className="bg-white p-6 rounded-[2rem] border border-slate-100 group hover:shadow-md transition-all">
                       <div className="flex items-center justify-between">
@@ -1305,15 +1294,6 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                         ) : (
                           <div className="flex items-center gap-2">
                             <span className="font-black text-slate-800 text-sm">{center}</span>
-                            {isBackOffice ? (
-                              <span className="px-2 py-0.5 text-[8px] font-black rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200/60 shrink-0">
-                                后台
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 text-[8px] font-black rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 shrink-0">
-                                前台
-                              </span>
-                            )}
                           </div>
                         )}
                         <div className="flex items-center space-x-2">

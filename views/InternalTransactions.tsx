@@ -2,6 +2,7 @@
 import { UI_TOKENS } from '../src/constants/uiTokens';
 import React, { useState, useMemo, useEffect } from 'react';
 import { User, Role, MiningResource, InternalTransaction, TransactionType, TransactionStatus, CircuitBreaker, TransactionFailure, RefineCategory, RefineType, AuditStatus, ValueCreationLog } from '../types';
+import { parseCenterList, centerMatch, isResourceAssignedToCenter } from '../src/utils/centerScope';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
   Cell, Legend, CartesianGrid, PieChart, Pie 
@@ -27,7 +28,8 @@ import {
   canonicalizeBusinessUnitLabel, 
   businessUnitLabelsEqual, 
   userCenterMatchesBusinessUnit,
-  resolveBusinessUnitName 
+  resolveBusinessUnitName,
+  businessUnitBaseKey
 } from '../src/utils/businessUnitName';
 import { formatAmount } from '../src/utils/formatters';
 import { InfoTip } from '../src/components/InfoTip';
@@ -36,11 +38,13 @@ import { getExecutionType, getExecutionTypeBadgeColor, EXECUTION_TYPE_EXPLANATIO
 import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { isCenterManagerUser, sortCenterManagers } from '../src/utils/centerManager';
+import { TradingTab } from './TradingTab';
 
 interface InternalTransactionsProps {
   currentUser: User;
   users: User[];
   managerUsers?: User[];
+  managerCandidates?: User[];
   resources: MiningResource[];
   allResources?: MiningResource[];
   logs: ValueCreationLog[];
@@ -65,6 +69,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   currentUser,
   users,
   managerUsers,
+  managerCandidates,
   resources,
   allResources,
   logs,
@@ -196,7 +201,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     return false;
   };
 
-  const managerSource = useMemo(() => managerUsers ?? users, [managerUsers, users]);
+  const managerSource = useMemo(() => managerCandidates ?? managerUsers ?? users, [managerCandidates, managerUsers, users]);
 
   const userList = useMemo(() => {
     return users;
@@ -220,7 +225,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
         manager = sortCenterManagers(candidateManagers)[0];
       }
 
-      const isSelfUnit = !!(currentUser.center && currentUser.center === unitName);
+      const isSelfUnit = !!(currentUser.center && centerMatch(currentUser.center, unitName));
 
       return {
         unitName,
@@ -257,31 +262,23 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     return `已选择 ${receiverIds.length} 个单元: ${names.join(', ')}`;
   }, [receiverIds, unitSelectionList, managerSource]);
 
-  const availableMiningResources = useMemo(() => {
-    if (isAdmin) return resources;
-    const isAssigned = (assigned: string | undefined, center: string) => {
-      if (!assigned) return false;
-      return assigned.split(',').map(c => c.trim()).includes(center);
-    };
-    return resources.filter(r => 
-      isAssigned(r.assignedToRevenue, currentUser.center) || 
-      isAssigned(r.assignedToValue, currentUser.center) || 
-      isAssigned(r.assignedTo, currentUser.center)
-    );
-  }, [resources, currentUser.center, isAdmin]);
-
   const pendingTransactions = useMemo(() => {
     return transactions.filter(t => {
-      // 接收方确认阶段
+      // 1. 接收方确认阶段 (IT-02-F 修复多单元与基名匹配)
       if (t.status === TransactionStatus.PendingTarget) {
         const receiver = managerSource.find(u => u.id === t.receiverId);
-        if (receiver && receiver.center && currentUser.center && receiver.center === currentUser.center) return true;
+        if (receiver && centerMatch(receiver.center, currentUser.center)) return true;
         if (t.receiverId === currentUser.id) return true;
+        if (centerMatch(t.receiverId, currentUser.center)) return true;
+        if (t.senderId === currentUser.id) return true;
       }
       
-      // 2. 发起方处理退回或验证修改阶段
-      if (t.status === TransactionStatus.PendingInitiatorVerify) {
+      // 2. 发起方处理退回或验证修改阶段 (IT-04-F 增加对 Returned 状态支持)
+      if (t.status === TransactionStatus.PendingInitiatorVerify || t.status === TransactionStatus.Returned) {
+        const sender = managerSource.find(u => u.id === t.senderId);
         if (t.senderId === currentUser.id) return true;
+        if (sender && centerMatch(sender.center, currentUser.center)) return true;
+        if (centerMatch(t.senderId, currentUser.center)) return true;
       }
 
       // 3. 管理员终审阶段
@@ -289,7 +286,23 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
 
       return false;
     });
-  }, [transactions, currentUser.id, isAdmin, userList, currentUser.center]);
+  }, [transactions, currentUser.id, isAdmin, managerSource, currentUser.center]);
+
+  const availableMiningResources = useMemo(() => {
+    const base = isAdmin ? (allResources || resources) : resources.filter(r => isResourceAssignedToCenter(r, currentUser.center));
+    const pendingMiningIds = new Set(pendingTransactions.map(t => t.miningId).filter(Boolean));
+    const allRes = allResources || resources;
+    const injectedRes = allRes.filter(r => pendingMiningIds.has(r.id));
+
+    const map = new Map<string, MiningResource>();
+    base.forEach(r => map.set(r.id, r));
+    injectedRes.forEach(r => {
+      if (!map.has(r.id)) {
+        map.set(r.id, r);
+      }
+    });
+    return Array.from(map.values());
+  }, [resources, allResources, currentUser.center, isAdmin, pendingTransactions]);
 
   const selectedResource = useMemo(() => {
     return resources.find(r => r.id === miningId);
@@ -301,31 +314,34 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
 
   const selectedResourceQuadrants = useMemo(() => {
     if (!selectedResource) return null;
-    return aggregateMiningQuadrantsFromLogs(valueLogs, resources, selectedResource.id);
-  }, [selectedResource, valueLogs, resources]);
+    return aggregateMiningQuadrantsFromLogs(valueLogs, resources, selectedResource.id, currentUser.center, users);
+  }, [selectedResource, valueLogs, resources, currentUser.center, users]);
 
-  // 自动匹配经营单元逻辑
+  // 自动匹配经营单元逻辑 (IT-05-F)
   useEffect(() => {
     if (selectedResource && type === TransactionType.Resource) {
-      const myCenter = currentUser.center;
       let targetCenter = '';
 
-      if (myCenter === selectedResource.assignedToRevenue) {
+      const isMyRevenue = centerMatch(selectedResource.assignedToRevenue, currentUser.center);
+      const isMyValue = centerMatch(selectedResource.assignedToValue, currentUser.center);
+      const isMyGeneral = centerMatch(selectedResource.assignedTo, currentUser.center);
+
+      if (isMyRevenue) {
         targetCenter = selectedResource.assignedToValue || '';
       } 
-      else if (myCenter === selectedResource.assignedToValue) {
+      else if (isMyValue) {
         targetCenter = selectedResource.assignedToRevenue || '';
       }
-      else if (myCenter === selectedResource.assignedTo) {
-        if (selectedResource.assignedToRevenue && selectedResource.assignedToRevenue !== myCenter) {
+      else if (isMyGeneral) {
+        if (selectedResource.assignedToRevenue && !centerMatch(selectedResource.assignedToRevenue, currentUser.center)) {
           targetCenter = selectedResource.assignedToRevenue;
-        } else if (selectedResource.assignedToValue && selectedResource.assignedToValue !== myCenter) {
+        } else if (selectedResource.assignedToValue && !centerMatch(selectedResource.assignedToValue, currentUser.center)) {
           targetCenter = selectedResource.assignedToValue;
         }
       }
 
       if (targetCenter) {
-        const targetItem = unitSelectionList.find(u => u.unitName === targetCenter);
+        const targetItem = unitSelectionList.find(u => centerMatch(u.unitName, targetCenter));
         if (targetItem && targetItem.manager && targetItem.manager.id !== currentUser.id) {
           setReceiverIds([targetItem.manager.id]);
         }
@@ -422,8 +438,6 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
           onSubmitTransaction(newTxs);
         }
 
-        showAlert('交易指令已发起，等待接收方验证。');
-
         setReceiverIds([]);
         setMiningId('');
         setAmount(0);
@@ -444,7 +458,9 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       list = list.filter(t => {
         const sender = managerSource.find(u => u.id === t.senderId);
         const receiver = managerSource.find(u => u.id === t.receiverId);
-        return sender?.center === currentUser.center || receiver?.center === currentUser.center;
+        
+        return centerMatch(sender?.center, currentUser.center) || 
+               centerMatch(receiver?.center, currentUser.center);
       });
     }
     
@@ -534,7 +550,16 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
           }
 
           const receiver = managerSource.find(u => u.id === tx.receiverId);
-          const targetCenter = resolveBusinessUnitName(receiver?.center, units) || canonicalizeBusinessUnitLabel(receiver?.center);
+          let targetCenter = resolveBusinessUnitName(receiver?.center, units) || 
+            canonicalizeBusinessUnitLabel(receiver?.center) || 
+            resolveBusinessUnitName(tx.receiverId, units) || 
+            canonicalizeBusinessUnitLabel(tx.receiverId);
+
+          // 确认时 appendCenter 使用的 targetCenter 必须与当前用户 center 基名一致（调用 userCenterMatchesBusinessUnit 或 businessUnitBaseKey），避免因「(前台)/(后台)」后缀导致匹配失败
+          if (currentUser.center && (userCenterMatchesBusinessUnit(currentUser.center, targetCenter) || businessUnitBaseKey(currentUser.center) === businessUnitBaseKey(targetCenter) || centerMatch(currentUser.center, targetCenter))) {
+            targetCenter = canonicalizeBusinessUnitLabel(currentUser.center);
+          }
+
           if (!targetCenter) {
             showAlert(`确认失败：接收主体 [${receiver?.name || tx.receiverId}] 未配置所属经营单元。操作已中止。`);
             return;
@@ -544,7 +569,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
             const trimmedToAdd = canonicalizeBusinessUnitLabel(centerToAdd);
             if (!trimmedToAdd) return current || '';
             const centers = (current || '').split(',').map(c => canonicalizeBusinessUnitLabel(c)).filter(Boolean);
-            if (!centers.some(c => businessUnitLabelsEqual(c, trimmedToAdd))) {
+            if (!centers.some(c => userCenterMatchesBusinessUnit(c, trimmedToAdd) || businessUnitBaseKey(c) === businessUnitBaseKey(trimmedToAdd) || centerMatch(c, trimmedToAdd))) {
               centers.push(trimmedToAdd);
             }
             return centers.join(',');
@@ -571,7 +596,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
               let currentQuotas = [...(resource.quotas || [])];
               
               // 1. 处理接收方 (targetCenter): 增量累加额度
-              const targetIdx = currentQuotas.findIndex(q => businessUnitLabelsEqual(q.centerId, targetCenter));
+              const targetIdx = currentQuotas.findIndex(q => centerMatch(q.centerId, targetCenter));
               if (targetIdx > -1) {
                 currentQuotas[targetIdx] = {
                   ...currentQuotas[targetIdx],
@@ -589,8 +614,8 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
               }
 
               // 2. 处理发起方 (sourceCenter): 对应扣减额度 (确保矿山总额度在各单元间守恒)
-              if (sourceCenter && !businessUnitLabelsEqual(sourceCenter, targetCenter)) {
-                const sourceIdx = currentQuotas.findIndex(q => businessUnitLabelsEqual(q.centerId, sourceCenter));
+              if (sourceCenter && !centerMatch(sourceCenter, targetCenter)) {
+                const sourceIdx = currentQuotas.findIndex(q => centerMatch(q.centerId, sourceCenter));
                 if (sourceIdx > -1) {
                   currentQuotas[sourceIdx] = {
                     ...currentQuotas[sourceIdx],
@@ -614,12 +639,10 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       }
 
       onAuditTransaction(tx.id, nextStatus, updatedResource);
-      showAlert(`交易 [${tx.id}] 确认成功！${updatedResource ? `矿山 [${tx.miningId}] 已同步指派给 [${managerSource.find(u => u.id === tx.receiverId)?.center || '接收单元'}]。` : ''}`);
       return;
     }
 
     onAuditTransaction(tx.id, nextStatus);
-    showAlert(`交易 [${tx.id}] 状态更新成功！`);
   };
 
   const handleBatchAudit = async (action: 'approve' | 'reject' | 'return' | 'modify' | 'withdraw' | 'agree') => {
@@ -629,7 +652,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     }
     const count = selectedTxIds.length;
     setSelectedTxIds([]);
-    showAlert(`批量操作完成！共处理 ${count} 条交易指令。`);
+    toast.success(`批量处理完成 (${count}条)`);
   };
 
   const handleOpenConfirmModal = (modal: { 
@@ -822,6 +845,12 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
               className={`px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all ${activeTab === 'history' ? 'bg-white text-slate-900 shadow-xl scale-105' : 'text-slate-400 hover:text-slate-600'}`}
              >
                交易记录
+             </button>
+             <button 
+              onClick={() => setActiveTab('breakers')}
+              className={`px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all flex items-center space-x-2 ${activeTab === 'breakers' ? 'bg-white text-slate-900 shadow-xl scale-105' : 'text-slate-400 hover:text-slate-600'}`}
+             >
+               <span>熔断监控 ({circuitBreakers.filter(cb => cb.status === 'active').length})</span>
              </button>
           </div>
         </div>
@@ -1095,7 +1124,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                         type="button"
                         onClick={() => {
                           if (!miningId || receiverIds.length === 0) return;
-                          const q = aggregateMiningQuadrantsFromLogs(valueLogs, availableMiningResources, miningId);
+                          const q = aggregateMiningQuadrantsFromLogs(valueLogs, availableMiningResources, miningId, currentUser.center, users);
                           const count = receiverIds.length;
                           const newAllocations: Record<string, any> = {};
                           receiverIds.forEach((rid) => {
@@ -1263,6 +1292,21 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
              </form>
            </div>
         </div>
+      )}
+
+      {activeTab === 'trading' && (
+        <TradingTab
+          currentUserId={currentUser.id}
+          currentUser={currentUser}
+          pendingTransactions={pendingTransactions}
+          users={users}
+          managerSource={managerSource}
+          managerCandidates={managerCandidates}
+          isAdmin={isAdmin}
+          onAuditTransaction={onAuditTransaction}
+          onHandleAudit={handleAudit}
+          onStartModify={startModify}
+        />
       )}
 
 

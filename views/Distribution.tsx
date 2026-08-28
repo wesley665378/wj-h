@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from "framer-motion";
 
 import { TIER_COEFFICIENTS } from "../src/constants/coefficients";
 import { calculateBonusAllocation, isExpertCategory, aggregateUserMonthMetrics } from "../src/utils/bonusAllocation";
-import { isCenterManagerUser } from "../src/utils/centerScope";
+import { isCenterManagerUser, centerMatch } from "../src/utils/centerScope";
+import { parseCenterList, businessUnitLabelsEqual } from "../src/utils/purification";
 import { getUserSalaryByMonth } from "../src/utils/business";
 import { resolveLogBusinessMonth, getLocalMonthString, getLocalDateString, resolveLogBusinessDate, isDateInRange } from "../src/utils/dateUtils";
 import { formatAmount, formatRatio, formatPercent } from "../src/utils/formatters";
@@ -286,21 +287,30 @@ const Distribution: React.FC<DistributionProps> = ({
         const isRevenueExpert = (serverItem.category || "").includes("款专");
         const isChan = (serverItem.category || "").includes("产专") || serverItem.category === "经管员高产专";
 
-        const currentSurplus = conf.currentSurplus ?? 0;
-        const historyDebt = conf.historyDebt ?? 0;
-        const nextDebt = conf.newDebt ?? 0;
-        const netRedundancy = conf.quota ?? 0;
-        const theoreticalBonus = conf.theoreticalBonus ?? 0;
-        const ratioVal = conf.ratio ?? 0.05;
+        const currentSurplus = conf.currentSurplus ?? serverItem.currentSurplus ?? 0;
+        const historyDebt = conf.historyDebt ?? serverItem.historyDebt ?? 0;
+        const nextDebt = conf.newDebt ?? serverItem.nextDebt ?? 0;
+        const netRedundancy = conf.quota ?? serverItem.netRedundancy ?? 0;
+        const theoreticalBonus = conf.theoreticalBonus ?? serverItem.theoreticalBonus ?? 0;
+        const ratioVal = conf.ratio ?? serverItem.ratio ?? 0.05;
 
-        const userLogsMonthly = logs.filter(l => 
+        const historyDebtConfirmed = conf.historyDebt ?? serverItem.historyDebtConfirmed ?? serverItem.historyDebt ?? 0;
+        const historyDebtApproved = app.historyDebt ?? serverItem.historyDebtApproved ?? serverItem.historyDebt ?? 0;
+        const netRedundancyConfirmed = conf.quota ?? serverItem.netRedundancyConfirmed ?? serverItem.netRedundancy ?? 0;
+        const netRedundancyApproved = app.quota ?? serverItem.netRedundancyApproved ?? serverItem.netRedundancy ?? 0;
+        const theoreticalBonusConfirmed = conf.theoreticalBonus ?? serverItem.theoreticalBonusConfirmed ?? serverItem.theoreticalBonus ?? 0;
+        const theoreticalBonusApproved = app.theoreticalBonus ?? serverItem.theoreticalBonusApproved ?? serverItem.theoreticalBonus ?? 0;
+        const historyRecordsConfirmed = conf.historyRecords || serverItem.historyRecordsConfirmed || serverItem.historyRecords || [];
+        const historyRecordsApproved = app.historyRecords || serverItem.historyRecordsApproved || serverItem.historyRecords || [];
+
+        const userLogsMonthly = (logs || []).filter(l => 
           l.recordedCollectorId === serverItem.userId && 
           (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved) &&
           resolveLogBusinessMonth(l) === effectiveMonth
         );
 
-        const confirmedMetrics = aggregateUserMonthMetrics(logs, userObj || { id: serverItem.userId } as User, effectiveMonth, resources, users, [AuditStatus.Confirmed]);
-        const approvedMetrics = aggregateUserMonthMetrics(logs, userObj || { id: serverItem.userId } as User, effectiveMonth, resources, users, [AuditStatus.Approved]);
+        const confirmedMetrics = aggregateUserMonthMetrics(logs || [], userObj || { id: serverItem.userId } as User, effectiveMonth, resources || [], users || [], [AuditStatus.Confirmed]);
+        const approvedMetrics = aggregateUserMonthMetrics(logs || [], userObj || { id: serverItem.userId } as User, effectiveMonth, resources || [], users || [], [AuditStatus.Approved]);
 
         const baseValueConfirmed = isChan ? confirmedMetrics.productionPackage : confirmedMetrics.revenuePackage;
         const baseValueApproved = isChan ? approvedMetrics.productionPackage : approvedMetrics.revenuePackage;
@@ -313,7 +323,7 @@ const Distribution: React.FC<DistributionProps> = ({
           ? effectiveMonth.split("-")[0]
           : new Date().getFullYear().toString();
 
-        const userLogsYearly = logs.filter(l => 
+        const userLogsYearly = (logs || []).filter(l => 
           l.recordedCollectorId === serverItem.userId && 
           (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved) &&
           resolveLogBusinessMonth(l).startsWith(currentYear)
@@ -321,13 +331,13 @@ const Distribution: React.FC<DistributionProps> = ({
 
         const yearlyMonths = Array.from(new Set(userLogsYearly.map(l => resolveLogBusinessMonth(l))));
         for (const m of yearlyMonths) {
-          const mConf = aggregateUserMonthMetrics(userLogsYearly, userObj || { id: serverItem.userId } as User, m, resources, users, [AuditStatus.Confirmed]);
-          const mApp = aggregateUserMonthMetrics(userLogsYearly, userObj || { id: serverItem.userId } as User, m, resources, users, [AuditStatus.Approved]);
+          const mConf = aggregateUserMonthMetrics(userLogsYearly, userObj || { id: serverItem.userId } as User, m, resources || [], users || [], [AuditStatus.Confirmed]);
+          const mApp = aggregateUserMonthMetrics(userLogsYearly, userObj || { id: serverItem.userId } as User, m, resources || [], users || [], [AuditStatus.Approved]);
           yearlyBaseValConfirmed += (isChan ? mConf.productionPackage : mConf.revenuePackage);
           yearlyBaseValApproved += (isChan ? mApp.productionPackage : mApp.revenuePackage);
         }
 
-        yearlyBonusApproved = yearlyBaseValApproved * (app.ratio ?? 0.05);
+        yearlyBonusApproved = yearlyBaseValApproved * (app.ratio ?? ratioVal);
 
         return {
           userId: serverItem.userId,
@@ -335,24 +345,24 @@ const Distribution: React.FC<DistributionProps> = ({
           category: serverItem.category || "初级专家",
           isRevenueExpert,
           isChan,
-          historyDebt: conf.historyDebt ?? 0,
-          currentSurplus: conf.currentSurplus ?? 0,
-          netRedundancy: conf.quota ?? 0,
-          nextDebt: conf.newDebt ?? 0,
-          theoreticalBonus: conf.theoreticalBonus ?? 0,
-          ratio: conf.ratio ?? 0.05,
+          historyDebt: historyDebt,
+          currentSurplus: currentSurplus,
+          netRedundancy: netRedundancy,
+          nextDebt: nextDebt,
+          theoreticalBonus: theoreticalBonus,
+          ratio: ratioVal,
           centerLevelBonus,
 
-          historyRecordsConfirmed: conf.historyRecords || [],
-          historyRecordsApproved: app.historyRecords || [],
-          historyDebtConfirmed: conf.historyDebt ?? 0,
-          historyDebtApproved: app.historyDebt ?? 0,
-          currentSurplusConfirmed: conf.currentSurplus ?? 0,
-          currentSurplusApproved: app.currentSurplus ?? 0,
-          netRedundancyConfirmed: conf.quota ?? 0,
-          netRedundancyApproved: app.quota ?? 0,
-          theoreticalBonusConfirmed: conf.theoreticalBonus ?? 0,
-          theoreticalBonusApproved: app.theoreticalBonus ?? 0,
+          historyRecordsConfirmed,
+          historyRecordsApproved,
+          historyDebtConfirmed,
+          historyDebtApproved,
+          currentSurplusConfirmed: conf.currentSurplus ?? currentSurplus,
+          currentSurplusApproved: app.currentSurplus ?? currentSurplus,
+          netRedundancyConfirmed,
+          netRedundancyApproved,
+          theoreticalBonusConfirmed,
+          theoreticalBonusApproved,
           yearlyBonusApproved: app.theoreticalBonus ?? yearlyBonusApproved,
 
           confirmedValueConfirmed: isChan ? baseValueConfirmed : 0,
@@ -361,9 +371,9 @@ const Distribution: React.FC<DistributionProps> = ({
           aCostConfirmed: confirmedMetrics.aCost ?? 0,
           confirmedGoldConfirmed: !isChan ? baseValueConfirmed : 0,
           baseValueConfirmed: baseValueConfirmed,
-          netBonusConfirmed: conf.theoreticalBonus ?? 0,
-          isBreakthroughConfirmed: (conf.currentSurplus ?? 0) > 0,
-          gapToBreakthroughConfirmed: (conf.currentSurplus ?? 0) > 0 ? 0 : Math.abs(conf.currentSurplus ?? 0),
+          netBonusConfirmed: theoreticalBonusConfirmed,
+          isBreakthroughConfirmed: (conf.currentSurplus ?? currentSurplus) > 0,
+          gapToBreakthroughConfirmed: (conf.currentSurplus ?? currentSurplus) > 0 ? 0 : Math.abs(conf.currentSurplus ?? currentSurplus),
           paymentMatchRateConfirmed: 1,
 
           confirmedValueApproved: isChan ? baseValueApproved : 0,
@@ -372,9 +382,9 @@ const Distribution: React.FC<DistributionProps> = ({
           aCostApproved: approvedMetrics.aCost ?? 0,
           confirmedGoldApproved: !isChan ? baseValueApproved : 0,
           baseValueApproved: baseValueApproved,
-          netBonusApproved: app.theoreticalBonus ?? 0,
-          isBreakthroughApproved: (app.currentSurplus ?? 0) > 0,
-          gapToBreakthroughApproved: (app.currentSurplus ?? 0) > 0 ? 0 : Math.abs(app.currentSurplus ?? 0),
+          netBonusApproved: theoreticalBonusApproved,
+          isBreakthroughApproved: (app.currentSurplus ?? currentSurplus) > 0,
+          gapToBreakthroughApproved: (app.currentSurplus ?? currentSurplus) > 0 ? 0 : Math.abs(app.currentSurplus ?? currentSurplus),
           paymentMatchRateApproved: 1,
 
           baseValuePending: 0,
@@ -383,10 +393,10 @@ const Distribution: React.FC<DistributionProps> = ({
 
           cWeight: TIER_COEFFICIENTS.BASE_LOSS,
           salaryPackage: userObj?.salaryPackage ?? 0,
-          details: userLogsMonthly,
+          details: userLogsMonthly || [],
 
-          personalIncentiveStatus: (app.currentSurplus ?? 0) > 0 ? "已激活超额价值分享" : "入库任务进行中",
-          teamDividendStatus: (app.currentSurplus ?? 0) > 0 ? "已激活超额价值分享" : "入库任务进行中",
+          personalIncentiveStatus: (app.currentSurplus ?? currentSurplus) > 0 ? "已激活超额价值分享" : "入库任务进行中",
+          teamDividendStatus: (app.currentSurplus ?? currentSurplus) > 0 ? "已激活超额价值分享" : "入库任务进行中",
         };
       });
     }
@@ -563,7 +573,7 @@ const Distribution: React.FC<DistributionProps> = ({
         let centerLevelBonus = 0;
         if (user.category === "经管员高款专" || user.category === "经管员高产专") {
           centerLevelBonus = resources
-            .filter((r) => r.assignedTo === userCenter)
+            .filter((r) => centerMatch(r.assignedTo, userCenter))
             .reduce((sum, r) => sum + (r.incentiveOutput5 || 0) + (r.incentiveCollection2 || 0), 0);
         }
 
@@ -633,14 +643,14 @@ const Distribution: React.FC<DistributionProps> = ({
   const getRedundancyValue = React.useCallback(
     (userId: string, category: string) => {
       const getIndividualRedundancy = (uid: string, cat: string) => {
-        const isChan = cat.includes("产专");
+        const isChan = (cat || "").includes("产专");
         if (isChan) {
-          const item = distributionData.find((d) => d.userId === uid);
-          return item ? item.netRedundancy : 0;
+          const item = (distributionData || []).find((d) => d.userId === uid);
+          return item ? (item.netRedundancy || 0) : 0;
         }
         const isRankKuan = cat === "中款专" || cat === "初款专";
 
-        const rowLogs = logs.filter(
+        const rowLogs = (logs || []).filter(
           (l) =>
             l.recordedCollectorId === uid &&
             (l.status === AuditStatus.Confirmed ||
@@ -659,7 +669,7 @@ const Distribution: React.FC<DistributionProps> = ({
       const isManager =
         category === "经管员高款专" || category === "经管员高产专";
       if (isManager) {
-        return distributionData.reduce((acc, d) => {
+        return (distributionData || []).reduce((acc, d) => {
           if (d.userId === userId) return acc;
           return acc + getIndividualRedundancy(d.userId, d.category);
         }, 0);
@@ -672,6 +682,7 @@ const Distribution: React.FC<DistributionProps> = ({
 
   const getKuanTheoreticalTiers = React.useCallback(
     (data: BonusCalculation) => {
+      if (!data) return null;
       const cat = data.category || "";
       const isManagerKuan = cat === "经管员高款专";
       const isKuan =
@@ -1032,13 +1043,14 @@ const Distribution: React.FC<DistributionProps> = ({
               {distributionData.map((data) => {
                 const userObj = users.find((u) => u.id === data.userId);
                 const userCenter = userObj?.center || "";
+                const userCenters = parseCenterList(userCenter);
 
                 const coll2_Sum = resources
                   .filter(
                     (r) =>
                       r.assignedToRevenue === data.userId ||
                       r.assignedToRevenue === data.userName ||
-                      (userCenter && r.assignedToRevenue === userCenter),
+                      centerMatch(r.assignedToRevenue, userCenter),
                   )
                   .reduce((sum, r) => sum + (r.incentiveCollection2 || 0), 0);
 
@@ -1047,7 +1059,7 @@ const Distribution: React.FC<DistributionProps> = ({
                     (r) =>
                       r.assignedToValue === data.userId ||
                       r.assignedToValue === data.userName ||
-                      (userCenter && r.assignedToValue === userCenter),
+                      centerMatch(r.assignedToValue, userCenter),
                   )
                   .reduce((sum, r) => sum + (r.incentiveOutput5 || 0), 0);
 
@@ -1505,7 +1517,7 @@ const Distribution: React.FC<DistributionProps> = ({
                                   关联确权记录明细
                                 </h5>
                                 <div className="space-y-3">
-                                  {data.details.map((log) => (
+                                  {(data.details || []).map((log) => (
                                     <div
                                       key={log.id}
                                       className="p-4 bg-white rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between group hover:border-blue-200 transition-all"
@@ -1601,13 +1613,14 @@ const Distribution: React.FC<DistributionProps> = ({
             {distributionData.map((data) => {
               const userObj = users.find((u) => u.id === data.userId);
               const userCenter = userObj?.center || "";
+              const userCenters = parseCenterList(userCenter);
 
               const coll2_Sum = resources
                 .filter(
                   (r) =>
                     r.assignedToRevenue === data.userId ||
                     r.assignedToRevenue === data.userName ||
-                    (userCenter && r.assignedToRevenue === userCenter),
+                    centerMatch(r.assignedToRevenue, userCenter),
                 )
                 .reduce((sum, r) => sum + (r.incentiveCollection2 || 0), 0);
 
@@ -1616,7 +1629,7 @@ const Distribution: React.FC<DistributionProps> = ({
                   (r) =>
                     r.assignedToValue === data.userId ||
                     r.assignedToValue === data.userName ||
-                    (userCenter && r.assignedToValue === userCenter),
+                    centerMatch(r.assignedToValue, userCenter),
                 )
                 .reduce((sum, r) => sum + (r.incentiveOutput5 || 0), 0);
 
@@ -1818,149 +1831,151 @@ const Distribution: React.FC<DistributionProps> = ({
       </div>
 
       {/* 登记承兑发放 Modal */}
-      <CityGuardianModal 
-        state={{
-          isOpen: !!bonusTarget && !modalState.isOpen,
-          type: 'custom',
-          title: `城市守护者 - 登记承兑发放 (${bonusTarget?.userName || ""})`,
-          content: (
-          <div className="space-y-4">
-            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
-              <div className="flex justify-between">
-                <span className="text-slate-500">人员:</span>
-                <span className="font-bold text-slate-800">{bonusTarget.userName} ({bonusTarget.category})</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">本月理论应得奖金:</span>
-                <span className="font-bold text-emerald-600 font-mono">{fmtAmount(bonusTarget.netBonusConfirmed)}</span>
-              </div>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-600 font-bold mb-1">发放类别</label>
-                <select
-                  value={bonusForm.category}
-                  onChange={(e) => setBonusForm({ ...bonusForm, category: e.target.value as any })}
-                  className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-white"
-                >
-                  <option value="收款奖金">收款奖金</option>
-                  <option value="产值奖金">产值奖金</option>
-                  <option value="分红">分红</option>
-                  <option value="特别奖金">特别奖金</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-600 font-bold mb-1">关联矿山/资源 (可选)</label>
-                <select
-                  value={bonusForm.miningId}
-                  onChange={(e) => setBonusForm({ ...bonusForm, miningId: e.target.value })}
-                  className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-white"
-                >
-                  <option value="">不指定矿山</option>
-                  {resources.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.id} ({Array.isArray(r.types) ? r.types.join(' / ') : "资源矿山"})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">理论发放金额</label>
-                  <input
-                    type="number"
-                    disabled
-                    value={bonusForm.theoreticalAmount}
-                    className="w-full p-2 border border-slate-200 rounded-lg bg-slate-100 text-slate-500 font-mono text-xs"
-                  />
+      {bonusTarget && (
+        <CityGuardianModal 
+          state={{
+            isOpen: !modalState.isOpen,
+            type: 'custom',
+            title: `城市守护者 - 登记承兑发放 (${bonusTarget.userName || ""})`,
+            content: (
+            <div className="space-y-4">
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">人员:</span>
+                  <span className="font-bold text-slate-800">{bonusTarget.userName} ({bonusTarget.category})</span>
                 </div>
-                <div>
-                  <label className="block text-slate-600 font-bold mb-1">实际发放金额 <span className="text-rose-500">*</span></label>
-                  <input
-                    type="number"
-                    value={bonusForm.amount}
-                    onChange={(e) => setBonusForm({ ...bonusForm, amount: Number(e.target.value) })}
-                    className="w-full p-2 border border-slate-200 rounded-lg text-xs font-mono font-bold text-blue-600 bg-white"
-                  />
+                <div className="flex justify-between">
+                  <span className="text-slate-500">本月理论应得奖金:</span>
+                  <span className="font-bold text-emerald-600 font-mono">{fmtAmount(bonusTarget.netBonusConfirmed)}</span>
                 </div>
               </div>
 
-              {Math.abs(bonusForm.amount - bonusForm.theoreticalAmount) > 0.01 && (
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
-                  <div className="text-amber-800 font-bold text-[11px]">
-                    ⚠️ 实际发放与理论金额存在差异 ({fmtAmount(bonusForm.amount - bonusForm.theoreticalAmount)})
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-slate-600 font-bold mb-1">发放类别</label>
+                  <select
+                    value={bonusForm.category}
+                    onChange={(e) => setBonusForm({ ...bonusForm, category: e.target.value as any })}
+                    className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-white"
+                  >
+                    <option value="收款奖金">收款奖金</option>
+                    <option value="产值奖金">产值奖金</option>
+                    <option value="分红">分红</option>
+                    <option value="特别奖金">特别奖金</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-600 font-bold mb-1">关联矿山/资源 (可选)</label>
+                  <select
+                    value={bonusForm.miningId}
+                    onChange={(e) => setBonusForm({ ...bonusForm, miningId: e.target.value })}
+                    className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-white"
+                  >
+                    <option value="">不指定矿山</option>
+                    {resources.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.id} ({Array.isArray(r.types) ? r.types.join(' / ') : "资源矿山"})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-600 font-bold mb-1">理论发放金额</label>
+                    <input
+                      type="number"
+                      disabled
+                      value={bonusForm.theoreticalAmount}
+                      className="w-full p-2 border border-slate-200 rounded-lg bg-slate-100 text-slate-500 font-mono text-xs"
+                    />
                   </div>
                   <div>
-                    <label className="block text-slate-600 font-bold mb-1">差异原因分类 <span className="text-rose-500">*</span></label>
-                    <select
-                      value={bonusForm.diffType}
-                      onChange={(e) => setBonusForm({ ...bonusForm, diffType: e.target.value as any })}
-                      className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-white"
-                    >
-                      <option value="政策调整">政策调整</option>
-                      <option value="绩效扣减">绩效扣减</option>
-                      <option value="误差纠偏">误差纠偏</option>
-                      <option value="其它">其它</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-slate-600 font-bold mb-1">差异具体说明 <span className="text-rose-500">*</span></label>
-                    <textarea
-                      value={bonusForm.diffReason}
-                      onChange={(e) => setBonusForm({ ...bonusForm, diffReason: e.target.value })}
-                      placeholder="请详细说明金额差异的具体原因..."
-                      rows={2}
-                      className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-white"
+                    <label className="block text-slate-600 font-bold mb-1">实际发放金额 <span className="text-rose-500">*</span></label>
+                    <input
+                      type="number"
+                      value={bonusForm.amount}
+                      onChange={(e) => setBonusForm({ ...bonusForm, amount: Number(e.target.value) })}
+                      className="w-full p-2 border border-slate-200 rounded-lg text-xs font-mono font-bold text-blue-600 bg-white"
                     />
                   </div>
                 </div>
-              )}
 
-              <div>
-                <label className="block text-slate-600 font-bold mb-1">审批文号/单号 (可选)</label>
-                <input
-                  type="text"
-                  value={bonusForm.approvalRef}
-                  onChange={(e) => setBonusForm({ ...bonusForm, approvalRef: e.target.value })}
-                  placeholder="例如：OA-202608-001"
-                  className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-white"
-                />
+                {Math.abs(bonusForm.amount - bonusForm.theoreticalAmount) > 0.01 && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+                    <div className="text-amber-800 font-bold text-[11px]">
+                      ⚠️ 实际发放与理论金额存在差异 ({fmtAmount(bonusForm.amount - bonusForm.theoreticalAmount)})
+                    </div>
+                    <div>
+                      <label className="block text-slate-600 font-bold mb-1">差异原因分类 <span className="text-rose-500">*</span></label>
+                      <select
+                        value={bonusForm.diffType}
+                        onChange={(e) => setBonusForm({ ...bonusForm, diffType: e.target.value as any })}
+                        className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-white"
+                      >
+                        <option value="政策调整">政策调整</option>
+                        <option value="绩效扣减">绩效扣减</option>
+                        <option value="误差纠偏">误差纠偏</option>
+                        <option value="其它">其它</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-slate-600 font-bold mb-1">差异具体说明 <span className="text-rose-500">*</span></label>
+                      <textarea
+                        value={bonusForm.diffReason}
+                        onChange={(e) => setBonusForm({ ...bonusForm, diffReason: e.target.value })}
+                        placeholder="请详细说明金额差异的具体原因..."
+                        rows={2}
+                        className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-white"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-slate-600 font-bold mb-1">审批文号/单号 (可选)</label>
+                  <input
+                    type="text"
+                    value={bonusForm.approvalRef}
+                    onChange={(e) => setBonusForm({ ...bonusForm, approvalRef: e.target.value })}
+                    placeholder="例如：OA-202608-001"
+                    className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-600 font-bold mb-1">发放备注说明 (可选)</label>
+                  <input
+                    type="text"
+                    value={bonusForm.description}
+                    onChange={(e) => setBonusForm({ ...bonusForm, description: e.target.value })}
+                    placeholder="备注信息..."
+                    className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-white"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-slate-600 font-bold mb-1">发放备注说明 (可选)</label>
-                <input
-                  type="text"
-                  value={bonusForm.description}
-                  onChange={(e) => setBonusForm({ ...bonusForm, description: e.target.value })}
-                  placeholder="备注信息..."
-                  className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-white"
-                />
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  onClick={() => setBonusTarget(null)}
+                  className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 transition-all"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleBonusSubmit}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-all shadow-md"
+                >
+                  确认提交发放
+                </button>
               </div>
             </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-              <button
-                onClick={() => setBonusTarget(null)}
-                className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 transition-all"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleBonusSubmit}
-                className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-all shadow-md"
-              >
-                确认提交发放
-              </button>
-            </div>
-          </div>
-          )
-        }}
-        onClose={() => setBonusTarget(null)}
-      />
+            )
+          }}
+          onClose={() => setBonusTarget(null)}
+        />
+      )}
       <CityGuardianModal state={modalState} onClose={closeModal} />
     </div>
   );

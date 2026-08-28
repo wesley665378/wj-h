@@ -90,17 +90,18 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
     };
   });
 
-  const nextLogs = overrides?.logs ?? input.logs;
-  const nextTxs = overrides?.transactions ?? input.transactions;
-  const nextRes = overrides?.miningResources ?? input.miningResources;
-  const nextCBs = overrides?.circuitBreakers ?? input.circuitBreakers;
-  const nextSamples = overrides?.meetingSamples ?? input.meetingSamples;
-  const nextAcc = overrides?.acceptanceRecords ?? input.acceptanceRecords;
+  const nextLogs = overrides ? overrides.logs : input.logs;
+  const nextTxs = overrides ? overrides.transactions : input.transactions;
+  const nextRes = overrides ? overrides.miningResources : input.miningResources;
+  const nextCBs = overrides ? overrides.circuitBreakers : input.circuitBreakers;
+  const nextSamples = overrides ? overrides.meetingSamples : input.meetingSamples;
+  const nextAcc = overrides ? overrides.acceptanceRecords : input.acceptanceRecords;
 
-  const dtcbLogs = nextLogs.filter(l => l.confirmationType === '手动确权');
-  const jzczLogs = nextLogs.filter(l => l.confirmationType !== '手动确权');
-  const snapshots = buildValueEfficiencySnapshots(sanitizedUsers as User[], nextLogs, nextRes, input.filterMonth);
-  const jzfpSnapshots = buildJzfpSnapshot(sanitizedUsers as User[], nextLogs, input.filterMonth);
+  const dtcbLogs = nextLogs ? nextLogs.filter(l => l.confirmationType === '手动确权') : undefined;
+  const jzczLogs = nextLogs ? nextLogs.filter(l => l.confirmationType !== '手动确权') : undefined;
+  // 快照延迟或移除：自动 sync 不附带 valueEfficiencySnapshots / jzfp，大幅缩减 payload 与前端计算开销
+  const snapshots = undefined;
+  const jzfpSnapshots = undefined;
 
   const isInitialUsersPlaceholder = 
     sanitizedUsers.length === 0 || 
@@ -114,9 +115,9 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
       transactions: nextTxs,
       miningResources: nextRes,
       circuitBreakers: nextCBs,
-      systemLogs: input.systemLogs,
-      fhctzRecords: [],
-      settlementPayouts: [],
+      systemLogs: overrides ? undefined : input.systemLogs,
+      fhctzRecords: overrides ? undefined : [],
+      settlementPayouts: overrides ? undefined : [],
       valueEfficiencySnapshots: snapshots,
       systemConfig: undefined,
     }),
@@ -127,13 +128,17 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
   };
 
   // 关键修复：非 Admin 用户强制省略 users 字段，防止触发后端快照比对 403
-  if (!isAdmin || isInitialUsersPlaceholder) {
-    delete payload.users;
+  if (!isAdmin || isInitialUsersPlaceholder || overrides) {
+    if (!overrides?.users) {
+      delete payload.users;
+    }
   }
 
-  // Anti-Data-Loss (防清库) Safeguard:
+  // 清除 undefined 字段和空数组
   Object.keys(payload).forEach(key => {
-    if (Array.isArray(payload[key]) && payload[key].length === 0) {
+    if (payload[key] === undefined) {
+      delete payload[key];
+    } else if (Array.isArray(payload[key]) && payload[key].length === 0) {
       delete payload[key];
     }
   });

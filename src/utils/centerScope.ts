@@ -1,6 +1,7 @@
 import { User, MiningResource, ValueCreationLog, InternalTransaction } from '../../types';
 import { isGlobalReader, parseCenterList } from './accessControl';
 import { isVirtualDeductionMiningId } from './virtualDeduction';
+import { userCenterMatchesBusinessUnit } from './businessUnitName';
 
 export { isSystemAdmin, isGlobalReader as isGlobalScope, isGlobalReader, isAdminOrNpc, parseCenterList } from './accessControl';
 export { isCenterManagerUser, sortCenterManagers, findCenterManager } from './centerManager';
@@ -13,7 +14,7 @@ export function centerMatch(centerA?: string | null, centerB?: string | null): b
   if (!centerA || !centerB) return false;
   const listA = parseCenterList(centerA);
   const listB = parseCenterList(centerB);
-  return listA.some(c => listB.includes(c));
+  return listA.some(a => listB.some(b => userCenterMatchesBusinessUnit(a, b)));
 }
 
 /**
@@ -22,30 +23,21 @@ export function centerMatch(centerA?: string | null, centerB?: string | null): b
 export function filterUsersByCenter(users: User[], currentUser: User | null | undefined): User[] {
   if (!currentUser) return [];
   if (isGlobalReader(currentUser)) return users;
-  const centers = parseCenterList(currentUser.center);
-  if (centers.length === 0) return [];
+  if (!currentUser.center) return [];
   return users.filter(u => {
     if (isGlobalReader(u)) return true;
-    const uCenters = parseCenterList(u.center);
-    return uCenters.some(c => centers.includes(c));
+    return centerMatch(u.center, currentUser.center);
   });
 }
 
 /**
- * 判断资源是否归属于特定经营单元（含多部门逗号/其他分隔符分隔，以及 VP 的多选单元）
+ * 判断资源是否归属于特定经营单元（含多部门逗号/其他分隔符分隔，以及 VP 的多选单元，支持基名模糊匹配）
  */
 export function isResourceAssignedToCenter(resource: MiningResource, center: string | null | undefined): boolean {
   if (!center) return false;
-  const targetCenters = parseCenterList(center);
-  if (targetCenters.length === 0) return false;
-
-  const match = (assigned?: string) => {
-    if (!assigned) return false;
-    const assignedList = parseCenterList(assigned);
-    return targetCenters.some(tc => assignedList.includes(tc));
-  };
-
-  return match(resource.assignedTo) || match(resource.assignedToRevenue) || match(resource.assignedToValue);
+  return centerMatch(resource.assignedTo, center) || 
+         centerMatch(resource.assignedToRevenue, center) || 
+         centerMatch(resource.assignedToValue, center);
 }
 
 /**
@@ -55,8 +47,7 @@ export function filterResourcesByCenter(resources: MiningResource[], currentUser
   if (!currentUser) return [];
   const validResources = (resources || []).filter(r => r && !isVirtualDeductionMiningId(r.id));
   if (isGlobalReader(currentUser)) return validResources;
-  const centers = parseCenterList(currentUser.center);
-  if (centers.length === 0) return [];
+  if (!currentUser.center) return [];
   return validResources.filter(r => isResourceAssignedToCenter(r, currentUser.center));
 }
 
@@ -70,8 +61,7 @@ export function filterLogsByCenter(
 ): ValueCreationLog[] {
   if (!currentUser) return [];
   if (isGlobalReader(currentUser)) return logs;
-  const centers = parseCenterList(currentUser.center);
-  if (centers.length === 0) return [];
+  if (!currentUser.center) return [];
   
   return logs.filter(l => {
     if (!l) return false;
@@ -121,13 +111,11 @@ export function filterAuditLogsByCenter(
 ): ValueCreationLog[] {
   if (!currentUser) return [];
   if (isGlobalReader(currentUser)) return logs;
-  const centers = parseCenterList(currentUser.center);
-  if (centers.length === 0) return [];
+  if (!currentUser.center) return [];
 
   const centerUserIds = new Set(users.filter(u => {
     if (!u) return false;
-    const uCenters = parseCenterList(u.center);
-    return uCenters.some(c => centers.includes(c));
+    return centerMatch(u.center, currentUser.center);
   }).map(u => u.id));
   centerUserIds.add(currentUser.id);
 
@@ -144,8 +132,7 @@ export function filterTransactionsByCenter(
 ): InternalTransaction[] {
   if (!currentUser) return [];
   if (isGlobalReader(currentUser)) return transactions;
-  const centers = parseCenterList(currentUser.center);
-  if (centers.length === 0) return [];
+  if (!currentUser.center) return [];
   
   const userMap = new Map<string, User>(users.map(u => [u.id, u]));
   
@@ -153,9 +140,6 @@ export function filterTransactionsByCenter(
     const sender = userMap.get(t.senderId);
     const receiver = userMap.get(t.receiverId);
     
-    const senderCenters = sender ? parseCenterList(sender.center) : [];
-    const receiverCenters = receiver ? parseCenterList(receiver.center) : [];
-    
-    return senderCenters.some(c => centers.includes(c)) || receiverCenters.some(c => centers.includes(c));
+    return centerMatch(sender?.center, currentUser.center) || centerMatch(receiver?.center, currentUser.center);
   });
 }

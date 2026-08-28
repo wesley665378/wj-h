@@ -7,6 +7,8 @@ import {
 } from '../../types';
 import { calculateHistoricalNetValue, getUserSalaryByMonth } from './business';
 import { resolveLogBusinessMonth } from './dateUtils';
+import { isNonEffectiveHoursEffective } from './employmentStatus';
+import { getNonEffectiveHoursDeduction } from './nonEffectiveHours';
 
 export interface UserMetricsResult {
   revenuePackage: number;
@@ -15,7 +17,11 @@ export interface UserMetricsResult {
   b1Cost: number;
   b2Cost: number;
   cCost: number;
+  dCost: number;
+  nonEffectiveDeduction: number;
 }
+
+import { Role } from '../../types';
 
 export function aggregateUserMonthMetrics(
   logs: ValueCreationLog[],
@@ -31,6 +37,7 @@ export function aggregateUserMonthMetrics(
   let b1Cost = 0;
   let b2Cost = 0;
   let cCost = 0;
+  let nonEffectiveDeduction = 0;
 
   const userLogs = logs.filter(
     (l) =>
@@ -56,7 +63,30 @@ export function aggregateUserMonthMetrics(
     }
   });
 
-  return { revenuePackage, productionPackage, aCost, b1Cost, b2Cost, cCost };
+  const dLogsInMonth = logs.filter(
+    (l) =>
+      l.costCategory === 'D' &&
+      resolveLogBusinessMonth(l) === month &&
+      statusFilter.includes(l.status as AuditStatus)
+  );
+  const totalDInMonth = dLogsInMonth.reduce((acc, l) => acc + (l.dynamicCost || 0), 0);
+  const activeCount = users.filter((u) => u.status !== '离职' && u.category !== '系统管理员' && u.role !== Role.Admin).length || 1;
+  const dCost = totalDInMonth / activeCount;
+
+  if (user.category !== 'VP') {
+    const nonEffLogs = logs.filter(
+      (l) =>
+        (l.recordedCollectorId === user.id || (!l.recordedCollectorId && l.rankId === user.id)) &&
+        resolveLogBusinessMonth(l) === month &&
+        statusFilter.includes(l.status as AuditStatus) &&
+        isNonEffectiveHoursEffective(l)
+    );
+    nonEffLogs.forEach((l) => {
+      nonEffectiveDeduction += getNonEffectiveHoursDeduction(l);
+    });
+  }
+
+  return { revenuePackage, productionPackage, aCost, b1Cost, b2Cost, cCost, dCost, nonEffectiveDeduction };
 }
 
 export interface HistoryRecord {
@@ -135,10 +165,14 @@ export function calculateBonusAllocation(
     if (isProdExpert) {
       mIncome = mRes.productionPackage;
       mCost += mRes.b1Cost;
+      mCost += mRes.dCost;
+      mCost -= mRes.nonEffectiveDeduction;
       mCurrent = mIncome - mCost;
     } else if (isRevenueExpert) {
       mIncome = mRes.revenuePackage;
       mCost += mRes.aCost;
+      mCost += mRes.dCost;
+      mCost -= mRes.nonEffectiveDeduction;
       mCurrent = mIncome - mCost;
     }
     
@@ -179,9 +213,13 @@ export function calculateBonusAllocation(
   if (isProdExpert) {
     currentIncome = cRes.productionPackage;
     currentCost += cRes.b1Cost;
+    currentCost += cRes.dCost;
+    currentCost -= cRes.nonEffectiveDeduction;
   } else if (isRevenueExpert) {
     currentIncome = cRes.revenuePackage;
     currentCost += cRes.aCost;
+    currentCost += cRes.dCost;
+    currentCost -= cRes.nonEffectiveDeduction;
   }
 
   const currentPerformance = currentIncome - currentCost;

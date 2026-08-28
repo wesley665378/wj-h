@@ -949,27 +949,27 @@ const Auditing: React.FC<AuditingProps> = ({
           >
             {(activeTab === "history" || activeTab === "consumption") ? (
               <table className="w-full text-left min-w-[1600px] border-collapse">
-                <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
+                <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 whitespace-nowrap">
                   <tr>
-                    <th className="px-4 py-6">申报编号</th>
-                    <th className="px-4 py-6">业务日期</th>
-                    <th className="px-4 py-6">提报日期</th>
-                    <th className="px-4 py-6">提炼类型</th>
-                    <th className="px-4 py-6 text-center">{TERMINOLOGY.BUSINESS_UNIT}</th>
-                    <th className="px-4 py-6 font-bold text-slate-800">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
-                    <th className="px-3 py-6 text-right text-indigo-600">非效对冲</th>
-                    <th className="px-3 py-6 text-right text-blue-600">A</th>
-                    <th className="px-3 py-6 text-right text-amber-600">C积分</th>
-                    <th className="px-4 py-6 text-right text-amber-700 font-extrabold bg-amber-50/20">C权</th>
-                    <th className="px-4 py-6 text-right text-amber-800 font-extrabold bg-amber-50/10">款初/款当</th>
-                    <th className="px-4 py-6 text-right text-amber-900 font-extrabold bg-amber-50/15">产初/产当</th>
-                    <th className="px-3 py-6 text-right text-rose-600">B1</th>
-                    <th className="px-3 py-6 text-right text-emerald-600">B2积分</th>
-                    <th className="px-4 py-6 text-right text-emerald-700 font-extrabold bg-emerald-50/20">B2权</th>
-                    <th className="px-4 py-6 text-right text-emerald-800 font-extrabold bg-emerald-50/10">产初/产当</th>
-                    <th className="px-6 py-6 text-center">确权日期</th>
-                    <th className="px-6 py-6 text-right">确权状态</th>
-                    {activeTab === "consumption" && <th className="px-4 py-6 text-right">操作控制</th>}
+                    <th className="px-4 py-6 whitespace-nowrap min-w-[90px]">申报编号</th>
+                    <th className="px-4 py-6 whitespace-nowrap min-w-[90px]">业务日期</th>
+                    <th className="px-4 py-6 whitespace-nowrap min-w-[90px]">提报日期</th>
+                    <th className="px-4 py-6 whitespace-nowrap min-w-[80px]">提炼类型</th>
+                    <th className="px-4 py-6 text-center whitespace-nowrap min-w-[80px]">{TERMINOLOGY.BUSINESS_UNIT}</th>
+                    <th className="px-4 py-6 font-bold text-slate-800 whitespace-nowrap min-w-[80px]">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
+                    <th className="px-3 py-6 text-right text-indigo-600 whitespace-nowrap min-w-[80px]">非效对冲</th>
+                    <th className="px-3 py-6 text-right text-blue-600 whitespace-nowrap min-w-[50px]">A</th>
+                    <th className="px-3 py-6 text-right text-amber-600 whitespace-nowrap min-w-[70px]">C积分</th>
+                    <th className="px-4 py-6 text-right text-amber-700 font-extrabold bg-amber-50/20 whitespace-nowrap min-w-[50px]">C权</th>
+                    <th className="px-4 py-6 text-right text-amber-800 font-extrabold bg-amber-50/10 whitespace-nowrap min-w-[110px]">款初/款当</th>
+                    <th className="px-4 py-6 text-right text-amber-900 font-extrabold bg-amber-50/15 whitespace-nowrap min-w-[110px]">产初/产当</th>
+                    <th className="px-3 py-6 text-right text-rose-600 whitespace-nowrap min-w-[50px]">B1</th>
+                    <th className="px-3 py-6 text-right text-emerald-600 whitespace-nowrap min-w-[70px]">B2积分</th>
+                    <th className="px-4 py-6 text-right text-emerald-700 font-extrabold bg-emerald-50/20 whitespace-nowrap min-w-[50px]">B2权</th>
+                    <th className="px-4 py-6 text-right text-emerald-800 font-extrabold bg-emerald-50/10 whitespace-nowrap min-w-[110px]">产初/产当</th>
+                    <th className="px-6 py-6 text-center whitespace-nowrap min-w-[90px]">确权日期</th>
+                    <th className="px-6 py-6 text-right whitespace-nowrap min-w-[80px]">确权状态</th>
+                    {activeTab === "consumption" && <th className="px-4 py-6 text-right whitespace-nowrap min-w-[90px]">操作控制</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">

@@ -64,6 +64,8 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
   const [businessMonth, setBusinessMonth] = useState<string>(getLocalMonthString());
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
+  const [isCustomQueryOpen, setIsCustomQueryOpen] = useState(false);
+  const [customStatusFilter, setCustomStatusFilter] = useState('');
 
   const isNpcxie = user.role === Role.npcxie || user.category === 'NPC';
   const isAdmin = isSystemAdmin(user);
@@ -107,8 +109,8 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
 
   // 全盘价值流四象限汇总（严格调用 aggregateMiningQuadrantsFromLogs 汇总当前页所有矿）
   const overallQuadrants = useMemo(() => {
-    return aggregateMiningQuadrantsFromLogs(logs, resources);
-  }, [logs, resources]);
+    return aggregateMiningQuadrantsFromLogs(logs, resources, undefined, selectedUnitFilter, managedUsers);
+  }, [logs, resources, selectedUnitFilter, managedUsers]);
 
   const handleEdit = (res: MiningResource) => {
     setEditingId(res.id);
@@ -146,10 +148,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       return;
     }
     showConfirm('警告：确定要永久移除此矿山资源吗？此操作将同步导致相关未确权任务失效。', async () => {
-      const success = await onDeleteResource(id);
-      if (success !== false) {
-        showAlert('移除成功');
-      }
+      await onDeleteResource(id);
     });
   };
 
@@ -253,12 +252,8 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       async () => {
         if (editingId) {
           onUpdateResource(resourceData);
-          const quotaInfo = isOutsourced ? `\n本月(N=${monthN})授权额度：${formatMoney(authorizedQuota || 0)} 积分` : '';
-          showAlert(`矿山 ${newMiningId} 指令已更新。${quotaInfo}`);
         } else {
           onAddResource(resourceData);
-          const quotaInfo = isOutsourced ? `\n本月(N=${monthN})授权额度：${formatMoney(authorizedQuota || 0)} 积分` : '';
-          showAlert(`指令下达成功：矿山 ${newMiningId} 已分配。${quotaInfo}`);
         }
         handleCancelEdit();
       }
@@ -311,63 +306,109 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
     <div className="w-full space-y-4 md:space-y-6 lg:space-y-8 animate-in fade-in duration-500 pb-6">
       {/* 权限受控：仅系统管理员（Admin）与 npcxie 显示查询入口 */}
       {canQuery && (
-        <Card className={`${UI_TOKENS.RADIUS_PANEL} p-6 md:p-8 bg-gradient-to-br from-slate-900 via-slate-850 to-slate-900 border border-slate-700 shadow-xl text-white space-y-4`}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <span className="w-11 h-11 rounded-2xl bg-blue-600/30 border border-blue-400/40 flex items-center justify-center text-blue-400 text-xl font-black shrink-0">
-                🔎
+        <div className="bg-white border border-[#d9e2ec] rounded-[4px] p-[20px] shadow-[0_1px_2px_rgba(0,0,0,0.04)] space-y-4">
+          {/* 标题栏 */}
+          <div className="flex items-center justify-between pb-3 border-b border-[#d9e2ec]">
+            <div className="flex items-center gap-2">
+              <span className="w-[3px] h-4 bg-[#1a56db] rounded-full inline-block" />
+              <h3 className="text-[14px] font-bold text-slate-800 tracking-tight">
+                矿山资源查询
+              </h3>
+            </div>
+            <span className="text-[12px] text-slate-400">
+              npcxie · 全景穿透
+            </span>
+          </div>
+
+          {/* 搜索主区域 */}
+          <form onSubmit={handleQuerySearch} className="flex items-center gap-3 w-full">
+            <div className="relative flex-1">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none">
+                🔍
               </span>
-              <div>
-                <h3 className="text-base font-black tracking-tight text-white flex items-center gap-2">
-                  按矿山编号查询 (全景穿透)
-                </h3>
-                <p className="text-xs text-slate-400 font-medium mt-0.5">
-                  输入矿山编号穿透主档、价值创造(jzcz)、动态消耗(dtcb)与内部交易(nbjy)四块台账
-                </p>
-              </div>
+              <input
+                type="text"
+                value={searchMiningId}
+                onChange={(e) => setSearchMiningId(e.target.value)}
+                placeholder="输入矿山编号，例如 LH26AP00001"
+                className="w-full bg-white border border-[#d9e2ec] rounded-[4px] pl-9 pr-8 py-2 text-[13px] text-slate-800 placeholder:text-slate-400 focus:border-[#1a56db] focus:ring-1 focus:ring-[#1a56db] outline-none transition-all h-[38px]"
+              />
+              {searchMiningId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchMiningId('');
+                    setQueriedMiningId(null);
+                  }}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold px-1"
+                  title="清空"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+            <button
+              type="submit"
+              className="px-6 h-[38px] bg-[#1a56db] hover:bg-[#1447b8] text-white font-medium text-[13px] tracking-[2px] rounded-[4px] shadow-sm transition-all shrink-0 cursor-pointer"
+            >
+              查 询
+            </button>
+          </form>
+
+          {/* 说明文字 */}
+          <div className="bg-[#fafbfc] border-l-2 border-[#1a56db] p-3 rounded-[4px]">
+            <p className="text-[12px] text-slate-600 leading-relaxed">
+              输入矿山编号后，将穿透查询以下四块台账：主档、价值创造（jzcz）、动态消耗（dtcb）与内部交易（nbjy）。
+            </p>
+          </div>
+
+          {/* 自定义查询折叠区 */}
+          <div>
+            <div
+              onClick={() => setIsCustomQueryOpen(!isCustomQueryOpen)}
+              className="flex items-center justify-between cursor-pointer py-2.5 px-1 border-t border-[#d9e2ec] text-[13px] font-medium text-slate-700 hover:text-[#1a56db] transition-colors select-none"
+            >
+              <span>自定义查询</span>
+              <span className="text-slate-400 text-xs">
+                {isCustomQueryOpen ? '▴' : '▾'}
+              </span>
             </div>
 
-            <form onSubmit={handleQuerySearch} className="flex items-center gap-2 w-full sm:w-auto">
-              <div className="relative flex-1 sm:w-72">
-                <input
-                  type="text"
-                  value={searchMiningId}
-                  onChange={(e) => setSearchMiningId(e.target.value)}
-                  placeholder="输入矿山编号 (如 A01)..."
-                  className="w-full bg-slate-950/90 border border-slate-700 rounded-xl px-4 py-2.5 text-xs font-mono font-bold text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all h-10"
-                />
-                {searchMiningId && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSearchMiningId('');
-                      setQueriedMiningId(null);
-                    }}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs font-bold px-1"
-                    title="清空"
-                  >
-                    ✕
-                  </button>
-                )}
+            {isCustomQueryOpen && (
+              <div className="pt-2 pb-1 space-y-1 animate-in fade-in duration-200">
+                <div className="flex items-center justify-between py-2.5 border-b border-dashed border-slate-200">
+                  <label className="text-[13px] text-slate-600">业务月份</label>
+                  <input
+                    type="month"
+                    value={businessMonth}
+                    onChange={(e) => setBusinessMonth(e.target.value)}
+                    className="bg-white border border-[#d9e2ec] rounded-[4px] px-3 py-1.5 text-[13px] text-slate-800 focus:border-[#1a56db] focus:ring-1 focus:ring-[#1a56db] outline-none"
+                  />
+                </div>
+                <div className="flex items-center justify-between py-2.5 border-b border-dashed border-slate-200">
+                  <label className="text-[13px] text-slate-600">经营单元</label>
+                  <input
+                    type="text"
+                    value={selectedUnitFilter}
+                    onChange={(e) => setSelectedUnitFilter(e.target.value)}
+                    placeholder="全部"
+                    className="bg-white border border-[#d9e2ec] rounded-[4px] px-3 py-1.5 text-[13px] text-slate-800 focus:border-[#1a56db] focus:ring-1 focus:ring-[#1a56db] outline-none placeholder:text-slate-400 w-48 text-right"
+                  />
+                </div>
+                <div className="flex items-center justify-between py-2.5">
+                  <label className="text-[13px] text-slate-600">矿山状态</label>
+                  <input
+                    type="text"
+                    value={customStatusFilter}
+                    onChange={(e) => setCustomStatusFilter(e.target.value)}
+                    placeholder="全部"
+                    className="bg-white border border-[#d9e2ec] rounded-[4px] px-3 py-1.5 text-[13px] text-slate-800 focus:border-[#1a56db] focus:ring-1 focus:ring-[#1a56db] outline-none placeholder:text-slate-400 w-48 text-right"
+                  />
+                </div>
               </div>
-              <button
-                type="submit"
-                className="px-5 bg-blue-600 hover:bg-blue-500 text-white font-black text-xs rounded-xl shadow-md transition-all shrink-0 flex items-center justify-center gap-1.5 h-10"
-              >
-                <span>查询</span>
-              </button>
-              <div className="w-full mt-4 pt-4 border-t border-slate-700/50">
-                <BusinessDateFilter
-                  month={businessMonth}
-                  onMonthChange={setBusinessMonth}
-                  startDate={startDate}
-                  endDate={endDate}
-                  onDateRangeChange={(s, e) => { setStartDate(s); setEndDate(e); }}
-                />
-              </div>
-            </form>
+            )}
           </div>
-        </Card>
+        </div>
       )}
 
       {/* 穿透查询结果展示 (包含 1 矿山主档、2 价值创造、3 动态消耗、4 内部交易 与 Excel 导出) */}

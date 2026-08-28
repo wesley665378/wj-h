@@ -1,4 +1,5 @@
 import { MiningResource } from '../../types';
+import { centerMatch, parseCenterList } from './centerScope';
 
 export type ExecutionTypeName = '自签自做' | '自签它做' | '它签自做' | '多元协同' | '未指派';
 
@@ -14,11 +15,11 @@ export function getExecutionType(resource: MiningResource | null | undefined, cu
   // 产侧：产值指派；为空则用总指派 (assignedToValue || assignedTo)
   const valAssign = resource.assignedToValue || resource.assignedTo || '';
 
-  const revUnits = revAssign.split(',').map(s => s.trim()).filter(Boolean);
-  const valUnits = valAssign.split(',').map(s => s.trim()).filter(Boolean);
+  const revUnits = parseCenterList(revAssign);
+  const valUnits = parseCenterList(valAssign);
 
-  const hasRev = revUnits.includes(cleanCurrentUnit);
-  const hasVal = valUnits.includes(cleanCurrentUnit);
+  const hasRev = revUnits.some(u => centerMatch(u, cleanCurrentUnit));
+  const hasVal = valUnits.some(u => centerMatch(u, cleanCurrentUnit));
 
   // 1. 款侧或产侧为空，或本单元两侧都不在 → 未指派
   if (!revAssign.trim() || !valAssign.trim() || (!hasRev && !hasVal)) {
@@ -26,9 +27,7 @@ export function getExecutionType(resource: MiningResource | null | undefined, cu
   }
 
   // 2. 本单元在款侧且在产侧，且两侧集合完全相同 → 自签自做
-  const revSet = new Set(revUnits);
-  const valSet = new Set(valUnits);
-  const setsAreEqual = revSet.size === valSet.size && [...revSet].every(u => valSet.has(u));
+  const setsAreEqual = revUnits.length === valUnits.length && revUnits.every(ru => valUnits.some(vu => centerMatch(ru, vu)));
 
   if (hasRev && hasVal && setsAreEqual) {
     return '自签自做';

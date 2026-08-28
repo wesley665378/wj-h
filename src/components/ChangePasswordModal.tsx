@@ -50,7 +50,7 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClo
             setConfirmPassword('');
           });
         } else {
-          showAlert('当前密码错误，修改失败');
+          showAlert('密码修改失败，请查看顶部提示');
         }
       } catch (error) {
         showAlert('系统异常，请稍后再试');

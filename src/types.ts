@@ -35,6 +35,7 @@ export interface User {
   salaryHistory?: SalaryHistoryRecord[]; // 工资变更履历
   permissions?: string[]; // 可访问的组件/标签页 ID 列表
   userStatus?: 'active' | 'inactive'; // 用户状态：active(在职), inactive(离职)
+  status?: string; // 用户状态扩展 (兼容在职/离职)
   password?: string; // 初始密码 (仅用于同步落库)
   mustChangePassword?: boolean; // 首次登录强制改密标识
   isFirstLogin?: boolean; // 首次登录标识
@@ -44,7 +45,6 @@ export interface User {
 export interface JydyUnit {
   id: string;
   name: string;
-  category?: '前台' | '后台';
   status?: 'active' | 'inactive';
 }
 
@@ -80,7 +80,7 @@ export enum TransactionStatus {
   PendingTarget = '待接收方验证',
   PendingNpcxie = '待npcxie审核',
   PendingAdmin = '待管理员审核',
-  Returned = '待发起方验证',
+  Returned = '已退回',
   PendingInitiatorVerify = '待发起方验证'
 }
 
@@ -302,7 +302,7 @@ export interface ValueCreationLog {
   recordedCollectorId?: string; // 提炼人员（仅为记录，不参与计算）
   category: RefineCategory;
   type: RefineType;
-  costCategory?: 'A' | 'B' | 'C'; // 动态消耗计入类别
+  costCategory?: 'A' | 'B' | 'C' | 'D'; // 动态消耗计入类别
   valueConsumptionMode?: 'B1' | 'B2'; // 产值B类消耗模式
   amount: number; // 积分/资源量
   rawAmount: number; // 原始注入总量（用于动态对冲计算基准）

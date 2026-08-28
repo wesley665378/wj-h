@@ -2,6 +2,8 @@ import { User, ValueCreationLog, MiningResource, AuditStatus, ValueEfficiencySna
 import { calculateHistoricalNetValue, getUserSalaryByMonth } from './business';
 import { aggregateUserMonthMetrics } from './bonusAllocation';
 import { isLogInFilter } from './dateUtils';
+import { isNonEffectiveHoursEffective } from './employmentStatus';
+import { getNonEffectiveHoursDeduction } from './nonEffectiveHours';
 
 export interface EvaluationResult extends ValueEfficiencySnapshot {
   tierLabel: string;
@@ -12,6 +14,8 @@ export interface EvaluationResult extends ValueEfficiencySnapshot {
   b1Cost: number;
   b2Cost: number;
   cCost: number;
+  dCost: number;
+  nonEffectiveDeduction: number;
 }
 
 /**
@@ -93,6 +97,25 @@ export function computePersonEvaluation(
   const isRevenueExpert = category.includes('款专');
   const isProdExpert = category.includes('产专') || category === '经管员高产专';
 
+  const nonEffectiveDeduction = (user.category === 'VP') ? 0 : logs
+    .filter(l => 
+      matchUser(l) &&
+      [AuditStatus.Confirmed, AuditStatus.Approved].includes(l.status as AuditStatus) &&
+      isNonEffectiveHoursEffective(l) &&
+      isLogInFilter(l, filterMonth, startDate, endDate)
+    )
+    .reduce((acc, l) => acc + getNonEffectiveHoursDeduction(l), 0);
+
+  // D类成本：中心开支，无项目列支，按实际发生月的人员平均分摊
+  const dLogsInPeriod = logs.filter(l =>
+    l.costCategory === 'D' &&
+    [AuditStatus.Confirmed, AuditStatus.Approved].includes(l.status as AuditStatus) &&
+    isLogInFilter(l, filterMonth, startDate, endDate)
+  );
+  const totalDCostInPeriod = dLogsInPeriod.reduce((acc, l) => acc + (l.dynamicCost || 0), 0);
+  const activeUserCount = allUsers.filter(u => u.status !== '离职' && u.category !== '系统管理员' && u.role !== Role.Admin).length || 1;
+  const dCost = totalDCostInPeriod / activeUserCount;
+
   const baseSalary = getUserSalaryByMonth(user, refMonth);
   let monthlyCost = baseSalary;
   if (isRevenueExpert) {
@@ -100,8 +123,10 @@ export function computePersonEvaluation(
   } else if (isProdExpert) {
     monthlyCost += b1Cost;
   }
+  monthlyCost += dCost;
+  monthlyCost -= nonEffectiveDeduction;
   
-  // 年度成本 = 从 1 月到 refMonth 累计月度成本 (工资 + A/B1)
+  // 年度成本 = 从 1 月到 refMonth 累计月度成本 (工资 + A/B1/D - 非效对冲)
   let yearlyCost = 0;
   const targetYear = refMonth.split('-')[0];
   const targetMonthNum = parseInt(refMonth.split('-')[1]);
@@ -121,6 +146,8 @@ export function computePersonEvaluation(
     } else if (isProdExpert) {
       mCost += ymMetrics.b1Cost;
     }
+    mCost += ymMetrics.dCost;
+    mCost -= ymMetrics.nonEffectiveDeduction;
     yearlyCost += mCost;
   }
 
@@ -171,7 +198,9 @@ export function computePersonEvaluation(
     aCost,
     b1Cost,
     b2Cost,
-    cCost
+    cCost,
+    dCost,
+    nonEffectiveDeduction
   };
 }
 

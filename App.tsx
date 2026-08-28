@@ -266,6 +266,26 @@ const App: React.FC = () => {
   const [quotaSnapshots, setQuotaSnapshots] = useState<Record<string, QuotaSnapshot>>({});
   const [filterMonth, setFilterMonth] = useState<string>(() => getLocalMonthString());
 
+  const lastSyncedFingerprintRef = React.useRef<string>('');
+
+  const getWorkspaceFingerprint = React.useCallback(() => {
+    return [
+      managedUsers.length, managedUsers[managedUsers.length - 1]?.id, managedUsers[managedUsers.length - 1]?.category,
+      logs.length, logs[logs.length - 1]?.id, logs[logs.length - 1]?.status, logs[logs.length - 1]?.dynamicCost,
+      transactions.length, transactions[transactions.length - 1]?.id, transactions[transactions.length - 1]?.status,
+      miningResources.length, miningResources[miningResources.length - 1]?.id, miningResources[miningResources.length - 1]?.version,
+      circuitBreakers.length, circuitBreakers[circuitBreakers.length - 1]?.id, circuitBreakers[circuitBreakers.length - 1]?.status,
+      systemLogs.length,
+      meetingSamples.length,
+      acceptanceRecords.length,
+      filterMonth
+    ].join('|');
+  }, [managedUsers, logs, transactions, miningResources, circuitBreakers, systemLogs, meetingSamples, acceptanceRecords, filterMonth]);
+
+  const updateLastSyncedFingerprint = React.useCallback(() => {
+    lastSyncedFingerprintRef.current = getWorkspaceFingerprint();
+  }, [getWorkspaceFingerprint]);
+
   const persistWorkspaceWithOverrides = React.useCallback(async (overrides?: {
     transactions?: InternalTransaction[];
     miningResources?: MiningResource[];
@@ -275,11 +295,16 @@ const App: React.FC = () => {
     meetingSamples?: MeetingSample[];
     acceptanceRecords?: AcceptanceRecord[];
     jydyUnits?: JydyUnit[];
-  }) => {
+  }, options?: { silent?: boolean; successMessage?: string; loadingMessage?: string; toastId?: string | number }) => {
     if (!currentUser) return;
     if (!workspaceLoaded) {
       toast.error('工作区尚未加载完成，请稍后再试');
       return;
+    }
+
+    let toastId: string | number | undefined = options?.toastId;
+    if (!options?.silent && !toastId) {
+      toastId = toast.loading(options?.loadingMessage || '保存中…');
     }
 
     const payload = buildAppSyncPayload({
@@ -306,12 +331,24 @@ const App: React.FC = () => {
       if (syncRes && (syncRes as any).success === false) {
         throw new Error((syncRes as any).error || '数据同步失败');
       }
+
+      updateLastSyncedFingerprint();
+
+      if (toastId) {
+        toast.success(options?.successMessage || '已落库', { id: toastId });
+      } else if (!options?.silent) {
+        toast.success(options?.successMessage || '已落库');
+      }
     } catch (err: any) {
       console.error('Data sync error:', err);
-      toastApiError(err, '工作区数据同步失败');
+      if (toastId) {
+        toast.error(err.message || '工作区数据同步失败', { id: toastId });
+      } else {
+        toastApiError(err, '工作区数据同步失败');
+      }
       throw err;
     }
-  }, [currentUser, workspaceLoaded, managedUsers, logs, transactions, miningResources, circuitBreakers, meetingSamples, filterMonth, acceptanceRecords, systemLogs]);
+  }, [currentUser, workspaceLoaded, managedUsers, logs, transactions, miningResources, circuitBreakers, meetingSamples, filterMonth, acceptanceRecords, systemLogs, updateLastSyncedFingerprint]);
 
   const persistWorkspaceNow = React.useCallback(async () => {
     await persistWorkspaceWithOverrides();
@@ -572,19 +609,32 @@ const App: React.FC = () => {
       return nextTxs;
     });
 
-    const nextRes = updatedResources || miningResources;
-    if (updatedResources) {
-      setMiningResources(updatedResources);
+    if (updatedResources && updatedResources.length > 0) {
+      setMiningResources(prev => {
+        const next = [...prev];
+        for (const item of updatedResources) {
+          const index = next.findIndex(r => r.id === item.id);
+          if (index >= 0) {
+            next[index] = item;
+          } else {
+            next.push(item);
+          }
+        }
+        return next;
+      });
     }
     try {
-      await persistWorkspaceWithOverrides({ transactions: nextTxs, miningResources: nextRes });
+      await persistWorkspaceWithOverrides({ 
+        transactions: nextTxs, 
+        miningResources: updatedResources 
+      }, { successMessage: '内部交易提交成功' });
     } catch (err: any) {
       toastApiError(err, '内部交易同步失败');
     }
     for (const tx of txList) {
       addSystemLog('内部交易', `发起了/修改了 ${tx.amount} 额度的 ${tx.type} 交易 (${tx.id})`);
     }
-  }, [miningResources, addSystemLog, persistWorkspaceWithOverrides]);
+  }, [addSystemLog, persistWorkspaceWithOverrides]);
 
   const onAuditTransaction = React.useCallback(async (txIdOrList: string | string[], status: TransactionStatus, updatedResource?: MiningResource | MiningResource[]) => {
     const idList = Array.isArray(txIdOrList) ? txIdOrList : [txIdOrList];
@@ -593,22 +643,29 @@ const App: React.FC = () => {
       nextTxs = prev.map(t => idList.includes(t.id) ? { ...t, status } : t);
       return nextTxs;
     });
-    let nextRes = miningResources;
+    
+    let resListToSync: MiningResource[] | undefined = undefined;
     if (updatedResource) {
       const resList = Array.isArray(updatedResource) ? updatedResource : [updatedResource];
-      nextRes = miningResources.map(r => {
-        const found = resList.find(item => item.id === r.id);
-        return found || r;
+      resListToSync = resList;
+      setMiningResources(prev => {
+        const ids = new Set(prev.map(r => r.id));
+        return [
+          ...prev.map(r => resList.find(x => x.id === r.id) || r),
+          ...resList.filter(x => !ids.has(x.id))
+        ];
       });
-      setMiningResources(nextRes);
     }
     try {
-      await persistWorkspaceWithOverrides({ transactions: nextTxs, miningResources: nextRes });
+      await persistWorkspaceWithOverrides({ 
+        transactions: nextTxs, 
+        miningResources: resListToSync // 仅同步变更的矿山资源，不要带全量 miningResources 避免非管理员403
+      }, { successMessage: '交易审核成功' });
     } catch (err: any) {
       toastApiError(err, '交易审核同步失败');
     }
     idList.forEach(id => addSystemLog('交易审核', `将交易 ${id} 的状态更新为 ${status}`));
-  }, [miningResources, addSystemLog, persistWorkspaceWithOverrides]);
+  }, [addSystemLog, persistWorkspaceWithOverrides]);
 
   const onAddCircuitBreaker = React.useCallback(async (cb: CircuitBreaker) => {
     let nextCBs: CircuitBreaker[] = [];
@@ -625,7 +682,7 @@ const App: React.FC = () => {
       return nextCBs;
     });
     try {
-      await persistWorkspaceWithOverrides({ circuitBreakers: nextCBs });
+      await persistWorkspaceWithOverrides({ circuitBreakers: nextCBs }, { successMessage: '熔断触发成功' });
     } catch (err: any) {
       toastApiError(err, '熔断触发同步失败');
     }
@@ -648,7 +705,7 @@ const App: React.FC = () => {
       return nextCBs;
     });
     try {
-      await persistWorkspaceWithOverrides({ circuitBreakers: nextCBs });
+      await persistWorkspaceWithOverrides({ circuitBreakers: nextCBs }, { successMessage: '熔断恢复成功' });
     } catch (err: any) {
       toastApiError(err, '熔断恢复同步失败');
     }
@@ -664,7 +721,7 @@ const App: React.FC = () => {
       return nextRes;
     });
     try {
-      await persistWorkspaceWithOverrides({ miningResources: nextRes });
+      await persistWorkspaceWithOverrides({ miningResources: nextRes }, { successMessage: '新增资源成功' });
     } catch (err: any) {
       toastApiError(err, '新增资源同步失败');
     }
@@ -678,7 +735,7 @@ const App: React.FC = () => {
       return nextRes;
     });
     try {
-      await persistWorkspaceWithOverrides({ miningResources: nextRes });
+      await persistWorkspaceWithOverrides({ miningResources: nextRes }, { successMessage: '更新资源成功' });
     } catch (err: any) {
       toastApiError(err, '更新资源同步失败');
     }
@@ -699,7 +756,7 @@ const App: React.FC = () => {
       return nextRes;
     });
     try {
-      await persistWorkspaceWithOverrides({ miningResources: nextRes });
+      await persistWorkspaceWithOverrides({ miningResources: nextRes }, { successMessage: '删除资源成功' });
     } catch (err: any) {
       toastApiError(err, '删除资源同步失败');
     }
@@ -755,19 +812,20 @@ const App: React.FC = () => {
 
   const onUpdatePassword = React.useCallback(async (userId: string, newPassword: string, oldPassword?: string): Promise<boolean> => {
     try {
-      const res = await changePasswordApi(userId, newPassword, oldPassword);
-      if (res && res.success) {
-        addSystemLog('安全设置', `用户 ${userId} 成功修改了密码`);
-        return true;
-      } else {
-        toast.error(res?.message || '修改密码失败，请重试');
-        return false;
+      await changePasswordApi(userId, newPassword, oldPassword);
+      addSystemLog('安全设置', `用户 ${userId} 成功修改了密码`);
+      
+      // 更新当前用户状态，避免再次弹出改密弹窗
+      if (currentUser && currentUser.id === userId) {
+        setCurrentUser(prev => prev ? { ...prev, mustChangePassword: false, isFirstLogin: false } : null);
       }
+      
+      return true;
     } catch (err) {
       toastApiError(err);
       return false;
     }
-  }, [addSystemLog]);
+  }, [addSystemLog, currentUser]);
 
   const onAuthenticate = React.useCallback(async (userId: string, password: string): Promise<User | null> => {
     try {
@@ -835,8 +893,15 @@ const App: React.FC = () => {
     }
   }, [onClearTestData]);
 
-  // 3. 数据持久化与后端同步 (去抖动)
+  // 3. 数据持久化与后端同步 (600ms 去抖动，动静分离与静默同步)
   useEffect(() => {
+    const currentFingerprint = getWorkspaceFingerprint();
+
+    // 显式写库已更新 fingerprint 或数据未变动，跳过自动 sync 避免重复请求
+    if (currentFingerprint === lastSyncedFingerprintRef.current) {
+      return;
+    }
+
     const syncData = async () => {
       // 门禁：未登录或未完成首次加载，不允许同步写
       if (!currentUser || !workspaceLoaded) return;
@@ -857,6 +922,7 @@ const App: React.FC = () => {
         });
         
         await syncWorkspace(payload);
+        lastSyncedFingerprintRef.current = currentFingerprint;
       } catch (err: any) {
         console.error('数据同步失败:', err);
         toastApiError(err, '工作区数据同步失败');
@@ -865,7 +931,7 @@ const App: React.FC = () => {
 
     // 只有在加载完成后才执行同步
     if (currentUser && workspaceLoaded) {
-      const timer = setTimeout(syncData, 2000); // 2 秒防抖
+      const timer = setTimeout(syncData, 600); // 600ms 防抖，响应迅速且不频繁
       
       if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
         // E′-6 规则澄清: shihe_* 本地缓存仅作为客户端前端暂存与开发环境保底，非权威主账本；服务端 API 接口及工作区同步 payload 为权威源。
@@ -874,7 +940,7 @@ const App: React.FC = () => {
 
       return () => clearTimeout(timer);
     }
-  }, [managedUsers, logs, transactions, miningResources, circuitBreakers, systemLogs, meetingSamples, acceptanceRecords, filterMonth, currentUser, workspaceLoaded]);
+  }, [managedUsers, logs, transactions, miningResources, circuitBreakers, systemLogs, meetingSamples, acceptanceRecords, filterMonth, currentUser, workspaceLoaded, getWorkspaceFingerprint]);
 
   useEffect(() => {
     if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
@@ -1104,6 +1170,7 @@ const App: React.FC = () => {
         currentUser, 
         users: filteredUsers, 
         managerUsers: managedUsers,
+        managerCandidates: managedUsers,
         resources: filteredResources, 
         allResources: miningResources,
         transactions: filteredTransactions, 
@@ -1208,16 +1275,6 @@ const App: React.FC = () => {
 
   const handleLoginSuccess = React.useCallback((loggedInUser: User) => {
     setCurrentUser(loggedInUser);
-    const AUTO_ACCOUNT_CATEGORIES = ['经管员高款专', '经管员高产专', '经管员NPC', 'VP'];
-    if (
-      loggedInUser.mustChangePassword || 
-      (loggedInUser.category && AUTO_ACCOUNT_CATEGORIES.includes(loggedInUser.category) && (loggedInUser.password === '66668888' || loggedInUser.isFirstLogin !== false))
-    ) {
-      setTimeout(() => {
-        toast.info(`🔐 首次登录提示：您的职级 (${loggedInUser.category}) 账号使用初始默认密码 66668888，请及时修改密码！`, { duration: 8000 });
-        setIsChangePasswordModalOpen(true);
-      }, 500);
-    }
   }, []);
 
   if (!currentUser) {

@@ -31,14 +31,14 @@ export const changePasswordApi = async (
   userId: string,
   newPassword: string,
   oldPassword?: string
-): Promise<{ success: boolean; message?: string }> => {
+): Promise<any> => {
   const raw = await apiClient.post<any>('/api/auth/change-password', {
     userId,
     id: userId,
     newPassword,
     oldPassword
   });
-  return unwrapApiEnvelope<{ success: boolean; message?: string }>(raw);
+  return unwrapApiEnvelope(raw);
 };
 
 export const fetchSessionUser = async (): Promise<User> => {
