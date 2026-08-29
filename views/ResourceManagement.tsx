@@ -306,109 +306,99 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
     <div className="w-full space-y-4 md:space-y-6 lg:space-y-8 animate-in fade-in duration-500 pb-6">
       {/* 权限受控：仅系统管理员（Admin）与 npcxie 显示查询入口 */}
       {canQuery && (
-        <div className="bg-white border border-[#d9e2ec] rounded-[4px] p-[20px] shadow-[0_1px_2px_rgba(0,0,0,0.04)] space-y-4">
-          {/* 标题栏 */}
-          <div className="flex items-center justify-between pb-3 border-b border-[#d9e2ec]">
-            <div className="flex items-center gap-2">
-              <span className="w-[3px] h-4 bg-[#1a56db] rounded-full inline-block" />
-              <h3 className="text-[14px] font-bold text-slate-800 tracking-tight">
-                矿山资源查询
-              </h3>
-            </div>
-            <span className="text-[12px] text-slate-400">
-              npcxie · 全景穿透
-            </span>
-          </div>
+        <Card
+          title="矿山资源查询"
+          headerAction={<span className="text-[12px] text-slate-400 font-normal">npcxie · 全景穿透</span>}
+          noPadding
+        >
+          <div className="p-4 md:p-6 space-y-4">
+            {/* 搜索主区域 */}
+            <form onSubmit={handleQuerySearch} className="flex items-center gap-3 w-full">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={searchMiningId}
+                  onChange={(e) => setSearchMiningId(e.target.value)}
+                  placeholder="输入矿山编号，例如 LH26AP00001"
+                  className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all h-10 placeholder:text-[#94a3b8]"
+                />
+                {searchMiningId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchMiningId('');
+                      setQueriedMiningId(null);
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold px-1 cursor-pointer"
+                    title="清空"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+              <button
+                type="submit"
+                className="px-6 h-10 bg-slate-900 hover:bg-blue-600 active:scale-95 text-white font-black text-xs uppercase tracking-[2px] rounded-[4px] shadow-sm transition-all shrink-0 cursor-pointer flex items-center justify-center"
+              >
+                查 询
+              </button>
+            </form>
 
-          {/* 搜索主区域 */}
-          <form onSubmit={handleQuerySearch} className="flex items-center gap-3 w-full">
-            <div className="relative flex-1">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none">
-                🔍
-              </span>
-              <input
-                type="text"
-                value={searchMiningId}
-                onChange={(e) => setSearchMiningId(e.target.value)}
-                placeholder="输入矿山编号，例如 LH26AP00001"
-                className="w-full bg-white border border-[#d9e2ec] rounded-[4px] pl-9 pr-8 py-2 text-[13px] text-slate-800 placeholder:text-slate-400 focus:border-[#1a56db] focus:ring-1 focus:ring-[#1a56db] outline-none transition-all h-[38px]"
-              />
-              {searchMiningId && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchMiningId('');
-                    setQueriedMiningId(null);
-                  }}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold px-1"
-                  title="清空"
-                >
-                  ✕
-                </button>
+            {/* 说明文字 */}
+            <div className="bg-[#fafbfc] border-l-2 border-[#1a56db] p-3 rounded-[4px]">
+              <p className="text-[12px] text-slate-600 leading-relaxed">
+                输入矿山编号后，将穿透查询以下四块台账：主档、价值创造（jzcz）、动态消耗（dtcb）与内部交易（nbjy）。
+              </p>
+            </div>
+
+            {/* 自定义查询折叠区 */}
+            <div className="border-t border-slate-200 pt-1">
+              <div
+                onClick={() => setIsCustomQueryOpen(!isCustomQueryOpen)}
+                className="flex items-center justify-between cursor-pointer py-2.5 px-1 text-[13px] font-medium text-slate-700 hover:text-[#1a56db] transition-colors select-none"
+              >
+                <span>自定义查询</span>
+                <span className="text-slate-400 text-xs">
+                  {isCustomQueryOpen ? '▴' : '▾'}
+                </span>
+              </div>
+
+              {isCustomQueryOpen && (
+                <div className="pt-2 pb-1 space-y-2 animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between py-2 border-b border-dashed border-slate-200">
+                    <label className="text-[13px] text-slate-600 font-medium">业务月份</label>
+                    <input
+                      type="month"
+                      value={businessMonth}
+                      onChange={(e) => setBusinessMonth(e.target.value)}
+                      className="bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-mono text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all text-right cursor-pointer h-10"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between py-2 border-b border-dashed border-slate-200">
+                    <label className="text-[13px] text-slate-600 font-medium">经营单元</label>
+                    <input
+                      type="text"
+                      value={selectedUnitFilter}
+                      onChange={(e) => setSelectedUnitFilter(e.target.value)}
+                      placeholder="全部"
+                      className="bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all placeholder:text-[#94a3b8] w-48 text-right h-10"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between py-2">
+                    <label className="text-[13px] text-slate-600 font-medium">矿山状态</label>
+                    <input
+                      type="text"
+                      value={customStatusFilter}
+                      onChange={(e) => setCustomStatusFilter(e.target.value)}
+                      placeholder="全部"
+                      className="bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all placeholder:text-[#94a3b8] w-48 text-right h-10"
+                    />
+                  </div>
+                </div>
               )}
             </div>
-            <button
-              type="submit"
-              className="px-6 h-[38px] bg-[#1a56db] hover:bg-[#1447b8] text-white font-medium text-[13px] tracking-[2px] rounded-[4px] shadow-sm transition-all shrink-0 cursor-pointer"
-            >
-              查 询
-            </button>
-          </form>
-
-          {/* 说明文字 */}
-          <div className="bg-[#fafbfc] border-l-2 border-[#1a56db] p-3 rounded-[4px]">
-            <p className="text-[12px] text-slate-600 leading-relaxed">
-              输入矿山编号后，将穿透查询以下四块台账：主档、价值创造（jzcz）、动态消耗（dtcb）与内部交易（nbjy）。
-            </p>
           </div>
-
-          {/* 自定义查询折叠区 */}
-          <div>
-            <div
-              onClick={() => setIsCustomQueryOpen(!isCustomQueryOpen)}
-              className="flex items-center justify-between cursor-pointer py-2.5 px-1 border-t border-[#d9e2ec] text-[13px] font-medium text-slate-700 hover:text-[#1a56db] transition-colors select-none"
-            >
-              <span>自定义查询</span>
-              <span className="text-slate-400 text-xs">
-                {isCustomQueryOpen ? '▴' : '▾'}
-              </span>
-            </div>
-
-            {isCustomQueryOpen && (
-              <div className="pt-2 pb-1 space-y-1 animate-in fade-in duration-200">
-                <div className="flex items-center justify-between py-2.5 border-b border-dashed border-slate-200">
-                  <label className="text-[13px] text-slate-600">业务月份</label>
-                  <input
-                    type="month"
-                    value={businessMonth}
-                    onChange={(e) => setBusinessMonth(e.target.value)}
-                    className="bg-white border border-[#d9e2ec] rounded-[4px] px-3 py-1.5 text-[13px] text-slate-800 focus:border-[#1a56db] focus:ring-1 focus:ring-[#1a56db] outline-none"
-                  />
-                </div>
-                <div className="flex items-center justify-between py-2.5 border-b border-dashed border-slate-200">
-                  <label className="text-[13px] text-slate-600">经营单元</label>
-                  <input
-                    type="text"
-                    value={selectedUnitFilter}
-                    onChange={(e) => setSelectedUnitFilter(e.target.value)}
-                    placeholder="全部"
-                    className="bg-white border border-[#d9e2ec] rounded-[4px] px-3 py-1.5 text-[13px] text-slate-800 focus:border-[#1a56db] focus:ring-1 focus:ring-[#1a56db] outline-none placeholder:text-slate-400 w-48 text-right"
-                  />
-                </div>
-                <div className="flex items-center justify-between py-2.5">
-                  <label className="text-[13px] text-slate-600">矿山状态</label>
-                  <input
-                    type="text"
-                    value={customStatusFilter}
-                    onChange={(e) => setCustomStatusFilter(e.target.value)}
-                    placeholder="全部"
-                    className="bg-white border border-[#d9e2ec] rounded-[4px] px-3 py-1.5 text-[13px] text-slate-800 focus:border-[#1a56db] focus:ring-1 focus:ring-[#1a56db] outline-none placeholder:text-slate-400 w-48 text-right"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        </Card>
       )}
 
       {/* 穿透查询结果展示 (包含 1 矿山主档、2 价值创造、3 动态消耗、4 内部交易 与 Excel 导出) */}
@@ -576,14 +566,33 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                   value={newMiningId}
                   onChange={(e) => setNewMiningId(e.target.value)}
                   disabled={!!editingId}
-                  className="flex-1 min-w-0 w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 outline-none focus:ring-4 focus:ring-blue-500/10 font-bold text-slate-800 transition-all placeholder:text-slate-300 disabled:opacity-50 text-xs h-11"
+                  className="flex-1 min-w-0 w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 font-bold text-slate-800 transition-all placeholder:text-[#94a3b8] disabled:opacity-50 text-[13px] h-10"
                   placeholder="自动匹配矿山编号"
                   required
                 />
                 <button
                   type="button"
+                  onClick={() => {
+                    const templateData = [{
+                      '矿山编号': 'R001',
+                      '提炼类型': RefineType.Enterprise,
+                      '收款上限': 100000,
+                      '产值上限': 100000,
+                      '收款指派': units[0] || '默认单元',
+                      '产值指派': units[0] || '默认单元',
+                      '核算类别': '100%'
+                    }];
+                    exportJsonToExcel(templateData, '矿山资源模板', '矿山资源导入模板.xlsx');
+                  }}
+                  className="px-3 bg-slate-50 text-slate-600 border border-slate-200 rounded-[4px] text-[11px] font-black hover:bg-slate-100 transition-all flex items-center shadow-xs whitespace-nowrap h-10 shrink-0 cursor-pointer ml-2"
+                  title="下载导入模板"
+                >
+                  📄 模板
+                </button>
+                <button
+                  type="button"
                   onClick={() => document.getElementById('excel-import-input')?.click()}
-                  className="px-3 bg-blue-50 text-blue-600 border border-blue-200 rounded-xl text-[11px] font-black hover:bg-blue-100 transition-all flex items-center shadow-sm whitespace-nowrap h-11 shrink-0"
+                  className="px-3 bg-blue-50 text-blue-600 border border-blue-200 rounded-[4px] text-[11px] font-black hover:bg-blue-100 transition-all flex items-center shadow-xs whitespace-nowrap h-10 shrink-0 cursor-pointer ml-2"
                   title="批量导入矿山资源"
                 >
                   📥 导入
@@ -674,7 +683,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                         });
 
                         newResourcesList.forEach(r => onAddResource(r));
-                        showAlert(`批量导入完成：新增 ${importCount} 个矿山资源。`);
+                        toast.success(`批量导入完成：新增 ${importCount} 个矿山资源。`);
                         e.target.value = ''; // Reset input
                       };
                       reader.readAsBinaryString(file);
@@ -684,7 +693,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value as '100%' | '据实')}
-                  className="w-20 shrink-0 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2.5 outline-none focus:ring-4 focus:ring-blue-500/10 font-bold text-slate-800 transition-all cursor-pointer text-xs h-11"
+                  className="w-20 shrink-0 bg-white border border-[#b8d0f7] rounded-[4px] px-2 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 font-bold text-slate-800 transition-all cursor-pointer text-[13px] h-10"
                   required
                 >
                   <option value="100%">100%</option>
@@ -694,39 +703,39 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
             </div>
 
             <div className="space-y-2 col-span-1 sm:col-span-1 lg:col-span-2 min-w-0">
-              <label className="text-[11px] font-black text-amber-600 uppercase tracking-wider h-5 flex items-center">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">
                  款初
               </label>
               <input
                 type="number"
                 value={revenueCapacity}
                 onChange={(e) => setRevenueCapacity(Number(e.target.value))}
-                className="w-full bg-slate-50 border border-amber-200 rounded-xl px-3.5 py-2.5 outline-none focus:ring-4 focus:ring-amber-500/10 font-black text-slate-900 font-mono transition-all text-xs h-11"
+                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 font-bold text-slate-900 font-mono transition-all text-[13px] h-10"
                 min="0"
                 required
               />
             </div>
 
             <div className="space-y-2 col-span-1 sm:col-span-1 lg:col-span-2 min-w-0">
-              <label className="text-[11px] font-black text-emerald-600 uppercase tracking-wider h-5 flex items-center">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">
                  产初
               </label>
               <input
                 type="number"
                 value={valueCapacity}
                 onChange={(e) => setValueCapacity(Number(e.target.value))}
-                className="w-full bg-slate-50 border border-emerald-200 rounded-xl px-3.5 py-2.5 outline-none focus:ring-4 focus:ring-emerald-500/10 font-black text-slate-900 font-mono transition-all text-xs h-11"
+                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 font-bold text-slate-900 font-mono transition-all text-[13px] h-10"
                 min="0"
                 required
               />
             </div>
 
             <div className="space-y-2 col-span-1 sm:col-span-1 lg:col-span-2 min-w-0">
-              <label className="text-[11px] font-black text-amber-600 uppercase tracking-wider h-5 flex items-center">收款指派</label>
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">收款指派</label>
               <select
                 value={assigneeRevenue}
                 onChange={(e) => setAssigneeRevenue(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 outline-none focus:ring-4 focus:ring-amber-500/10 font-bold text-slate-800 transition-all cursor-pointer text-xs h-11"
+                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 font-bold text-slate-800 transition-all cursor-pointer text-[13px] h-10"
                 required
               >
                 <option value="">选择...</option>
@@ -737,11 +746,11 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
             </div>
 
             <div className="space-y-2 col-span-1 sm:col-span-1 lg:col-span-2 min-w-0">
-              <label className="text-[11px] font-black text-emerald-600 uppercase tracking-wider h-5 flex items-center">产值指派</label>
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">产值指派</label>
               <select
                 value={assigneeValue}
                 onChange={(e) => setAssigneeValue(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 outline-none focus:ring-4 focus:ring-emerald-500/10 font-bold text-slate-800 transition-all cursor-pointer text-xs h-11"
+                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 font-bold text-slate-800 transition-all cursor-pointer text-[13px] h-10"
                 required
               >
                 <option value="">选择...</option>
@@ -995,12 +1004,12 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
            
            <div className="flex items-center space-x-6 flex-wrap gap-y-3">
               {isAdmin && (
-                <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
-                  <span className="text-[10px] font-black text-slate-500 uppercase">经营单元视角:</span>
+                <div className="flex items-center gap-2 bg-slate-50 px-3 py-1 rounded-[4px] border border-slate-200">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">经营单元视角:</span>
                   <select
                     value={selectedUnitFilter}
                     onChange={(e) => setSelectedUnitFilter(e.target.value)}
-                    className="bg-white border border-slate-200 text-slate-800 text-xs font-bold rounded-lg px-2 py-1 outline-none focus:border-blue-500"
+                    className="bg-white border border-[#b8d0f7] text-slate-800 text-[13px] font-bold rounded-[4px] px-3 py-1.5 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all cursor-pointer h-10"
                   >
                     <option value="">默认 ({user.center || '无'})</option>
                     {units.map(u => (
@@ -1021,7 +1030,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
         </div>
 
         {resources.length === 0 ? (
-          <div className="text-center py-20 text-slate-300 font-black uppercase text-xs tracking-widest">暂无矿山资源</div>
+          <div className="px-6 py-12 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_MINING}</div>
         ) : viewMode === 'card' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 lg:gap-8">
             {resources.map(res => {

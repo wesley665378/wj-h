@@ -18,16 +18,19 @@ export function isCenterManagerUser(user: User | null | undefined): boolean {
 
   const role = (user.role as string) || '';
   const category = (user.category as string) || '';
+  const name = user.name || '';
+  const roleTitle = (user as any).roleTitle || '';
 
-  // 3. 禁止：VP / NPC / 系统管理员 / 经管员NPC / 水库管理员 / reservoir_manager
+  // 3. 排除 VP 角色与特定管理角色
   if (
+    category === 'VP' ||
+    role === 'vp' ||
+    role === (Role as any).VP ||
+    role === Role.Admin ||
     role === Role.NPC ||
     role === Role.npcxie ||
-    role === (Role as any).VP ||
-    role === 'vp' ||
     role === 'npc' ||
     role === 'reservoir_manager' || 
-    category === 'VP' ||
     category === 'NPC' ||
     category === '系统管理员' ||
     category === '水库管理员' ||
@@ -36,7 +39,10 @@ export function isCenterManagerUser(user: User | null | undefined): boolean {
     return false;
   }
 
-  // 4. 纳入条件：仅基于 category 明确标识
+  // 4. 严禁使用 roleTitle 或 name 的 includes 模糊匹配
+  // (此处逻辑上已经通过 category 严格匹配了，但为了对齐业务口径，显式确保不使用模糊匹配)
+
+  // 5. 纳入条件：仅基于 category 明确标识
   const isManagerCategory =
     category === '经管员高款专' ||
     category === '经管员高产专' ||

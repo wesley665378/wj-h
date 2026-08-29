@@ -1,10 +1,10 @@
 import { UI_TOKENS } from '../src/constants/uiTokens';
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { User, Role, ValueCreationLog, JydyUnit } from '../types';
-import { XLSX, exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
+import { XLSX, exportWorkbook, buildExcelFilename, exportJsonToExcel } from '../src/utils/excelIo';
 import { Card, Badge } from '../src/components/UI';
 import { UserTableRow } from '../src/components/UserTableRow';
-import { MENU_ITEMS, RANK_DICTIONARY } from '../constants';
+import { MENU_ITEMS, RANK_DICTIONARY } from '../src/constants';
 import { checkUserPermission, RANK_CONFIG } from '../src/utils/business';
 import { getLocalMonthString } from '../src/utils/dateUtils';
 import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
@@ -16,6 +16,7 @@ import {
   businessUnitLabelsEqual, 
   userCenterMatchesBusinessUnit 
 } from '../src/utils/businessUnitName';
+import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import { assertAcceptablePassword } from '../src/utils/security';
 import { stripUsersPasswords } from '../src/utils/userSyncPayload';
@@ -231,7 +232,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
         // 成功后更新本地内存
         onUpdateUsers(stripUsersPasswords(nextUsers));
         
-        showAlert('新人格实体创建成功，并已成功注入矩阵。');
+        toast.success('新人格实体创建成功，并已成功注入矩阵。');
         setNewUserFormData({ 
           id: '', 
           userId: '',
@@ -361,7 +362,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       // 成功后更新内存
       onUpdateUsers(stripUsersPasswords(nextUsers));
       
-      showAlert(editingUserId ? '用户信息更新成功。' : '新的人格实体已成功注入矩阵。');
+      toast.success(editingUserId ? '用户信息更新成功。' : '新的人格实体已成功注入矩阵。');
       resetForm();
     } catch (err) {
       showAlert(`用户信息同步失败：${(err as Error).message || '网络错误'}`);
@@ -424,7 +425,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       if (!ok) return;
       onUpdateJydyUnits(updatedJydyUnits);
       setNewCenterName('');
-      showAlert(`成功新增单元: ${rawName}`);
+      toast.success(`成功新增单元: ${rawName}`);
     } catch (err) {
       showAlert('经营单元同步失败，请重试');
     } finally {
@@ -468,7 +469,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       onUpdateJydyUnits(updatedJydyUnits);
       onUpdateUsers(updatedUsers);
       setEditingCenter(null);
-      showAlert(`单元 [${oldName}] 已重命名为 [${newName}]`);
+      toast.success(`单元 [${oldName}] 已重命名为 [${newName}]`);
     } catch (err) {
       showAlert('重命名同步失败');
     } finally {
@@ -504,7 +505,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
         if (!ok) return;
         onUpdateJydyUnits(updatedJydyUnits);
         onUpdateUsers(updatedUsers);
-        showAlert(`已成功注销单元 [${name}] 及其关联别名，并已清空关联人员归属。`);
+        toast.success(`已成功注销单元 [${name}] 及其关联别名，并已清空关联人员归属。`);
       } catch (err) {
         showAlert('注销单元写库同步失败，请重试');
       } finally {
@@ -687,7 +688,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
             if (unitsToAdd.length > 0) {
               onUpdateJydyUnits(finalJydyUnits);
             }
-            showAlert('批量导入成功。');
+            toast.success('批量导入成功。');
           } catch (err) {
             showAlert('批量导入同步失败');
           } finally {
@@ -732,10 +733,8 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
         const ok = await persistOrAlert({ users: updatedUsers });
         if (!ok) return;
         onUpdateUsers(updatedUsers);
-        showAlert(`${userToToggle.name} 已成功复职。`, () => {
-          // 提示旧对冲单仍在
-          showAlert('提示：复职操作不会自动冲销原有的离职对冲单，如需调整请在「动态消耗」中手动处理。');
-        });
+        toast.success(`${userToToggle.name} 已成功复职。`);
+        toast.info('提示：复职操作不会自动冲销原有的离职对冲单，如需调整请在「动态消耗」中手动处理。');
       } catch (err) {
         showAlert(`复职更新失败：${(err as Error).message || '网络问题'}`);
       } finally {
@@ -779,7 +778,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       onUpdateUsers(updatedUsers);
       if (hedgeLog) onAppendLog?.(hedgeLog);
 
-      showAlert(`${userToResign.name} 已成功办理离职。${hedgeAmount > 0 ? '\n已自动生成一条「非有效工时对冲」待确权单据。' : ''}`);
+      toast.success(`${userToResign.name} 已成功办理离职。${hedgeAmount > 0 ? '\n已自动生成一条「非有效工时对冲」待确权单据。' : ''}`);
       setResigningUser(null);
     } catch (err) {
       showAlert(`离职办理同步失败：${(err as Error).message || '未知错误'}`);
@@ -799,7 +798,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
         const ok = await persistOrAlert({ users: updatedUsers });
         if (!ok) return;
         onUpdateUsers(updatedUsers);
-        showAlert('账号注销成功');
+        toast.success('账号注销成功');
       } catch (err) {
         showAlert(`账号注销失败：${(err as Error).message || '网络问题'}`);
       } finally {
@@ -843,7 +842,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
     const ok = await persistOrAlert({ users: updatedUsers });
     if (ok) {
       onUpdateUsers(updatedUsers);
-      showAlert('已成功为该成员开启全部组件访问权限');
+      toast.success('已成功为该成员开启全部组件访问权限');
     }
   };
 
@@ -856,7 +855,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
     const ok = await persistOrAlert({ users: updatedUsers });
     if (ok) {
       onUpdateUsers(updatedUsers);
-      showAlert('已关停该成员的所有组件访问权限');
+      toast.success('已关停该成员的所有组件访问权限');
     }
   };
 
@@ -876,7 +875,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
     const ok = await persistOrAlert({ users: updatedUsers });
     if (ok) {
       onUpdateUsers(updatedUsers);
-      showAlert('已成功重置为职级默认权限配置');
+      toast.success('已成功重置为职级默认权限配置');
     }
   };
 
@@ -908,7 +907,24 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-in slide-in-from-bottom-4">
         <div className="lg:col-span-4 space-y-8">
           <Card title="新增 采集主体" className={`p-6 ${UI_TOKENS.RADIUS_PANEL} border-2 border-blue-50 bg-blue-50/20 shadow-sm`}>
-            <div className="flex justify-end mb-4">
+            <div className="flex justify-end gap-2 mb-4">
+              <button
+                onClick={() => {
+                  const templateData = [{
+                    '工号': 'U001',
+                    '姓名': '张三',
+                    '登录账号': 'zhangsan',
+                    '角色': '普通用户',
+                    '经营单元': '研发部',
+                    '职级': '初产专',
+                    '工资包类型': '收款工资包'
+                  }];
+                  exportJsonToExcel(templateData, '人事池模板', '人事池导入模板.xlsx');
+                }}
+                className="bg-slate-50 text-slate-600 border border-slate-200 px-4 py-1 rounded-full font-black shadow-sm hover:bg-slate-100 transition-all flex items-center space-x-2 text-[10px] uppercase tracking-widest active:scale-95"
+              >
+                <span>模板</span>
+              </button>
               <button 
                 onClick={() => fileInputRef.current?.click()}
                 className="bg-emerald-600 text-white px-4 py-1 rounded-full font-black shadow-lg hover:bg-emerald-700 transition-all flex items-center space-x-2 text-[10px] uppercase tracking-widest active:scale-95"
@@ -1137,7 +1153,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       placeholder="搜索姓名/工号/单元..."
-                      className="bg-slate-100 border-none rounded-full px-4 py-1.5 text-[9px] font-black focus:ring-2 focus:ring-blue-500 outline-none w-32 md:w-48 transition-all"
+                      className="bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 outline-none w-36 md:w-52 transition-all h-10 placeholder:text-[#94a3b8]"
                     />
                     {searchQuery && (
                       <button 
@@ -1198,7 +1214,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                             <tbody className="divide-y divide-slate-100 text-xs">
                               {centerUsers.length === 0 ? (
                                 <tr>
-                                  <td colSpan={7} className="py-6 text-slate-400 text-center font-bold">{UI_LABELS.EMPTY_MEMBERS}</td>
+                                  <td colSpan={7} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_MEMBERS}</td>
                                 </tr>
                               ) : (
                                 centerUsers.map((u) => {
@@ -1480,7 +1496,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                      value={rbacSearch}
                      onChange={e => setRbacSearch(e.target.value)}
                      placeholder="搜索成员姓名 / 工号 / 职级..." 
-                     className="bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-slate-900 w-52"
+                     className="bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all w-60 h-10 placeholder:text-[#94a3b8]"
                    />
                    <div className="flex items-center space-x-1 bg-slate-200/70 p-1 rounded-xl">
                      {(['全部', '管理与VP', 'NPC与经管员', '采集主体'] as const).map(cat => (
@@ -1499,9 +1515,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
 
                {/* 人员权限列表 */}
                {filteredRbacUsers.length === 0 ? (
-                 <div className="py-12 text-center text-slate-400 font-bold text-xs bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                   未找到符合条件的成员
-                 </div>
+                 <div className="px-6 py-12 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</div>
                ) : (
                  filteredRbacUsers.map((u) => {
                    const isCustom = Array.isArray(u.permissions) && u.permissions.length > 0;

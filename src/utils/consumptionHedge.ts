@@ -69,6 +69,20 @@ export function calculateHedgeCapacitiesAndWeights(resource?: MiningResource | n
   };
 }
 
+/**
+ * 提炼阶梯归一化函数
+ * 兼容历史数据（A/B/C）与新阶梯（T1/T2/T3），缺省为 T3。
+ * 注意：本函数仅用于创造侧提炼阶梯判断，不得用于判断消耗 C/B2。
+ */
+export function normalizeRefineTier(costCategory?: string | null): 'T1' | 'T2' | 'T3' {
+  if (!costCategory) return 'T3';
+  const val = String(costCategory).trim().toUpperCase();
+  if (val === 'A' || val === 'T1') return 'T1';
+  if (val === 'B' || val === 'T2') return 'T2';
+  if (val === 'C' || val === 'T3') return 'T3';
+  return 'T3';
+}
+
 export function getLogRefineFactor(log: ValueCreationLog, resource?: MiningResource, collector?: User): number {
   if (!log) return 0;
   const categoryStr = log.category as string;
@@ -92,18 +106,18 @@ export function getLogRefineFactor(log: ValueCreationLog, resource?: MiningResou
   const isHighRevenueExpert = collector ? ((collector.category || '').includes('高款专') || ((collector.secondaryRoles as string[]) || []).includes('高款专')) : false;
   const isRevenueSpecialist = collector ? ((collector.category || '').includes('款专') || ((collector.secondaryRoles as string[]) || []).includes('款专')) : false;
 
-  const tier = log.costCategory || 'C';
+  const tier = normalizeRefineTier(log.costCategory);
   if (categoryStr === RefineCategory.Value || categoryStr === 'Value' || categoryStr === '产值') {
     const coeffs = isHighValueExpert ? TIER_COEFFICIENTS.VALUE_MANAGER : TIER_COEFFICIENTS.VALUE_CHAN;
-    if (tier === 'A') return coeffs.Enterprise;
-    if (tier === 'B') return coeffs.Bidding;
-    if (tier === 'C') return coeffs.SafetyEval;
+    if (tier === 'T1') return coeffs.Enterprise;
+    if (tier === 'T2') return coeffs.Bidding;
+    if (tier === 'T3') return coeffs.SafetyEval;
     return coeffs.SafetyEval;
   } else {
     const coeffs = isHighRevenueExpert ? TIER_COEFFICIENTS.REVENUE_HIGH : isRevenueSpecialist ? TIER_COEFFICIENTS.REVENUE_MID_INITIAL : TIER_COEFFICIENTS.REVENUE_HIGH;
-    if (tier === 'A') return coeffs.Enterprise;
-    if (tier === 'B') return coeffs.Bidding;
-    if (tier === 'C') return coeffs.SafetyEval;
+    if (tier === 'T1') return coeffs.Enterprise;
+    if (tier === 'T2') return coeffs.Bidding;
+    if (tier === 'T3') return coeffs.SafetyEval;
     return coeffs.SafetyEval;
   }
 }

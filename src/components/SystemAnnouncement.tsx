@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useCityGuardianModal, CityGuardianModal } from './CityGuardianModal';
 import { isSystemAdmin } from '../utils/accessControl';
 import { safeGetItem, safeSetItem } from '../utils/safeLocalStorage';
+import { UI_LABELS } from '../constants/uiLabels';
 
 interface SystemAnnouncementProps {
   currentUser: User;
@@ -360,16 +361,7 @@ export const SystemAnnouncement: React.FC<SystemAnnouncementProps> = ({ currentU
           {/* List Content */}
           <div className="max-h-[380px] overflow-y-auto p-4 space-y-3 custom-scrollbar">
             {filteredAnnouncements.length === 0 ? (
-              <div className="py-12 text-center text-slate-400 text-xs font-bold flex flex-col items-center justify-center space-y-2">
-                <Inbox className="w-8 h-8 opacity-40 text-slate-400" />
-                <span>
-                  {filterMode === 'unread'
-                    ? '当前没有未读信息'
-                    : filterMode === 'read'
-                    ? '暂无已读历史记录'
-                    : '暂无站内信息'}
-                </span>
-              </div>
+              <div className="px-6 py-12 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</div>
             ) : (
               filteredAnnouncements.map(item => {
                 const isRead = readIds.includes(item.id);

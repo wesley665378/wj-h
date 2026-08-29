@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { TIER_COEFFICIENTS } from '@/constants/coefficients';
+import { TIER_COEFFICIENTS, USER_LIST, UI_LABELS } from '@/constants';
 import { 
   User, MiningResource, ValueCreationLog, RefineCategory, AuditStatus, Role, RefineType,
   InternalTransaction, TransactionStatus, TransactionType, CircuitBreaker, QuotaSnapshot,
@@ -12,28 +12,27 @@ import {
   sumValueConversionPackage, 
   sumIncomeProductionPackage 
 } from '@/utils/reconcileMiningFromLogs';
-import { USER_LIST } from '../constants';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
   Cell, Legend, CartesianGrid, ComposedChart, Line, PieChart, Pie
 } from 'recharts';
 import { Card, ProgressBar, Badge, ProjectStatusBadge } from '@/components/UI';
 import StandardModal from '@/components/StandardModal';
-import { UI_LABELS } from '@/constants/uiLabels';
 import { TERMINOLOGY } from '@/constants/terminology';
 import { aggregateMiningQuadrantsFromLogs } from '@/utils/purification';
 import { XLSX, exportWorkbook, buildExcelFilename } from '@/utils/excelIo';
 import { calculateHistoricalNetValue, calculateDualTrackCoreMatrices, calculateT1PlusValue, calculateT1PlusRevenue } from '@/utils/business';
-import { calculateHedgeCapacitiesAndWeights } from '@/utils/consumptionHedge';
+import { calculateHedgeCapacitiesAndWeights, normalizeRefineTier } from '@/utils/consumptionHedge';
 import { deriveProjectStatus, isProjectWritable } from '@/utils/projectStatus';
 import { isAdminOrNpc, parseCenterList } from '@/utils/accessControl';
 import { userCenterMatchesBusinessUnit, businessUnitLabelsEqual } from '@/utils/businessUnitName';
 import { isCenterManagerUser, sortCenterManagers } from '@/utils/centerManager';
-import { centerMatch } from '@/utils/centerScope';
+import { centerMatch, isGlobalReader } from '@/utils/centerScope';
 import { labelBusinessUnit } from '@/utils/statusDisplay';
+import { formatCollectorDisplay } from '@/utils/collector';
 import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '@/components/CityGuardianModal';
-import { Info, AlertCircle, CheckCircle2, X } from 'lucide-react';
+import { Info, AlertCircle, CheckCircle2, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   getInitialRevenueCapacity,
   getInitialValueCapacity,
@@ -136,6 +135,9 @@ interface ValueCreationProps {
 type TimePeriod = 'monthly' | 'quarterly' | 'yearly';
 
 export const tierDisplayMap: Record<string, { name: string, desc: string }> = {
+  T1: { name: 'T1 级提炼 (企项配方)', desc: '默认结算方式 (高产专 53% / 产专 48%)' },
+  T2: { name: 'T2 级提炼 (招采配方)', desc: '招标采购结算 (高产专 60% / 产专 55%)' },
+  T3: { name: 'T3 级提炼 (安评配方)', desc: '安全评价结算 (高产专 50% / 产专 40%)' },
   A: { name: 'T1 级提炼 (企项配方)', desc: '默认结算方式 (高产专 53% / 产专 48%)' },
   B: { name: 'T2 级提炼 (招采配方)', desc: '招标采购结算 (高产专 60% / 产专 55%)' },
   C: { name: 'T3 级提炼 (安评配方)', desc: '安全评价结算 (高产专 50% / 产专 40%)' },
@@ -156,7 +158,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const [selectedRefineType, setSelectedRefineType] = useState<RefineType>(RefineType.Enterprise);
   const [selectedCategory, setSelectedCategory] = useState<RefineCategory>(RefineCategory.Revenue);
-  const [selectedTier, setSelectedTier] = useState<string>('A');
+  const [selectedTier, setSelectedTier] = useState<string>('T1');
   const [selectedSubCategory, setSelectedSubCategory] = useState<string>('企业项目');
   const [error, setError] = useState('');
   const [recordTab, setRecordTab] = useState<'revenue' | 'linkedPending' | 'confirmed' | 'history'>('revenue');
@@ -168,6 +170,12 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   const [filterMonth, setFilterMonth] = useState<string>(() => getLocalMonthString()); // 记录筛选月份
   const [filterStartDate, setFilterStartDate] = useState<string>('');
   const [filterEndDate, setFilterEndDate] = useState<string>('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 50;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedOperatorId, recordTab, filterMonth, filterStartDate, filterEndDate]);
 
   useEffect(() => {
     setSelectedOperatorId(user.id);
@@ -178,15 +186,15 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     if (resource) {
       const prefix = (resource.id || '').charAt(0).toUpperCase();
       if (prefix === 'A') {
-        setSelectedTier('A');
+        setSelectedTier('T1');
         setSelectedSubCategory('企业项目');
         setSelectedRefineType(RefineType.Enterprise);
       } else if (prefix === 'B') {
-        setSelectedTier('B');
+        setSelectedTier('T2');
         setSelectedSubCategory('招采项目');
         setSelectedRefineType(RefineType.Bidding);
       } else if (prefix === 'C') {
-        setSelectedTier('C');
+        setSelectedTier('T3');
         setSelectedSubCategory('安全评价');
         setSelectedRefineType(RefineType.SafetyEval);
       } else if (resource.types && resource.types.length > 0) {
@@ -201,15 +209,15 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   useEffect(() => {
     // 映射逻辑
     const mappings: Partial<Record<RefineType, { tier: string, subCategory: string }>> = {
-      [RefineType.Enterprise]: { tier: 'A', subCategory: '企业项目' },
-      [RefineType.Bidding]: { tier: 'B', subCategory: '招标采购项目' },
-      [RefineType.SafetyEval]: { tier: 'C', subCategory: '安全评价' },
-      [RefineType.OccHealthElectric]: { tier: 'C', subCategory: '职业卫生/电气检测' },
-      [RefineType.OccHealth]: { tier: 'C', subCategory: '职业卫生' },
-      [RefineType.Outsourced]: { tier: 'A', subCategory: '战略性外派' },
-      [RefineType.EmergencyG]: { tier: 'A', subCategory: '应急演练（G)' },
-      [RefineType.TrainingG]: { tier: 'A', subCategory: '培训（G）' },
-      [RefineType.NonEffectiveHours]: { tier: 'A', subCategory: '企业项目' }
+      [RefineType.Enterprise]: { tier: 'T1', subCategory: '企业项目' },
+      [RefineType.Bidding]: { tier: 'T2', subCategory: '招标采购项目' },
+      [RefineType.SafetyEval]: { tier: 'T3', subCategory: '安全评价' },
+      [RefineType.OccHealthElectric]: { tier: 'T3', subCategory: '职业卫生/电气检测' },
+      [RefineType.OccHealth]: { tier: 'T3', subCategory: '职业卫生' },
+      [RefineType.Outsourced]: { tier: 'T1', subCategory: '战略性外派' },
+      [RefineType.EmergencyG]: { tier: 'T1', subCategory: '应急演练（G)' },
+      [RefineType.TrainingG]: { tier: 'T1', subCategory: '培训（G）' },
+      [RefineType.NonEffectiveHours]: { tier: 'T1', subCategory: '企业项目' }
     };
 
     const mapping = mappings[selectedRefineType];
@@ -494,18 +502,19 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     // ... (Keep existing coeffs logic check if needed or just use coefficients)
     const vCoeffs = isHighValueExpert ? TIER_COEFFICIENTS.VALUE_MANAGER : TIER_COEFFICIENTS.VALUE_CHAN;
 
+    const tier = normalizeRefineTier(selectedTier);
     if (selectedCategory === RefineCategory.Value) {
-      if (selectedTier === 'A') return vCoeffs.Enterprise;
-      if (selectedTier === 'B') return vCoeffs.Bidding;
-      if (selectedTier === 'C') return vCoeffs.SafetyEval;
+      if (tier === 'T1') return vCoeffs.Enterprise;
+      if (tier === 'T2') return vCoeffs.Bidding;
+      if (tier === 'T3') return vCoeffs.SafetyEval;
       return vCoeffs.OccHealth;
     }
 
     const rCoeffs = isHighRevenueExpert ? TIER_COEFFICIENTS.REVENUE_HIGH : TIER_COEFFICIENTS.REVENUE_MID_INITIAL;
 
-    if (selectedTier === 'A') return rCoeffs.Enterprise;
-    if (selectedTier === 'B') return rCoeffs.Bidding;
-    if (selectedTier === 'C') return rCoeffs.SafetyEval;
+    if (tier === 'T1') return rCoeffs.Enterprise;
+    if (tier === 'T2') return rCoeffs.Bidding;
+    if (tier === 'T3') return rCoeffs.SafetyEval;
     return rCoeffs.SafetyEval; // Default
   }, [selectedCategory, selectedTier, managedUsers, selectedResource, selectedRefineType]);
 
@@ -867,7 +876,9 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           toast.error('工作区同步未就绪，请刷新后重试');
           return;
         }
-        await persistWorkspaceWithOverrides({ logs: logsToSubmit }, { loadingMessage: '提报落库中…', successMessage: '已落库' });
+        const jzczLogs = logs.filter(l => l.confirmationType !== '手动确权');
+        const payloadLogs = isGlobalReader(user) ? [...jzczLogs, ...logsToSubmit] : logsToSubmit;
+        await persistWorkspaceWithOverrides({ logs: payloadLogs }, { loadingMessage: '提报落库中…', successMessage: '已落库' });
       } catch (err) {
         // Handled inside persistWorkspaceWithOverrides via toast
       }
@@ -916,6 +927,11 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     }
   }, [logs, selectedOperatorId, recordTab, filterMonth, filterStartDate, filterEndDate]);
 
+  const paginatedLogs = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredLogs.slice(start, start + PAGE_SIZE);
+  }, [filteredLogs, currentPage, PAGE_SIZE]);
+
   const getLogRefineFactor = (log: ValueCreationLog, resource?: MiningResource, collector?: User): number => {
     if (!log) return 0;
     if (resource) {
@@ -938,18 +954,18 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     const isHighRevenueExpert = collector ? ((collector.category || '').includes('高款专') || ((collector.secondaryRoles as string[]) || []).includes('高款专')) : false;
     const isRevenueSpecialist = collector ? ((collector.category || '').includes('款专') || ((collector.secondaryRoles as string[]) || []).includes('款专')) : false;
 
-    const tier = log.costCategory || 'C';
+    const tier = normalizeRefineTier(log.costCategory);
     if (log.category === RefineCategory.Value) {
       const coeffs = isHighValueExpert ? TIER_COEFFICIENTS.VALUE_MANAGER : TIER_COEFFICIENTS.VALUE_CHAN;
-      if (tier === 'A') return coeffs.Enterprise;
-      if (tier === 'B') return coeffs.Bidding;
-      if (tier === 'C') return coeffs.SafetyEval;
+      if (tier === 'T1') return coeffs.Enterprise;
+      if (tier === 'T2') return coeffs.Bidding;
+      if (tier === 'T3') return coeffs.SafetyEval;
       return coeffs.SafetyEval;
     } else {
       const coeffs = isHighRevenueExpert ? TIER_COEFFICIENTS.REVENUE_HIGH : isRevenueSpecialist ? TIER_COEFFICIENTS.REVENUE_MID_INITIAL : TIER_COEFFICIENTS.REVENUE_HIGH;
-      if (tier === 'A') return coeffs.Enterprise;
-      if (tier === 'B') return coeffs.Bidding;
-      if (tier === 'C') return coeffs.SafetyEval;
+      if (tier === 'T1') return coeffs.Enterprise;
+      if (tier === 'T2') return coeffs.Bidding;
+      if (tier === 'T3') return coeffs.SafetyEval;
       return coeffs.SafetyEval;
     }
   };
@@ -997,7 +1013,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         '业务日期': resolveLogBusinessDate(log),
         '提交日期': formatSubmissionDate(log.timestamp),
         '经营单元': labelBusinessUnit(operator?.center),
-        '采集主体': `${collector?.name || log.recordedCollectorId} (${collector?.category || '未定义'})`,
+        '采集主体': formatCollectorDisplay(log.recordedCollectorId, managedUsers),
         '确权类型': log.confirmationType || '手动确权',
         '注入积分': displayInjection,
         'C权': cWeight.toFixed(4),
@@ -1098,7 +1114,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     setSelectedCollectors([...selectedCollectors, { id, amount: 0, rawAmount: 0 }]);
                   }
                 }} 
-                className="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-xs outline-none focus:border-blue-900 focus:ring-2 focus:ring-blue-100 transition-all font-bold text-slate-800 h-10" 
+                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all font-bold text-slate-800 h-10 cursor-pointer" 
                 required={selectedCollectors.length === 0}
               >
                 <option value="">请选择采集主体</option>
@@ -1130,7 +1146,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                   }
                   
                   return true;
-                }).map(u => <option key={u.id} value={u.id}>{u.name} / {u.category}{u.secondaryRoles?.length ? ` (兼: ${u.secondaryRoles.join(',')})` : ''}</option>)}
+                }).map(u => <option key={u.id} value={u.id}>{formatCollectorDisplay(u)}{u.secondaryRoles?.length ? ` (兼: ${u.secondaryRoles.join(',')})` : ''}</option>)}
               </select>
             </div>
 
@@ -1146,7 +1162,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     setSelectedMiningId(e.target.value);
                     setMiningSearchTerm('');
                   }} 
-                  className="w-full min-w-48 bg-white border border-slate-300 rounded-md px-3 py-2 text-xs outline-none focus:border-blue-900 focus:ring-2 focus:ring-blue-100 transition-all font-bold text-slate-800 h-10" 
+                  className="w-full min-w-48 bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all font-bold text-slate-800 h-10 cursor-pointer" 
                   required
                 >
                   <option value="">自动匹配矿山编号...</option>
@@ -1205,7 +1221,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                       setSelectedMiningId(match.id);
                     }
                   }}
-                  className="w-full min-w-48 bg-white border border-slate-300 rounded-md px-3 py-2 text-xs outline-none focus:border-blue-900 focus:ring-2 focus:ring-blue-100 transition-all font-bold text-slate-800 h-10"
+                  className="w-full min-w-48 bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all font-bold text-slate-800 h-10"
                 />
               </div>
             </div>
@@ -1223,14 +1239,14 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
               <select 
                 value={selectedTier} 
                 onChange={(e) => setSelectedTier(e.target.value)} 
-                className={`w-full border rounded-md px-3 py-2 text-xs outline-none ${
-                  hasCustomFactor ? 'bg-emerald-50 border-emerald-200 text-emerald-700 font-bold' : 'bg-slate-100 border-slate-200 text-slate-400'
+                className={`w-full border rounded-[4px] px-3 py-2 text-[13px] outline-none ${
+                  hasCustomFactor ? 'bg-emerald-50 border-emerald-200 text-emerald-700 font-bold' : 'bg-slate-100 border-[#b8d0f7] text-slate-400'
                 } cursor-not-allowed h-10`}
                 disabled={true}
               >
-                <option value="A">T1</option>
-                <option value="B">T2</option>
-                <option value="C">T3</option>
+                <option value="T1">T1</option>
+                <option value="T2">T2</option>
+                <option value="T3">T3</option>
                 {selectedCategory === RefineCategory.Value && (
                   <option value="D">T4</option>
                 )}
@@ -1252,7 +1268,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             {/* Row 2 - Col 2: 提炼类型 */}
             <div className="flex flex-col space-y-1.5 sm:col-span-1">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">提炼类型</label>
-              <select value={selectedRefineType} onChange={(e) => setSelectedRefineType(e.target.value as RefineType)} className="w-full bg-slate-100 border border-slate-200 rounded-md px-3 py-2 text-xs outline-none text-slate-400 cursor-not-allowed h-10" required disabled={true}>
+              <select value={selectedRefineType} onChange={(e) => setSelectedRefineType(e.target.value as RefineType)} className="w-full bg-slate-100 border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] outline-none text-slate-400 cursor-not-allowed h-10" required disabled={true}>
                 {selectedResource ? selectedResource.types.map(type => (
                   <option key={type} value={type}>{type}</option>
                 )) : Object.values(RefineType).filter(t => t !== RefineType.NonEffectiveHours).map(type => (
@@ -1263,19 +1279,36 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
             {/* Row 2 - Col 3: 业务日期 */}
             <div className="flex flex-col space-y-1.5 sm:col-span-1">
-              <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center h-4">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
                 业务日期 <span className="text-rose-500 ml-1 font-bold">*</span>
               </label>
               <input 
                 type="date" 
                 value={selectedDate} 
-                onChange={(e) => setSelectedDate(e.target.value)} 
-                className="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-xs outline-none focus:border-blue-900 focus:ring-2 focus:ring-blue-100 transition-all font-bold text-slate-800 h-10" 
+                onChange={(e) => {
+                  const date = e.target.value;
+                  setSelectedDate(date);
+                  if (date) setSelectedMonth(date.slice(0, 7));
+                }} 
+                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all font-bold text-slate-800 h-10 cursor-pointer" 
                 required
               />
             </div>
 
-            {/* Row 2 - Col 4: 执行类型 */}
+            {/* Row 2 - Col 4: 业务月份 (只读) */}
+            <div className="flex flex-col space-y-1.5 sm:col-span-1">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
+                业务月份
+              </label>
+              <input 
+                type="month" 
+                value={selectedMonth} 
+                readOnly
+                className="w-full bg-slate-50 border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] outline-none text-slate-400 cursor-not-allowed font-bold h-10"
+              />
+            </div>
+
+            {/* Row 2 - Col 5: 执行类型 */}
             <div className="flex flex-col space-y-1.5 sm:col-span-1">
               <div className="flex items-center justify-between h-4">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
@@ -1287,7 +1320,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                   </span>
                 )}
               </div>
-              <div className="w-full bg-slate-50 border border-slate-200 rounded-md px-3 py-2 text-xs flex items-center justify-between h-10 shadow-sm">
+              <div className="w-full bg-slate-50 border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] flex items-center justify-between h-10 shadow-xs">
                 {selectedResource ? (() => {
                   const currentUnitForVC = selectedOperator?.center || user.center || '';
                   const et = getExecutionType(selectedResource, currentUnitForVC);
@@ -1385,8 +1418,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                       <label className="text-[10px] font-bold text-blue-600 uppercase">注入积分主体</label>
                       <div className="flex items-center bg-white border border-slate-200 rounded-sm px-3 py-1.5 h-10">
                         <span className="text-xs font-bold text-slate-700">
-                          {user?.id?.startsWith('M') ? '产值 ' : (user?.id?.startsWith('J') ? '收款 ' : '')}
-                          {user?.name} | ****
+                          {formatCollectorDisplay(user || c.id, managedUsers)}
                         </span>
                       </div>
                     </div>
@@ -1667,7 +1699,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 setFilterMonth('');
               }}
               onClear={() => {
-                setFilterMonth('');
+                setFilterMonth(getLocalMonthString());
                 setFilterStartDate('');
                 setFilterEndDate('');
               }}
@@ -1833,7 +1865,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
         {/* 移动端卡片视图 (Narrow Screen Card View) */}
         <div className="block md:hidden space-y-3 p-2">
-          {filteredLogs.map(log => {
+          {paginatedLogs.map(log => {
             if (!log) return null;
             const collector = managedUsers.find(u => u.id === log.recordedCollectorId);
             const resource = resources.find(r => r.id === log.miningId);
@@ -1882,7 +1914,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 <div className="grid grid-cols-2 gap-2 text-slate-700">
                   <div>
                     <span className="text-slate-400 text-[10px] block">{TERMINOLOGY.BUSINESS_UNIT} / 收集人</span>
-                    <span className="font-bold">{labelBusinessUnit(operator?.center)} · {collector?.name || log.recordedCollectorId}</span>
+                    <span className="font-bold">{labelBusinessUnit(operator?.center)} · {formatCollectorDisplay(log.recordedCollectorId, managedUsers)}</span>
                   </div>
                   <div className="text-right">
                     <span className="text-slate-400 text-[10px] block">注入积分</span>
@@ -1946,7 +1978,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredLogs.map(log => {
+              {paginatedLogs.map(log => {
                 if (!log) return null;
                 const collector = managedUsers.find(u => u.id === log.recordedCollectorId);
                 const resource = resources.find(r => r.id === log.miningId);
@@ -1996,14 +2028,11 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                       </Badge>
                     </td>
                     <td className="px-2 py-4 font-mono text-slate-400">{log.id}</td>
-                    <td className="px-2 py-4 text-slate-500 font-bold hidden md:table-cell">{resolveLogBusinessDate(log)}</td>
+                    <td className="px-2 py-4 text-slate-500 font-bold hidden md:table-cell">{resolveLogBusinessDate(log)} ({resolveLogBusinessMonth(log)})</td>
                     <td className="px-2 py-4 text-slate-400 hidden md:table-cell">{formatSubmissionDate(log.timestamp)}</td>
                     <td className="px-2 py-4 text-slate-600">{labelBusinessUnit(operator?.center)}</td>
                     <td className="px-2 py-4">
-                      <div className="flex flex-col">
-                        <span className="font-bold text-slate-700">{collector?.name || log.recordedCollectorId}</span>
-                        <span className="text-[9px] text-slate-400 font-normal">{collector?.category || '未定义'}</span>
-                      </div>
+                      <span className="font-bold text-slate-700">{formatCollectorDisplay(log.recordedCollectorId, managedUsers)}</span>
                     </td>
                     <td className="px-2 py-4">
                       <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[9px] font-bold">
@@ -2054,6 +2083,42 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             </tbody>
           </table>
         </div>
+
+        {/* Unified Pagination for both Mobile and Desktop */}
+        {Math.ceil(filteredLogs.length / PAGE_SIZE) > 1 && (
+          <div className="flex items-center justify-between px-6 py-4 bg-white border-t border-slate-100">
+            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+              显示 {Math.min(filteredLogs.length, (currentPage - 1) * PAGE_SIZE + 1)}-{Math.min(filteredLogs.length, currentPage * PAGE_SIZE)} / 共 {filteredLogs.length} 条
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-1">
+                <button 
+                  disabled={currentPage === 1}
+                  onClick={() => {
+                    setCurrentPage(prev => Math.max(1, prev - 1));
+                  }}
+                  className="p-2 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeft size={18} className="text-slate-600" />
+                </button>
+                <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-50 rounded-lg border border-slate-200">
+                  <span className="text-xs font-black text-slate-900">{currentPage}</span>
+                  <span className="text-[10px] font-bold text-slate-400">/</span>
+                  <span className="text-[10px] font-bold text-slate-400">{Math.ceil(filteredLogs.length / PAGE_SIZE)}</span>
+                </div>
+                <button 
+                  disabled={currentPage === Math.ceil(filteredLogs.length / PAGE_SIZE)}
+                  onClick={() => {
+                    setCurrentPage(prev => Math.min(Math.ceil(filteredLogs.length / PAGE_SIZE), prev + 1));
+                  }}
+                  className="p-2 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronRight size={18} className="text-slate-600" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </Card>
       <CityGuardianModal state={modalState} onClose={closeModal} />
     </div>

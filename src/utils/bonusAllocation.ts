@@ -7,7 +7,7 @@ import {
 } from '../../types';
 import { calculateHistoricalNetValue, getUserSalaryByMonth } from './business';
 import { resolveLogBusinessMonth } from './dateUtils';
-import { isNonEffectiveHoursEffective } from './employmentStatus';
+import { isNonEffectiveHoursEffective, isSalaryActiveForMonth } from './employmentStatus';
 import { getNonEffectiveHoursDeduction } from './nonEffectiveHours';
 
 export interface UserMetricsResult {
@@ -160,7 +160,7 @@ export function calculateBonusAllocation(
     const mRes = aggregateUserMonthMetrics(allLogs, user, ym, resources, users, [status]);
     let mCurrent = 0;
     let mIncome = 0;
-    let mCost = getUserSalaryByMonth(user, ym);
+    let mCost = isSalaryActiveForMonth(user, ym) ? getUserSalaryByMonth(user, ym) : 0;
 
     if (isProdExpert) {
       mIncome = mRes.productionPackage;
@@ -208,7 +208,7 @@ export function calculateBonusAllocation(
   const cRes = aggregateUserMonthMetrics(allLogs, user, targetMonth, resources, users, [status]);
   
   let currentIncome = 0;
-  let currentCost = getUserSalaryByMonth(user, targetMonth);
+  let currentCost = isSalaryActiveForMonth(user, targetMonth) ? getUserSalaryByMonth(user, targetMonth) : 0;
 
   if (isProdExpert) {
     currentIncome = cRes.productionPackage;

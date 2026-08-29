@@ -24,6 +24,7 @@ import {
   isDateInRange,
   isLogInFilter,
 } from '../src/utils/dateUtils';
+import { toast } from 'sonner';
 import { 
   canonicalizeBusinessUnitLabel, 
   businessUnitLabelsEqual, 
@@ -35,8 +36,8 @@ import { formatAmount } from '../src/utils/formatters';
 import { InfoTip } from '../src/components/InfoTip';
 import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
 import { getExecutionType, getExecutionTypeBadgeColor, EXECUTION_TYPE_EXPLANATIONS } from '../src/utils/executionType';
-import { toast } from 'sonner';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { isCenterManagerUser, sortCenterManagers } from '../src/utils/centerManager';
 import { TradingTab } from './TradingTab';
 
@@ -150,6 +151,12 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   const [modAmount, setModAmount] = useState<number>(0);
   const [modRevenueAmount, setModRevenueAmount] = useState<number>(0);
   const [modValueAmount, setModValueAmount] = useState<number>(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 50;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, filterMonth, filterStartDate, filterEndDate, filterMiningId, filterType]);
   const [modReceiverId, setModReceiverId] = useState<string>('');
   const selectedMine = useMemo(() => resources.find(r => r.id === miningId), [resources, miningId]);
 
@@ -482,6 +489,16 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     }).sort((a, b) => b.timestamp - a.timestamp);
   }, [transactions, filterMiningId, filterType, filterDateRange, currentUser.id, isAdmin, filterMonth, filterStartDate, filterEndDate]);
 
+  const paginatedTransactions = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredTransactions.slice().reverse().slice(start, start + PAGE_SIZE);
+  }, [filteredTransactions, currentPage]);
+
+  const paginatedExchangeTransactions = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredExchangeTransactions.slice(start, start + PAGE_SIZE);
+  }, [filteredExchangeTransactions, currentPage]);
+
   const handleAudit = async (tx: InternalTransaction, action: 'approve' | 'reject' | 'return' | 'modify' | 'withdraw' | 'agree') => {
     let nextStatus = tx.status;
 
@@ -510,7 +527,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
         };
         onSubmitTransaction(updatedTx);
         setModifyingTx(null);
-        showAlert(`交易 [${modifyingTx.id}] 已修改并重新提交发起方验证！`);
+        toast.success(`交易 [${modifyingTx.id}] 已修改并重新提交发起方验证！`);
         return;
       }
     }
@@ -819,7 +836,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
             <button
               onClick={async () => {
                 await persistWorkspaceNow();
-                showAlert('工作区数据已保存');
+                toast.success('工作区数据已保存');
               }}
               className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-[10px] font-black tracking-widest shadow-lg active:scale-95 transition-all flex items-center"
             >
@@ -878,12 +895,12 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <div className="space-y-3 md:col-span-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">矿山编号 (唯一定量)</label>
+                  <div className="space-y-1.5 md:col-span-2">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">矿山编号 (唯一定量)</label>
                     <select
                       value={miningId}
                       onChange={(e) => setMiningId(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none focus:ring-4 focus:ring-indigo-500/10"
+                      className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all cursor-pointer h-10"
                       required
                     >
                       <option value="">选择关联矿山编号...</option>
@@ -893,33 +910,33 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                     </select>
                   </div>
 
-                  <div className="space-y-3 relative md:col-span-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                  <div className="space-y-1.5 relative md:col-span-2">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">
                       接收经营单元
                     </label>
                     <div className="relative">
                       <button
                         type="button"
                         onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold text-left flex justify-between items-center outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
+                        className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 text-left flex justify-between items-center outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all h-10 cursor-pointer"
                       >
                         <span className="truncate">
                           {selectedUnitSummary}
                         </span>
-                        <svg className={`w-5 h-5 transition-transform flex-shrink-0 ${isDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className={`w-4 h-4 text-slate-400 transition-transform flex-shrink-0 ${isDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                         </svg>
                       </button>
 
                       {isDropdownOpen && (
-                        <div className="absolute z-50 mt-2 w-full bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                        <div className="absolute z-50 mt-2 w-full bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                           <div className="p-3 border-b border-slate-100 bg-slate-50">
                             <input
                               type="text"
                               placeholder="搜索经营单元名称或负责人..."
                               value={receiverSearch}
                               onChange={(e) => setReceiverSearch(e.target.value)}
-                              className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20"
+                              className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 h-10"
                             />
                           </div>
                           <div className="p-2 divide-y divide-slate-50">
@@ -969,8 +986,8 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                               );
                             })}
                             {filteredDisplayUnits.length === 0 && (
-                              <div className="p-6 text-center text-slate-400 text-xs font-bold uppercase tracking-widest">
-                                未找到匹配的经营单元
+                              <div className="px-6 py-12 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">
+                                {UI_LABELS.EMPTY_DEFAULT}
                               </div>
                             )}
                           </div>
@@ -1216,32 +1233,33 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">业务月份</label>
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">业务月份</label>
                     <input 
                       type="month" 
                       value={selectedMonth} 
-                      onChange={(e) => {
-                        setSelectedMonth(e.target.value);
-                        if (selectedDate.slice(0, 7) !== e.target.value) {
-                          setSelectedDate(`${e.target.value}-01`);
-                        }
-                      }} 
-                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none focus:ring-4 focus:ring-indigo-500/10"
+                      readOnly
+                      className="w-full bg-slate-50 border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-400 outline-none cursor-not-allowed h-10"
                     />
                   </div>
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">业务日期</label>
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">业务日期</label>
                     <input 
                       type="date" 
                       value={selectedDate} 
-                      onChange={(e) => setSelectedDate(e.target.value)} 
-                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none focus:ring-4 focus:ring-indigo-500/10"
+                      onChange={(e) => {
+                        const date = e.target.value;
+                        setSelectedDate(date);
+                        if (date) {
+                          setSelectedMonth(date.slice(0, 7));
+                        }
+                      }} 
+                      className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all cursor-pointer h-10"
                     />
                   </div>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between h-4">
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                         执行类型
                       </label>
                       {selectedResource && (
@@ -1250,7 +1268,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                         </span>
                       )}
                     </div>
-                    <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3.5 font-bold flex items-center justify-between min-h-[58px]">
+                    <div className="w-full bg-slate-50 border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold flex items-center justify-between h-10 shadow-xs">
                       {selectedResource ? (() => {
                         const currentUnit = currentUser.center || '';
                         const et = getExecutionType(selectedResource, currentUnit);
@@ -1391,7 +1409,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                        ))}
                        {circuitBreakers.length === 0 && (
                          <tr>
-                           <td colSpan={7} className="py-20 text-center text-slate-400 font-black uppercase tracking-widest">暂无熔断记录</td>
+                           <td colSpan={7} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
                          </tr>
                        )}
                     </tbody>
@@ -1438,7 +1456,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                     </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-50">
-                    {filteredExchangeTransactions.map(tx => (
+                    {paginatedExchangeTransactions.map(tx => (
                        <tr key={tx.id} className="hover:bg-slate-50/50 transition-colors">
                           <td className="px-10 py-6 font-mono text-[10px] font-black text-slate-400">#{tx.id}</td>
                           <td className="px-6 py-6">
@@ -1457,12 +1475,48 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                     ))}
                     {filteredExchangeTransactions.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="px-10 py-20 text-center text-slate-400 font-black uppercase tracking-widest">暂无资源交易记录</td>
+                        <td colSpan={5} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
                       </tr>
                     )}
                  </tbody>
               </table>
            </div>
+
+           {/* Pagination Controls */}
+           {(() => {
+             const currentTasksLength = filteredExchangeTransactions.length;
+             if (currentTasksLength <= PAGE_SIZE) return null;
+             return (
+               <div className="flex items-center justify-between px-6 py-4 bg-white border-t border-slate-100">
+                 <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                   显示 {Math.min(currentTasksLength, (currentPage - 1) * PAGE_SIZE + 1)}-{Math.min(currentTasksLength, currentPage * PAGE_SIZE)} / 共 {currentTasksLength} 条
+                 </div>
+                 <div className="flex items-center gap-4">
+                   <div className="flex items-center gap-1">
+                     <button 
+                       disabled={currentPage === 1}
+                       onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                       className="p-2 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                     >
+                       <ChevronLeft size={18} className="text-slate-600" />
+                     </button>
+                     <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-50 rounded-lg border border-slate-200">
+                       <span className="text-xs font-black text-slate-900">{currentPage}</span>
+                       <span className="text-[10px] font-bold text-slate-400">/</span>
+                       <span className="text-[10px] font-bold text-slate-400">{Math.ceil(currentTasksLength / PAGE_SIZE)}</span>
+                     </div>
+                     <button 
+                       disabled={currentPage === Math.ceil(currentTasksLength / PAGE_SIZE)}
+                       onClick={() => setCurrentPage(prev => Math.min(Math.ceil(currentTasksLength / PAGE_SIZE), prev + 1))}
+                       className="p-2 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                     >
+                       <ChevronRight size={18} className="text-slate-600" />
+                     </button>
+                   </div>
+                 </div>
+               </div>
+             );
+           })()}
         </div>
       )}
 
@@ -1512,11 +1566,11 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                     </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-50">
-                    {filteredTransactions.slice().reverse().map(tx => (
+                    {paginatedTransactions.map(tx => (
                        <tr key={tx.id} className="hover:bg-slate-50/50 transition-colors">
                           <td className="px-10 py-6">
                              <span className="font-mono text-[10px] font-black text-slate-300 block mb-1">#{tx.id}</span>
-                             <span className="text-[9px] font-bold text-slate-500">{new Date(tx.timestamp).toLocaleString()}</span>
+                             <span className="text-[9px] font-bold text-slate-500">{tx.businessDate} ({tx.month})</span>
                           </td>
                           <td className="px-6 py-6">
                              <span className={`text-[9px] font-black px-3 py-1 rounded-lg uppercase tracking-widest bg-indigo-50 text-indigo-600`}>
@@ -1544,9 +1598,50 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                           </td>
                        </tr>
                     ))}
+                    {paginatedTransactions.length === 0 && (
+                       <tr>
+                          <td colSpan={5} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
+                       </tr>
+                    )}
                  </tbody>
               </table>
            </div>
+
+           {/* Pagination Controls */}
+           {(() => {
+             const currentTasksLength = filteredTransactions.length;
+             if (currentTasksLength <= PAGE_SIZE) return null;
+             return (
+               <div className="flex items-center justify-between px-6 py-4 bg-white border-t border-slate-100">
+                 <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                   显示 {Math.min(currentTasksLength, (currentPage - 1) * PAGE_SIZE + 1)}-{Math.min(currentTasksLength, currentPage * PAGE_SIZE)} / 共 {currentTasksLength} 条
+                 </div>
+                 <div className="flex items-center gap-4">
+                   <div className="flex items-center gap-1">
+                     <button 
+                       disabled={currentPage === 1}
+                       onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                       className="p-2 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                     >
+                       <ChevronLeft size={18} className="text-slate-600" />
+                     </button>
+                     <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-50 rounded-lg border border-slate-200">
+                       <span className="text-xs font-black text-slate-900">{currentPage}</span>
+                       <span className="text-[10px] font-bold text-slate-400">/</span>
+                       <span className="text-[10px] font-bold text-slate-400">{Math.ceil(currentTasksLength / PAGE_SIZE)}</span>
+                     </div>
+                     <button 
+                       disabled={currentPage === Math.ceil(currentTasksLength / PAGE_SIZE)}
+                       onClick={() => setCurrentPage(prev => Math.min(Math.ceil(currentTasksLength / PAGE_SIZE), prev + 1))}
+                       className="p-2 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                     >
+                       <ChevronRight size={18} className="text-slate-600" />
+                     </button>
+                   </div>
+                 </div>
+               </div>
+             );
+           })()}
         </div>
       )}
 

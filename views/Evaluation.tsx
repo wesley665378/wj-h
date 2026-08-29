@@ -10,6 +10,8 @@ import { formatAmount, formatRatio } from '../src/utils/formatters';
 import { InfoTip } from '../src/components/InfoTip';
 import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
 import { getLocalMonthString } from '../src/utils/dateUtils';
+import { UI_LABELS } from '../src/constants/uiLabels';
+import { CostBreakdown } from '@/components/CostBreakdown';
 
 interface EvaluationProps {
   users: User[];
@@ -106,8 +108,8 @@ const CostDetailCard: React.FC<{
 }> = ({ evaluation: e, maskMoney }) => {
   const [expanded, setExpanded] = useState(false);
 
-  const isRevenue = e.category.includes('款专');
-  const dynamicCategoryLabel = isRevenue ? 'A类' : 'B1类';
+  const isRevenue = e.category?.includes('款专');
+  const dynamicCategoryLabel = isRevenue ? 'A类' : 'B1';
   const dynamicCategoryCost = isRevenue ? e.aCost : e.b1Cost;
 
   return (
@@ -125,7 +127,7 @@ const CostDetailCard: React.FC<{
             <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
           </button>
         </div>
-        <span className="text-[16px] font-bold font-mono text-slate-900 [font-variant-numeric:tabular-nums]">
+        <span className="text-[16px] font-bold font-mono text-slate-900 [font-variant-numeric:tabular-nums] text-right">
           {maskMoney(e.monthlyCost)}
         </span>
       </div>
@@ -136,15 +138,15 @@ const CostDetailCard: React.FC<{
           {/* 工资 */}
           <div className="flex items-center justify-between text-[12px]">
             <span className="text-slate-600 font-medium">工资</span>
-            <span className="font-mono text-slate-800 font-semibold [font-variant-numeric:tabular-nums]">
+            <span className="font-mono text-slate-800 font-semibold [font-variant-numeric:tabular-nums] text-right">
               {maskMoney(e.baseSalary || 0)}
             </span>
           </div>
 
-          {/* A类或B1类 */}
+          {/* B1 (或款专对应A类) */}
           <div className="flex items-center justify-between text-[12px]">
             <span className="text-slate-600 font-medium">{dynamicCategoryLabel}</span>
-            <span className="font-mono text-slate-800 font-semibold [font-variant-numeric:tabular-nums]">
+            <span className="font-mono text-slate-800 font-semibold [font-variant-numeric:tabular-nums] text-right">
               {maskMoney(dynamicCategoryCost || 0)}
             </span>
           </div>
@@ -153,9 +155,9 @@ const CostDetailCard: React.FC<{
           <div className="flex items-center justify-between text-[12px]">
             <span className="text-slate-600 font-medium inline-flex items-center">
               D类
-              <CostTooltipIcon tooltip="中心开支，无项目列支，按实际发生月人员平均分摊" />
+              <CostTooltipIcon tooltip="经营单元开支，无项目。按实际发生月人员平均分摊" />
             </span>
-            <span className="font-mono text-slate-800 font-semibold [font-variant-numeric:tabular-nums]">
+            <span className="font-mono text-slate-800 font-semibold [font-variant-numeric:tabular-nums] text-right">
               {maskMoney(e.dCost || 0)}
             </span>
           </div>
@@ -166,7 +168,7 @@ const CostDetailCard: React.FC<{
               FXDC
               <CostTooltipIcon tooltip="非有效工时对冲，冲抵刚性工资包" />
             </span>
-            <span className="font-mono text-slate-800 font-semibold [font-variant-numeric:tabular-nums]">
+            <span className="font-mono text-slate-800 font-semibold [font-variant-numeric:tabular-nums] text-right">
               {maskMoney(e.nonEffectiveDeduction || 0)}
             </span>
           </div>
@@ -255,7 +257,7 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
         </div>
 
         {/* 自定义查询控制栏 */}
-        <div className="p-4 bg-slate-50/50 border-b border-slate-100 flex flex-wrap items-center gap-4">
+        <div className="p-4 bg-slate-50/50 border-b border-slate-100 flex flex-wrap items-center gap-3">
           {/* 时间筛选 */}
           <div className="flex items-center gap-2">
             <BusinessDateFilter 
@@ -285,23 +287,23 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
 
           {/* 姓名/编号输入搜索 */}
           <div className="flex-1 min-w-[200px] relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               placeholder="搜索姓名或员工编号..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full text-xs bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-slate-400 placeholder:text-slate-400 transition-all font-medium text-slate-800"
+              className="w-full h-10 bg-white border border-[#b8d0f7] rounded-[4px] pl-9 pr-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all placeholder:text-[#94a3b8]"
             />
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
           </div>
 
           {/* 评价等级筛选 */}
           <div className="flex items-center space-x-2">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">评价等级:</span>
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4 whitespace-nowrap">评价等级:</span>
             <select
               value={selectedTier}
               onChange={(e) => setSelectedTier(e.target.value)}
-              className="text-xs bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-slate-400 font-medium text-slate-700"
+              className="h-10 bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all cursor-pointer"
             >
               <option value="ALL">全部等级</option>
               <option value="S">S - 卓越级</option>
@@ -313,11 +315,11 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
 
           {/* 专家分类筛选 */}
           <div className="flex items-center space-x-2">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">角色分类:</span>
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4 whitespace-nowrap">角色分类:</span>
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="text-xs bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-slate-400 font-medium text-slate-700"
+              className="h-10 bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all cursor-pointer"
             >
               <option value="ALL">全部类别</option>
               <option value="款专">收款专家 (款专)</option>
@@ -334,7 +336,7 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                 setSelectedTier('ALL');
                 setSelectedCategory('ALL');
               }}
-              className="text-xs text-rose-600 hover:text-rose-700 font-bold px-3 py-1.5 hover:bg-rose-50 rounded-lg transition-colors"
+              className="h-10 text-[13px] text-rose-600 hover:text-rose-700 font-bold px-3 py-2 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-[4px] transition-colors cursor-pointer flex items-center"
             >
               重置条件
             </button>
@@ -382,9 +384,7 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
             <tbody className="divide-y divide-slate-100">
               {filteredEvaluations.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                    没有匹配该查询条件的审计记录
-                  </td>
+                  <td colSpan={7} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
                 </tr>
               ) : (
                 filteredEvaluations.map(e => (

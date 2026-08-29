@@ -14,6 +14,7 @@ import { InfoTip } from '../src/components/InfoTip';
 import { XLSX, exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
 import { toast } from 'sonner';
 import { Wallet, TrendingUp, ShieldCheck, ArrowRight, FileSpreadsheet, Search, Filter, Calendar, RefreshCw } from 'lucide-react';
+import { UI_LABELS } from '../src/constants/uiLabels';
 
 interface MyAccountProps {
   currentUser: User;
@@ -397,9 +398,10 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
         <div className="space-y-4 mb-8">
           <div className="flex flex-wrap items-end gap-4 p-4 bg-slate-50/50 rounded-2xl border border-slate-100">
             {/* 1. 业务时间筛选 - 核心引擎 */}
+            {/* 1. 业务日期筛选 */}
             <div className="space-y-1.5 min-w-fit">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-1">
-                <Calendar className="w-3 h-3" />
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center gap-1">
+                <Calendar className="w-3 h-3 text-slate-400" />
                 业务日期窗口
               </label>
               <BusinessDateFilter
@@ -424,18 +426,18 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               />
             </div>
 
-            {/* 分隔符 (可选) */}
-            <div className="hidden lg:block h-10 w-px bg-slate-200 self-end mb-1 mx-2"></div>
+            {/* 分隔符 */}
+            <div className="hidden lg:block h-10 w-px bg-slate-200 self-end mb-0 mx-2"></div>
 
             {/* 2. 业务类别筛选 */}
             <div className="space-y-1.5 flex-1 min-w-[120px]">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">业务类别</label>
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">业务类别</label>
               <select
                 value={filterType}
                 onChange={(e) => setFilterType(e.target.value)}
-                className="w-full bg-white border border-slate-200 text-xs text-slate-700 font-bold rounded-xl px-3 py-2 outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                className="w-full bg-white border border-[#b8d0f7] text-[13px] text-slate-800 font-bold rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 cursor-pointer h-10 transition-all"
               >
-                <option value="all">全部</option>
+                <option value="all">全部类别</option>
                 <option value="revenue">收款</option>
                 <option value="value">产值</option>
               </select>
@@ -443,11 +445,11 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
 
             {/* 3. 确权状态筛选 */}
             <div className="space-y-1.5 flex-1 min-w-[120px]">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">确权状态</label>
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">确权状态</label>
               <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value)}
-                className="w-full bg-white border border-slate-200 text-xs text-slate-700 font-bold rounded-xl px-3 py-2 outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                className="w-full bg-white border border-[#b8d0f7] text-[13px] text-slate-800 font-bold rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 cursor-pointer h-10 transition-all"
               >
                 <option value="all">全部状态</option>
                 <option value={AuditStatus.Confirmed}>{AuditStatus.Confirmed}</option>
@@ -459,28 +461,28 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
 
             {/* 4. 矿山搜索 */}
             <div className="space-y-1.5 flex-1 min-w-[140px]">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">矿山筛选</label>
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">矿山筛选</label>
               <div className="relative">
-                <Search className="w-3.5 h-3.5 text-slate-300 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="text"
                   placeholder="ID / 名称..."
                   value={filterMiningId}
                   onChange={(e) => setFilterMiningId(e.target.value)}
-                  className="w-full bg-white border border-slate-200 text-xs rounded-xl pl-8 pr-3 py-2 outline-none focus:border-blue-500 text-slate-800 shadow-2xs"
+                  className="w-full bg-white border border-[#b8d0f7] text-[13px] font-bold rounded-[4px] pl-8 pr-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 text-slate-800 h-10 transition-all placeholder:text-[#94a3b8]"
                 />
               </div>
             </div>
 
             {/* 5. 收支方向 */}
             <div className="space-y-1.5 flex-1 min-w-[100px]">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">方向</label>
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">方向</label>
               <select
                 value={filterDirection}
                 onChange={(e) => setFilterDirection(e.target.value)}
-                className="w-full bg-white border border-slate-200 text-xs text-slate-700 font-bold rounded-xl px-3 py-2 outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                className="w-full bg-white border border-[#b8d0f7] text-[13px] text-slate-800 font-bold rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 cursor-pointer h-10 transition-all"
               >
-                <option value="all">全部</option>
+                <option value="all">全部方向</option>
                 <option value="income">收入</option>
                 <option value="expense">支出</option>
               </select>
@@ -488,21 +490,21 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
 
             {/* 6. 单号搜索 */}
             <div className="space-y-1.5 flex-[1.5] min-w-[160px]">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">单号关键词</label>
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">单号关键词</label>
               <div className="flex gap-2">
                 <div className="relative flex-1">
-                  <Filter className="w-3.5 h-3.5 text-slate-300 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <Filter className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
                     placeholder="单号模糊匹配..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full bg-white border border-slate-200 text-xs rounded-xl pl-8 pr-3 py-2 outline-none focus:border-blue-500 text-slate-800 shadow-2xs"
+                    className="w-full bg-white border border-[#b8d0f7] text-[13px] font-bold rounded-[4px] pl-8 pr-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 text-slate-800 h-10 transition-all placeholder:text-[#94a3b8]"
                   />
                 </div>
                 <button
                   onClick={handleClearFilters}
-                  className="p-2 bg-white border border-slate-200 text-slate-400 hover:text-slate-600 hover:border-slate-300 rounded-xl transition-all shadow-2xs"
+                  className="px-3 bg-white border border-[#b8d0f7] text-slate-500 hover:text-[#1a56db] hover:border-[#1a56db] rounded-[4px] transition-all cursor-pointer h-10 flex items-center justify-center"
                   title="一键清除筛选"
                 >
                   <RefreshCw className="w-4 h-4" />
@@ -627,9 +629,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
                 ))
               ) : (
                 <tr>
-                  <td colSpan={7} className="text-center py-16 text-slate-400">
-                    <p className="text-sm font-bold">暂无流水</p>
-                  </td>
+                  <td colSpan={7} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
                 </tr>
               )}
             </tbody>

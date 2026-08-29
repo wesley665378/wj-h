@@ -7,6 +7,7 @@ import { calculateBonusAllocation, isExpertCategory, aggregateUserMonthMetrics }
 import { isCenterManagerUser, centerMatch } from "../src/utils/centerScope";
 import { parseCenterList, businessUnitLabelsEqual } from "../src/utils/purification";
 import { getUserSalaryByMonth } from "../src/utils/business";
+import { UI_LABELS } from '../src/constants/uiLabels';
 import { resolveLogBusinessMonth, getLocalMonthString, getLocalDateString, resolveLogBusinessDate, isDateInRange } from "../src/utils/dateUtils";
 import { formatAmount, formatRatio, formatPercent } from "../src/utils/formatters";
 import { InfoTip } from "../src/components/InfoTip";
@@ -14,6 +15,7 @@ import { CostPrivacyToggle } from "../src/components/CostPrivacyToggle";
 import { BusinessDateFilter } from "../src/components/BusinessDateFilter";
 import { fetchDistributionData } from "../src/api/distribution";
 import { createCdtzRecord } from "../src/api/cdtz";
+import { toast } from "sonner";
 import {
   ValueCreationLog,
   AuditStatus,
@@ -28,7 +30,6 @@ import {
   AcceptanceRecord,
 } from "../types";
 import { XLSX, exportWorkbook, buildExcelFilename } from "../src/utils/excelIo";
-import { toast } from "sonner";
 import { CityGuardianModal, useCityGuardianModal } from "../src/components/CityGuardianModal";
 import { useCostPrivacy } from "../src/hooks/useCostPrivacy";
 import {
@@ -209,7 +210,7 @@ const Distribution: React.FC<DistributionProps> = ({
 
         try {
           await createCdtzRecord(newRecord);
-          showAlert(`已成功写入承兑台账 cdtz！对 [${bonusTarget.userName}] 的 ${bonusForm.category} 发放：${fmtAmount(bonusForm.amount)}`);
+          toast.success(`已成功写入承兑台账 cdtz！对 [${bonusTarget.userName}] 的 ${bonusForm.category} 发放：${fmtAmount(bonusForm.amount)}`);
           loadDistribution();
         } catch (err) {
           showAlert("写入承兑台账 cdtz 失败，请重试");
@@ -792,7 +793,7 @@ const Distribution: React.FC<DistributionProps> = ({
       workbook,
       buildExcelFilename("价值分配", effectiveMonth || "全部")
     );
-    showAlert("导出成功");
+    toast.success("导出成功");
   };
 
   if (!users || !logs) {
@@ -864,15 +865,7 @@ const Distribution: React.FC<DistributionProps> = ({
               </button>
             </div>
           </div>
-          <div className="p-20 text-center">
-            <Calculator size={48} className="mx-auto text-slate-200 mb-6" />
-            <p className="text-sm font-black text-slate-900 uppercase mb-2">
-              未发现本月分配数据
-            </p>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">
-              请确认已完成该月份的价值提炼记录审核，或切换其它业务月份。
-            </p>
-          </div>
+          <div className="px-6 py-12 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</div>
         </div>
       </div>
     );
@@ -991,47 +984,47 @@ const Distribution: React.FC<DistributionProps> = ({
           <table className="w-full text-left border-separate border-spacing-0 border border-slate-200 rounded-2xl overflow-hidden">
             <thead className="sticky top-0 z-20">
               <tr className="bg-slate-50/90 backdrop-blur-md">
-                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[220px]">
+                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[160px]">
                   采集主体
                 </th>
-                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[200px]">
+                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[120px]">
                   <div className="flex items-center justify-center gap-1.5">
                     <span>产兑包/收款包</span>
                     <InfoTip title="产兑包/收款包口径" content="款专收款已确权，产专产值已确权或待确权联动确权。" />
                   </div>
                 </th>
-                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[180px]">
+                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[100px]">
                   <div className="flex items-center justify-center gap-1.5">
                     <span>总成本对冲</span>
                     <CostPrivacyToggle size="sm" showLabel={false} />
                     <InfoTip title="总成本对冲口径" content="款专工资+A类，产专工资+B1类，不含 B2/C 动态对冲。" />
                   </div>
                 </th>
-                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[160px]">
+                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[100px]">
                   <div className="flex items-center justify-center gap-1.5">
                     <span>分配额度（月）</span>
                     <InfoTip title="分配额度口径" content="填平历史欠产后的净分配额度（≥0）。" />
                   </div>
                 </th>
-                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-amber-600 bg-amber-50/50 uppercase tracking-widest min-w-[150px]">
+                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-amber-600 bg-amber-50/50 uppercase tracking-widest min-w-[100px]">
                   <div className="flex items-center justify-center gap-1.5">
                     <span>理论（额度）</span>
                     <InfoTip title="理论（额度）口径" content="理论奖金=已确权额度×系数，计算应发理论额度。" />
                   </div>
                 </th>
-                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-emerald-600 bg-emerald-50/50 uppercase tracking-widest min-w-[150px]">
+                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-emerald-600 bg-emerald-50/50 uppercase tracking-widest min-w-[100px]">
                   <div className="flex items-center justify-center gap-1.5">
                     <span>承兑（实发）</span>
                     <InfoTip title="承兑（实发）口径" content="当月 cdtz 实际发放和承兑记录。" />
                   </div>
                 </th>
-                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[160px]">
+                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[100px]">
                   <div className="flex items-center justify-center gap-1.5">
                     <span>历史欠产包</span>
                      <InfoTip title="历史欠产包口径" content="当年 1~M-1 全量滚动，无流水仍计工资，不含当月，负数展示。" />
                   </div>
                 </th>
-                <th className="border-b border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[150px]">
+                <th className="border-b border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[100px]">
                   <div className="flex items-center justify-center gap-1.5">
                     <span>年度累计</span>
                      <InfoTip title="年度累计口径" content="按选定审核状态年度全量累计计算。" />
@@ -1101,7 +1094,7 @@ const Distribution: React.FC<DistributionProps> = ({
                       <td className="p-0 border border-slate-200">
                         <div className="flex flex-col divide-y divide-slate-200 h-full w-full">
                           <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[76px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
+                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
                               已确权：
                             </div>
                             <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-slate-800 whitespace-nowrap">
@@ -1109,7 +1102,7 @@ const Distribution: React.FC<DistributionProps> = ({
                             </div>
                           </div>
                           <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[76px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
+                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
                               入库：
                             </div>
                             <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-slate-800 whitespace-nowrap">
@@ -1123,7 +1116,7 @@ const Distribution: React.FC<DistributionProps> = ({
                       <td className="p-0 border border-slate-200">
                         <div className="flex flex-col divide-y divide-slate-200 h-full w-full">
                           <div className="flex items-stretch flex-1 min-h-[38px] group/cost">
-                            <div className="flex items-center justify-center w-[76px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
+                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
                               已确权
                             </div>
                             <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-bold text-slate-700 whitespace-nowrap relative group">
@@ -1133,7 +1126,7 @@ const Distribution: React.FC<DistributionProps> = ({
                             </div>
                           </div>
                           <div className="flex items-stretch flex-1 min-h-[38px] group/cost">
-                            <div className="flex items-center justify-center w-[76px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
+                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
                               入库
                             </div>
                             <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-bold text-slate-700 whitespace-nowrap relative group">
@@ -1149,7 +1142,7 @@ const Distribution: React.FC<DistributionProps> = ({
                       <td className="p-0 border border-slate-200">
                         <div className="flex flex-col divide-y divide-slate-200 h-full w-full">
                           <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[76px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
+                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
                               已确权
                             </div>
                             <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-indigo-600 whitespace-nowrap">
@@ -1157,7 +1150,7 @@ const Distribution: React.FC<DistributionProps> = ({
                             </div>
                           </div>
                           <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[76px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
+                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
                               入库
                             </div>
                             <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-[#10b981] whitespace-nowrap">
@@ -1171,7 +1164,7 @@ const Distribution: React.FC<DistributionProps> = ({
                       <td className="p-0 border border-slate-200 bg-amber-50/30">
                         <div className="flex flex-col divide-y divide-amber-100/50 h-full w-full">
                           <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[76px] flex-none border-r border-amber-100/50 text-amber-600/70 text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
+                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-amber-100/50 text-amber-600/70 text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
                               已确权
                             </div>
                             <div className="flex-1 px-3 py-1.5 flex flex-col items-end justify-center font-mono text-[11px] font-black text-amber-600 whitespace-nowrap leading-tight">
@@ -1187,7 +1180,7 @@ const Distribution: React.FC<DistributionProps> = ({
                             </div>
                           </div>
                           <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[76px] flex-none border-r border-amber-100/50 text-amber-600/70 text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
+                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-amber-100/50 text-amber-600/70 text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
                               入库
                             </div>
                             <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-amber-600 whitespace-nowrap">
@@ -1201,7 +1194,7 @@ const Distribution: React.FC<DistributionProps> = ({
                       <td className="p-0 border border-slate-200 bg-emerald-50/20">
                         <div className="flex flex-col divide-y divide-emerald-100/50 h-full w-full">
                           <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[76px] flex-none border-r border-emerald-100/50 text-emerald-600/70 text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
+                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-emerald-100/50 text-emerald-600/70 text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
                               已确权
                             </div>
                             <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-emerald-600 whitespace-nowrap">
@@ -1209,7 +1202,7 @@ const Distribution: React.FC<DistributionProps> = ({
                             </div>
                           </div>
                           <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[76px] flex-none border-r border-emerald-100/50 text-emerald-600/70 text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
+                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-emerald-100/50 text-emerald-600/70 text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
                               入库
                             </div>
                             <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-emerald-600 whitespace-nowrap">
@@ -1223,7 +1216,7 @@ const Distribution: React.FC<DistributionProps> = ({
                       <td className="p-0 border border-slate-200">
                         <div className="flex flex-col divide-y divide-slate-200 h-full w-full">
                           <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[76px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
+                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
                               已确权
                             </div>
                             <div
@@ -1233,7 +1226,7 @@ const Distribution: React.FC<DistributionProps> = ({
                             </div>
                           </div>
                           <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[76px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
+                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
                               入库
                             </div>
                             <div
@@ -1249,7 +1242,7 @@ const Distribution: React.FC<DistributionProps> = ({
                       <td className="p-0 border border-slate-200">
                         <div className="flex flex-col divide-y divide-slate-200 h-full w-full">
                           <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[76px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
+                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
                               已确权
                             </div>
                             <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-slate-800 whitespace-nowrap">
@@ -1257,7 +1250,7 @@ const Distribution: React.FC<DistributionProps> = ({
                             </div>
                           </div>
                           <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[76px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
+                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
                               入库
                             </div>
                             <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-slate-800 whitespace-nowrap">
@@ -1535,10 +1528,7 @@ const Distribution: React.FC<DistributionProps> = ({
                                             {log.type}
                                           </p>
                                           <p className="text-[9px] font-bold text-slate-400 uppercase">
-                                            {new Date(
-                                              log.timestamp,
-                                            ).toLocaleString()}{" "}
-                                            |{" "}
+                                            {resolveLogBusinessDate(log)} ({resolveLogBusinessMonth(log)}) |{" "}
                                             {log.status === AuditStatus.Approved
                                               ? "入库"
                                               : "已确权"}

@@ -45,7 +45,8 @@ export const BusinessDateFilter: React.FC<BusinessDateFilterProps> = ({
     if (monthOptions && monthOptions.length > 0) return monthOptions;
     const list: string[] = [];
     const now = new Date();
-    for (let i = 0; i < 12; i++) {
+    // 默认显示过去 36 个月 (3 年) 以支持跨年查询
+    for (let i = 0; i < 36; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const y = d.getFullYear();
       const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -104,28 +105,28 @@ export const BusinessDateFilter: React.FC<BusinessDateFilterProps> = ({
     <div className={`flex flex-wrap items-center gap-2 ${className}`}>
       {/* 1. 自定义查询按钮与起止日 */}
       {supportsRange && (
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={handleToggleCustom}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-1.5 px-3 h-10 rounded-[4px] text-[13px] font-bold transition-all whitespace-nowrap cursor-pointer ${
               isCustomRange
-                ? 'bg-blue-600 text-white shadow-xs font-black'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+                ? 'bg-[#1a56db] text-white shadow-xs font-black'
+                : 'bg-white hover:bg-slate-50 text-slate-700 border border-[#b8d0f7]'
             }`}
           >
-            <Search size={12} />
+            <Search size={14} />
             <span>自定义查询</span>
           </button>
 
           {/* 激活自定义时显示的起止日 */}
           {isCustomRange && (
-            <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1 text-xs shadow-xs">
+            <div className="flex items-center gap-2 bg-white border border-[#b8d0f7] rounded-[4px] px-3 h-10 text-[13px] shadow-xs">
               <input
                 type="date"
                 value={startDate || ''}
                 onChange={(e) => handleCustomDateChange('start', e.target.value)}
-                className="bg-transparent text-slate-800 font-mono text-xs font-bold outline-none cursor-pointer"
+                className="bg-transparent text-slate-800 font-mono text-[13px] font-bold outline-none cursor-pointer"
                 title="起始日期"
               />
               <span className="text-slate-400 font-bold text-[11px]">至</span>
@@ -133,7 +134,7 @@ export const BusinessDateFilter: React.FC<BusinessDateFilterProps> = ({
                 type="date"
                 value={endDate || ''}
                 onChange={(e) => handleCustomDateChange('end', e.target.value)}
-                className="bg-transparent text-slate-800 font-mono text-xs font-bold outline-none cursor-pointer"
+                className="bg-transparent text-slate-800 font-mono text-[13px] font-bold outline-none cursor-pointer"
                 title="截止日期"
               />
             </div>
@@ -143,10 +144,10 @@ export const BusinessDateFilter: React.FC<BusinessDateFilterProps> = ({
             <button
               type="button"
               onClick={handleClear}
-              className="flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-rose-600 bg-slate-100 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 px-2 py-1.5 rounded-xl transition-all whitespace-nowrap shadow-2xs"
+              className="flex items-center gap-1 text-[12px] font-bold text-slate-500 hover:text-rose-600 bg-slate-100 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 px-2.5 h-10 rounded-[4px] transition-all whitespace-nowrap shadow-2xs cursor-pointer"
               title="清除自定义区间并返回按月"
             >
-              <RotateCcw size={11} />
+              <RotateCcw size={12} />
               <span>清除</span>
             </button>
           )}
@@ -157,17 +158,17 @@ export const BusinessDateFilter: React.FC<BusinessDateFilterProps> = ({
 
       {/* 2. 业务月份下拉选择器 */}
       {onMonthChange && (
-        <div className="flex items-center gap-1.5 shrink-0">
-          <span className="text-xs font-bold text-slate-500 whitespace-nowrap flex items-center gap-1">
-            <Calendar size={12} className="text-slate-400" />
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4 whitespace-nowrap gap-1">
+            <Calendar size={13} className="text-slate-400" />
             <span>业务月份:</span>
           </span>
           <select
             value={isCustomRange ? '' : (month || getLocalMonthString())}
             onChange={(e) => handleSelectMonth(e.target.value)}
-            className={`rounded-xl px-3 py-1.5 text-xs font-black outline-none transition-all cursor-pointer shadow-xs border ${
+            className={`h-10 rounded-[4px] px-3 py-2 text-[13px] font-bold outline-none transition-all cursor-pointer shadow-xs border ${
               !isCustomRange
-                ? 'bg-white border-slate-200 text-slate-800 focus:ring-2 focus:ring-blue-500/20'
+                ? 'bg-white border-[#b8d0f7] text-slate-800 focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10'
                 : 'bg-slate-100 border-slate-200 text-slate-400 hover:text-slate-600'
             }`}
           >

@@ -3,8 +3,31 @@
  * 改业务口径须同步：types.ts + 本文件 + 主指引
  */
 
+import { ProjectStatus, RefineType } from '../types';
+
 /** User.id — 系统内部主键，人事表「工号」列导入时勿与 userId 混填 */
 export const TERM_USER_ID = '系统编号';
+
+export const PROJECT_STATUS_LABELS: Record<string, string> = {
+  [ProjectStatus.InProgress]: '运营中',
+  [ProjectStatus.Capping]: '静置中',
+  [ProjectStatus.Archived]: '已封存',
+};
+
+export const REFINE_TYPE_LABELS: Record<string, string> = {
+  [RefineType.Enterprise]: '企业项目',
+  [RefineType.OccHealth]: '职业卫生',
+  [RefineType.SafetyEval]: '安全评价',
+  [RefineType.OccHealthElectric]: '职业卫生/电气检测',
+  [RefineType.Bidding]: '招采项目',
+  [RefineType.Outsourced]: '战略性外派',
+  [RefineType.EmergencyG]: '应急演练（G)',
+  [RefineType.TrainingG]: '培训（G）',
+  [RefineType.NonEffectiveHours]: '非有效工时',
+  '招标项目': '招采项目',
+  '外派项目': '战略性外派',
+  '非有效工时': '非有效工时',
+};
 
 /** User.userId — 登录账号 */
 export const TERM_LOGIN_ID = '登录账号';

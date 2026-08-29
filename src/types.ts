@@ -160,6 +160,11 @@ export enum AuditStatus {
   Rejected = '已驳回'
 }
 
+/** 系统采集码常量 (附录 H-1) */
+export const SYS_C = 'SYS_C';
+export const SYS_B2 = 'SYS_B2';
+export const LEGACY_SYSTEM_B2 = 'SYSTEM_B2';
+
 export interface QuotaSnapshot {
   revenue: {
     capacity: number;
@@ -302,7 +307,7 @@ export interface ValueCreationLog {
   recordedCollectorId?: string; // 提炼人员（仅为记录，不参与计算）
   category: RefineCategory;
   type: RefineType;
-  costCategory?: 'A' | 'B' | 'C' | 'D'; // 动态消耗计入类别
+  costCategory?: 'A' | 'B' | 'C' | 'D' | 'T1' | 'T2' | 'T3' | string; // 动态消耗计入类别 / 创造侧提炼阶梯
   valueConsumptionMode?: 'B1' | 'B2'; // 产值B类消耗模式
   amount: number; // 积分/资源量
   rawAmount: number; // 原始注入总量（用于动态对冲计算基准）

@@ -1,8 +1,8 @@
 import { User, ValueCreationLog, MiningResource, AuditStatus, ValueEfficiencySnapshot, RefineCategory, Role } from '../../types';
 import { calculateHistoricalNetValue, getUserSalaryByMonth } from './business';
 import { aggregateUserMonthMetrics } from './bonusAllocation';
-import { isLogInFilter } from './dateUtils';
-import { isNonEffectiveHoursEffective } from './employmentStatus';
+import { isLogInFilter, resolveLogBusinessMonth } from './dateUtils';
+import { isNonEffectiveHoursEffective, isSalaryActiveForMonth } from './employmentStatus';
 import { getNonEffectiveHoursDeduction } from './nonEffectiveHours';
 
 export interface EvaluationResult extends ValueEfficiencySnapshot {
@@ -16,6 +16,74 @@ export interface EvaluationResult extends ValueEfficiencySnapshot {
   cCost: number;
   dCost: number;
   nonEffectiveDeduction: number;
+}
+
+/**
+ * 计算单个用户在指定月份的月度成本包明细
+ */
+export function computeUserMonthlyCost(
+  user: User,
+  logs: ValueCreationLog[],
+  resources: MiningResource[],
+  allUsers: User[],
+  monthStr: string
+): {
+  monthlyCost: number;
+  baseSalary: number;
+  aCost: number;
+  b1Cost: number;
+  b2Cost: number;
+  cCost: number;
+  dCost: number;
+  nonEffectiveDeduction: number;
+} {
+  // 不在职月份，成本计 0
+  if (!isSalaryActiveForMonth(user, monthStr)) {
+    return {
+      monthlyCost: 0,
+      baseSalary: 0,
+      aCost: 0,
+      b1Cost: 0,
+      b2Cost: 0,
+      cCost: 0,
+      dCost: 0,
+      nonEffectiveDeduction: 0,
+    };
+  }
+
+  const ymMetrics = aggregateUserMonthMetrics(
+    logs,
+    user,
+    monthStr,
+    resources,
+    allUsers,
+    [AuditStatus.Confirmed, AuditStatus.Approved]
+  );
+
+  const category = user.category || '';
+  const isRevenueExpert = category.includes('款专');
+  const isProdExpert = category.includes('产专') || category === '经管员高产专';
+
+  const baseSalary = getUserSalaryByMonth(user, monthStr);
+  let monthlyCost = baseSalary;
+  if (isRevenueExpert) {
+    monthlyCost += ymMetrics.aCost;
+  } else if (isProdExpert) {
+    monthlyCost += ymMetrics.b1Cost;
+  }
+  monthlyCost += ymMetrics.dCost;
+  monthlyCost -= ymMetrics.nonEffectiveDeduction;
+
+  return {
+    monthlyCost,
+    baseSalary,
+    aCost: ymMetrics.aCost,
+    b1Cost: ymMetrics.b1Cost,
+    b2Cost: ymMetrics.b2Cost,
+    cCost: ymMetrics.cCost,
+    dCost: ymMetrics.dCost,
+    nonEffectiveDeduction: ymMetrics.nonEffectiveDeduction,
+  };
 }
 
 /**
@@ -36,7 +104,7 @@ export function computePersonEvaluation(
   // 匹配规则：recordedCollectorId 优先，其次是 rankId 回退
   const matchUser = (l: ValueCreationLog) => l.recordedCollectorId === user.id || (!l.recordedCollectorId && l.rankId === user.id);
 
-  // 收入包口径对齐 reconcileMiningFromLogs.ts (保持现状)
+  // 收入包口径对齐 reconcileMiningFromLogs.ts
   const isIncomeLog = (l: ValueCreationLog) => {
     const isRevenue = l.category === RefineCategory.Revenue && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved);
     const isValue = l.category === RefineCategory.Value && (
@@ -54,101 +122,103 @@ export function computePersonEvaluation(
     isLogInFilter(l, filterMonth, startDate, endDate)
   );
 
-  // 成本相关流水筛选 (A/B1/B2/C)
-  const costLogs = logs.filter(l => 
-    l.recordedCollectorId === user.id &&
-    [AuditStatus.Confirmed, AuditStatus.Approved].includes(l.status as AuditStatus) &&
-    isLogInFilter(l, filterMonth, startDate, endDate)
-  );
-
-  let aCost = 0;
-  let b1Cost = 0;
-  let b2Cost = 0;
-  let cCost = 0;
-
-  costLogs.forEach(l => {
-    if (l.costCategory === 'A') aCost += l.dynamicCost || 0;
-    else if (l.costCategory === 'B') {
-      if (l.valueConsumptionMode === 'B1') b1Cost += l.dynamicCost || 0;
-      else if (l.valueConsumptionMode === 'B2') b2Cost += l.dynamicCost || 0;
-    } else if (l.costCategory === 'C') cCost += l.dynamicCost || 0;
-  });
-
-  // 年度流水 (至当前月)
-  const yearlyLogs = logs.filter(l => 
-    matchUser(l) && 
-    isIncomeLog(l) &&
-    l.month &&
-    l.month.startsWith(currentYear) &&
-    l.month <= refMonth
-  );
-
-  // 收入计算 (维持现状)
+  // 月度收入计算
   const monthlyIncome = monthlyLogs.reduce((acc, log) => {
     return acc + calculateHistoricalNetValue(log, resources, allUsers);
   }, 0);
+
+  // 月度成本包计算
+  let monthlyCostDetail: ReturnType<typeof computeUserMonthlyCost>;
+  if (startDate || endDate) {
+    // 自定义起止日期的成本筛选
+    const costLogs = logs.filter(l => 
+      l.recordedCollectorId === user.id &&
+      [AuditStatus.Confirmed, AuditStatus.Approved].includes(l.status as AuditStatus) &&
+      isLogInFilter(l, filterMonth, startDate, endDate)
+    );
+    let aCost = 0, b1Cost = 0, b2Cost = 0, cCost = 0;
+    costLogs.forEach(l => {
+      if (l.costCategory === 'A') aCost += l.dynamicCost || 0;
+      else if (l.costCategory === 'B') {
+        if (l.valueConsumptionMode === 'B1') b1Cost += l.dynamicCost || 0;
+        else if (l.valueConsumptionMode === 'B2') b2Cost += l.dynamicCost || 0;
+      } else if (l.costCategory === 'C') cCost += l.dynamicCost || 0;
+    });
+
+    const category = user.category || '';
+    const isRevenueExpert = category.includes('款专');
+    const isProdExpert = category.includes('产专') || category === '经管员高产专';
+
+    const nonEffectiveDeduction = (user.category === 'VP') ? 0 : logs
+      .filter(l => 
+        matchUser(l) &&
+        [AuditStatus.Confirmed, AuditStatus.Approved].includes(l.status as AuditStatus) &&
+        isNonEffectiveHoursEffective(l) &&
+        isLogInFilter(l, filterMonth, startDate, endDate)
+      )
+      .reduce((acc, l) => acc + getNonEffectiveHoursDeduction(l), 0);
+
+    const dLogsInPeriod = logs.filter(l =>
+      l.costCategory === 'D' &&
+      [AuditStatus.Confirmed, AuditStatus.Approved].includes(l.status as AuditStatus) &&
+      isLogInFilter(l, filterMonth, startDate, endDate)
+    );
+    const totalDCostInPeriod = dLogsInPeriod.reduce((acc, l) => acc + (l.dynamicCost || 0), 0);
+    const activeUserCount = allUsers.filter(u => u.status !== '离职' && u.category !== '系统管理员' && u.role !== Role.Admin).length || 1;
+    const dCost = totalDCostInPeriod / activeUserCount;
+
+    const baseSalary = isSalaryActiveForMonth(user, refMonth) ? getUserSalaryByMonth(user, refMonth) : 0;
+    let mCost = baseSalary;
+    if (isRevenueExpert) mCost += aCost;
+    else if (isProdExpert) mCost += b1Cost;
+    mCost += dCost;
+    mCost -= nonEffectiveDeduction;
+
+    monthlyCostDetail = {
+      monthlyCost: mCost,
+      baseSalary,
+      aCost,
+      b1Cost,
+      b2Cost,
+      cCost,
+      dCost,
+      nonEffectiveDeduction,
+    };
+  } else {
+    monthlyCostDetail = computeUserMonthlyCost(user, logs, resources, allUsers, refMonth);
+  }
+
+  const {
+    monthlyCost,
+    baseSalary,
+    aCost,
+    b1Cost,
+    b2Cost,
+    cCost,
+    dCost,
+    nonEffectiveDeduction
+  } = monthlyCostDetail;
+
+  // 年度流水 (从 1 月至 refMonth 业务年度内)
+  const yearlyLogs = logs.filter(l => 
+    matchUser(l) && 
+    isIncomeLog(l) &&
+    resolveLogBusinessMonth(l).startsWith(currentYear) &&
+    resolveLogBusinessMonth(l) <= refMonth
+  );
 
   const yearlyIncome = yearlyLogs.reduce((acc, log) => {
     return acc + calculateHistoricalNetValue(log, resources, allUsers);
   }, 0);
 
-  // 成本计算：款专成本=工资+A，产专成本=工资+B1
-  const category = user.category || '';
-  const isRevenueExpert = category.includes('款专');
-  const isProdExpert = category.includes('产专') || category === '经管员高产专';
-
-  const nonEffectiveDeduction = (user.category === 'VP') ? 0 : logs
-    .filter(l => 
-      matchUser(l) &&
-      [AuditStatus.Confirmed, AuditStatus.Approved].includes(l.status as AuditStatus) &&
-      isNonEffectiveHoursEffective(l) &&
-      isLogInFilter(l, filterMonth, startDate, endDate)
-    )
-    .reduce((acc, l) => acc + getNonEffectiveHoursDeduction(l), 0);
-
-  // D类成本：中心开支，无项目列支，按实际发生月的人员平均分摊
-  const dLogsInPeriod = logs.filter(l =>
-    l.costCategory === 'D' &&
-    [AuditStatus.Confirmed, AuditStatus.Approved].includes(l.status as AuditStatus) &&
-    isLogInFilter(l, filterMonth, startDate, endDate)
-  );
-  const totalDCostInPeriod = dLogsInPeriod.reduce((acc, l) => acc + (l.dynamicCost || 0), 0);
-  const activeUserCount = allUsers.filter(u => u.status !== '离职' && u.category !== '系统管理员' && u.role !== Role.Admin).length || 1;
-  const dCost = totalDCostInPeriod / activeUserCount;
-
-  const baseSalary = getUserSalaryByMonth(user, refMonth);
-  let monthlyCost = baseSalary;
-  if (isRevenueExpert) {
-    monthlyCost += aCost;
-  } else if (isProdExpert) {
-    monthlyCost += b1Cost;
-  }
-  monthlyCost += dCost;
-  monthlyCost -= nonEffectiveDeduction;
-  
-  // 年度成本 = 从 1 月到 refMonth 累计月度成本 (工资 + A/B1/D - 非效对冲)
+  // 年度成本 = 逐月累加业务年度内实际在职月份的月成本（不在职月份不计入）
   let yearlyCost = 0;
-  const targetYear = refMonth.split('-')[0];
+  const targetYear = currentYear;
   const targetMonthNum = parseInt(refMonth.split('-')[1]);
   for (let m = 1; m <= targetMonthNum; m++) {
     const monthStr = `${targetYear}-${String(m).padStart(2, '0')}`;
-    const ymMetrics = aggregateUserMonthMetrics(
-      logs,
-      user,
-      monthStr,
-      resources,
-      allUsers,
-      [AuditStatus.Confirmed, AuditStatus.Approved]
-    );
-    let mCost = getUserSalaryByMonth(user, monthStr);
-    if (isRevenueExpert) {
-      mCost += ymMetrics.aCost;
-    } else if (isProdExpert) {
-      mCost += ymMetrics.b1Cost;
-    }
-    mCost += ymMetrics.dCost;
-    mCost -= ymMetrics.nonEffectiveDeduction;
-    yearlyCost += mCost;
+    const mCostDetail = computeUserMonthlyCost(user, logs, resources, allUsers, monthStr);
+    yearlyCost += mCostDetail.monthlyCost;
   }
 
   // 效率与贡献

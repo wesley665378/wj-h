@@ -52,3 +52,13 @@ export const fetchResourceStatus = async (miningId: string): Promise<{ resource:
   const res = await apiClient.get<any>(`/api/resource/${miningId}/status`);
   return unwrapApiEnvelope<{ resource: MiningResource; snapshot: QuotaSnapshot }>(res);
 };
+
+export interface PersistDtcbResponse {
+  success?: boolean;
+  workspaceVersion?: number;
+}
+
+export const persistDtcbLogs = async (dtcbLogs: ValueCreationLog[]): Promise<PersistDtcbResponse> => {
+  const res = await apiClient.post<any>('/api/dtcb', { logs: dtcbLogs });
+  return unwrapApiEnvelope<PersistDtcbResponse>(res);
+};

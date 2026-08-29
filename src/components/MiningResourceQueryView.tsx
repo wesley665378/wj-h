@@ -20,6 +20,7 @@ import { isLogInFilter, getLocalMonthString } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatMoney';
 import { isVirtualDeductionMiningId } from '../utils/virtualDeduction';
 import { UI_LABELS } from '../constants/uiLabels';
+import { formatCollectorDisplay } from '../utils/collector';
 
 export const normalizeMiningId = (id: string | undefined | null): string => {
   return (id || '').trim().toLowerCase();
@@ -27,12 +28,7 @@ export const normalizeMiningId = (id: string | undefined | null): string => {
 
 export const formatExpertCategoryDisplay = (collectorId: string | undefined | null, users: User[] = []): string => {
   if (!collectorId) return '—';
-  const u = users.find(x => x.id === collectorId || x.userId === collectorId);
-  if (!u) return collectorId;
-  const userNo = u.userId || u.id;
-  const name = u.name || '';
-  const category = u.category || u.role || '';
-  return category ? `${userNo} ${name} (${category})` : `${userNo} ${name}`;
+  return formatCollectorDisplay(collectorId, users);
 };
 
 interface MiningResourceQueryViewProps {
@@ -580,9 +576,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {jzczRows.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-8 text-center text-slate-400 font-medium">
-                    {UI_LABELS.EMPTY_LIST}
-                  </td>
+                  <td colSpan={10} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_LIST}</td>
                 </tr>
               ) : (
                 jzczRows.map(l => {
@@ -679,9 +673,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {dtcbRows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-8 text-center text-slate-400 font-medium">
-                    {UI_LABELS.EMPTY_LIST}
-                  </td>
+                  <td colSpan={9} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_LIST}</td>
                 </tr>
               ) : (
                 dtcbRows.map(l => {
@@ -781,9 +773,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {nbjyRows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-8 text-center text-slate-400 font-medium">
-                    {UI_LABELS.EMPTY_LIST}
-                  </td>
+                  <td colSpan={9} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_LIST}</td>
                 </tr>
               ) : (
                 nbjyRows.map(t => {

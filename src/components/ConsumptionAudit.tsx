@@ -14,7 +14,7 @@ export interface AuditApiData {
   operatingUnit: string;    // 经营单元
   miningId: string;         // 矿山编号
   miningName?: string;      // 矿山/选区名称
-  type: 'A' | 'B1' | 'B2' | 'C'; // 确权类型
+  type: 'A' | 'B1' | 'B2' | 'C' | 'D'; // 确权类型
   basePoints: number;       // 申报积分 (系统核算动态基准)
   calculatedValue: number;  // 系统核算确权金额
   notes?: string;           // 备注
@@ -28,7 +28,7 @@ export interface ConsumptionFormState {
   operatingUnit: string;
   miningId: string;
   miningName: string;
-  type: 'A' | 'B1' | 'B2' | 'C';
+  type: 'A' | 'B1' | 'B2' | 'C' | 'D';
   basePoints: number;       // System raw points (readOnly)
   
   // Auto-filled proposed values based on rules (readOnly)
@@ -36,6 +36,7 @@ export interface ConsumptionFormState {
   b1Value: number;
   b2Value: number;
   cValue: number;
+  dValue: number;
   
   // Verification check inputs
   verifiedAmount: number;   // Human double-check audit amount
@@ -59,6 +60,7 @@ export function mapApiToForm(apiData: AuditApiData): ConsumptionFormState {
     b1Value: 0,
     b2Value: 0,
     cValue: 0,
+    dValue: 0,
     verifiedAmount: apiData.calculatedValue || 0,
     enableAdjustment: false,
     adjustmentValue: 0,
@@ -74,6 +76,8 @@ export function mapApiToForm(apiData: AuditApiData): ConsumptionFormState {
     result.b2Value = apiData.calculatedValue;
   } else if (apiData.type === 'C') {
     result.cValue = apiData.calculatedValue;
+  } else if (apiData.type === 'D') {
+    result.dValue = apiData.calculatedValue;
   }
 
   return result;
@@ -319,6 +323,27 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     value={formData.cValue > 0 ? formatMoney(formData.cValue) : '—'}
                     className={`w-full p-2.5 rounded-xl border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
                       formData.type === 'C'
+                        ? 'bg-emerald-50 border-emerald-200 text-slate-800 font-black'
+                        : 'bg-slate-50 border-slate-150 text-gray-300 cursor-not-allowed outline-none select-none'
+                    }`}
+                  />
+                </div>
+
+                {/* Field D */}
+                <div id="field-block-d" className="space-y-1">
+                  <div className="flex items-center justify-between px-0.5">
+                    <label className="text-[11px] font-bold text-slate-500">D类积分扣减项</label>
+                    {formData.type === 'D' && (
+                      <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-emerald-100 text-emerald-700">匹配</span>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    readOnly
+                    id="input-field-d"
+                    value={formData.dValue > 0 ? formatMoney(formData.dValue) : '—'}
+                    className={`w-full p-2.5 rounded-xl border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
+                      formData.type === 'D'
                         ? 'bg-emerald-50 border-emerald-200 text-slate-800 font-black'
                         : 'bg-slate-50 border-slate-150 text-gray-300 cursor-not-allowed outline-none select-none'
                     }`}

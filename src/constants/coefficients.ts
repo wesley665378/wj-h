@@ -1,3 +1,17 @@
+import { RefineType } from '../types';
+
+export const REFINE_FACTORS: Record<RefineType, { revenue: number; value: number }> = {
+  [RefineType.Enterprise]: { revenue: 0.27, value: 0.48 },
+  [RefineType.OccHealth]: { revenue: 0.30, value: 0.52 },
+  [RefineType.SafetyEval]: { revenue: 0.30, value: 0.40 },
+  [RefineType.OccHealthElectric]: { revenue: 0.30, value: 0.52 },
+  [RefineType.Bidding]: { revenue: 0.20, value: 0.55 },
+  [RefineType.Outsourced]: { revenue: 0.27, value: 0.55 },
+  [RefineType.EmergencyG]: { revenue: 0.30, value: 0.55 },
+  [RefineType.TrainingG]: { revenue: 0.30, value: 0.55 },
+  [RefineType.NonEffectiveHours]: { revenue: 0.27, value: 0.48 }
+};
+
 export const TIER_COEFFICIENTS = {
   // Value Revenue Expert (收款专家) mapping
   REVENUE_HIGH: {

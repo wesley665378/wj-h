@@ -268,22 +268,30 @@ const App: React.FC = () => {
 
   const lastSyncedFingerprintRef = React.useRef<string>('');
 
-  const getWorkspaceFingerprint = React.useCallback(() => {
+  const getWorkspaceFingerprint = React.useCallback((overrides?: any) => {
+    const currentUsers = overrides?.users ?? managedUsers;
+    const currentLogs = overrides?.logs ?? logs;
+    const currentTxs = overrides?.transactions ?? transactions;
+    const currentRes = overrides?.miningResources ?? miningResources;
+    const currentCBs = overrides?.circuitBreakers ?? circuitBreakers;
+    const currentSamples = overrides?.meetingSamples ?? meetingSamples;
+    const currentRecords = overrides?.acceptanceRecords ?? acceptanceRecords;
+
     return [
-      managedUsers.length, managedUsers[managedUsers.length - 1]?.id, managedUsers[managedUsers.length - 1]?.category,
-      logs.length, logs[logs.length - 1]?.id, logs[logs.length - 1]?.status, logs[logs.length - 1]?.dynamicCost,
-      transactions.length, transactions[transactions.length - 1]?.id, transactions[transactions.length - 1]?.status,
-      miningResources.length, miningResources[miningResources.length - 1]?.id, miningResources[miningResources.length - 1]?.version,
-      circuitBreakers.length, circuitBreakers[circuitBreakers.length - 1]?.id, circuitBreakers[circuitBreakers.length - 1]?.status,
+      currentUsers.length, currentUsers[currentUsers.length - 1]?.id, currentUsers[currentUsers.length - 1]?.category,
+      currentLogs.length, currentLogs[currentLogs.length - 1]?.id, currentLogs[currentLogs.length - 1]?.status, currentLogs[currentLogs.length - 1]?.dynamicCost,
+      currentTxs.length, currentTxs[currentTxs.length - 1]?.id, currentTxs[currentTxs.length - 1]?.status,
+      currentRes.length, currentRes[currentRes.length - 1]?.id, currentRes[currentRes.length - 1]?.version,
+      currentCBs.length, currentCBs[currentCBs.length - 1]?.id, currentCBs[currentCBs.length - 1]?.status,
       systemLogs.length,
-      meetingSamples.length,
-      acceptanceRecords.length,
+      currentSamples.length,
+      currentRecords.length,
       filterMonth
     ].join('|');
   }, [managedUsers, logs, transactions, miningResources, circuitBreakers, systemLogs, meetingSamples, acceptanceRecords, filterMonth]);
 
-  const updateLastSyncedFingerprint = React.useCallback(() => {
-    lastSyncedFingerprintRef.current = getWorkspaceFingerprint();
+  const updateLastSyncedFingerprint = React.useCallback((overrides?: any) => {
+    lastSyncedFingerprintRef.current = getWorkspaceFingerprint(overrides);
   }, [getWorkspaceFingerprint]);
 
   const persistWorkspaceWithOverrides = React.useCallback(async (overrides?: {
@@ -332,7 +340,7 @@ const App: React.FC = () => {
         throw new Error((syncRes as any).error || '数据同步失败');
       }
 
-      updateLastSyncedFingerprint();
+      updateLastSyncedFingerprint(overrides);
 
       if (toastId) {
         toast.success(options?.successMessage || '已落库', { id: toastId });
@@ -931,7 +939,7 @@ const App: React.FC = () => {
 
     // 只有在加载完成后才执行同步
     if (currentUser && workspaceLoaded) {
-      const timer = setTimeout(syncData, 600); // 600ms 防抖，响应迅速且不频繁
+      const timer = setTimeout(syncData, 500); // 500ms 防抖，响应迅速且不频繁
       
       if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
         // E′-6 规则澄清: shihe_* 本地缓存仅作为客户端前端暂存与开发环境保底，非权威主账本；服务端 API 接口及工作区同步 payload 为权威源。
@@ -1131,7 +1139,8 @@ const App: React.FC = () => {
         jzczLogs: filteredLogs.filter(l => l.confirmationType !== '手动确权'),
         dtcbLogs: auditLogs.filter(l => l.confirmationType === '手动确权'),
         onLogSubmit: onConsumptionSubmit,
-        persistWorkspaceWithOverrides
+        persistWorkspaceWithOverrides,
+        updateLastSyncedFingerprint
       },
       audit: { 
         user: currentUser, 
@@ -1248,7 +1257,7 @@ const App: React.FC = () => {
   }, [filteredLogs, auditLogs, filteredResources, filteredUsers, managedUsers, miningResources, jydyUnits, transactions, currentUser, currentTime, logs,
        onSystemAdjustment, onLogSubmit, onConsumptionSubmit, processAudit, onSubmitTransaction, 
        onAuditTransaction, onAddResource, onUpdateResource, onDeleteResource, onUpdateUsers, onClearTestData,
-       circuitBreakers, onAddCircuitBreaker, onRecoverCircuitBreaker, persistWorkspaceWithOverrides]);
+       circuitBreakers, onAddCircuitBreaker, onRecoverCircuitBreaker, persistWorkspaceWithOverrides, updateLastSyncedFingerprint]);
 
   const components = useMemo(() => {
     if (!currentUser) return {} as any;

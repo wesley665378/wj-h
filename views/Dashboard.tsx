@@ -83,6 +83,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
   }, []);
 
   const [periodType, setPeriodType] = useState<PeriodType>('month');
+  const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
   const [periodValue, setPeriodValue] = useState<number>(() => new Date().getMonth() + 1);
   const [sourceView, setSourceView] = useState<'category' | 'unit'>('category');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -187,11 +188,11 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
   }, [periodType]);
 
   const currentPeriodLabel = useMemo(() => {
-    if (periodType === 'month') return `${now.getFullYear()}年${periodValue}月`;
-    if (periodType === 'quarter') return `${now.getFullYear()}年Q${periodValue}`;
-    if (periodType === 'half') return `${now.getFullYear()}年${periodValue === 1 ? '上半年' : '下半年'}`;
+    if (periodType === 'month') return `${selectedYear}年${periodValue}月`;
+    if (periodType === 'quarter') return `${selectedYear}年Q${periodValue}`;
+    if (periodType === 'half') return `${selectedYear}年${periodValue === 1 ? '上半年' : '下半年'}`;
     return `${periodValue}年度`;
-  }, [periodType, periodValue, now]);
+  }, [periodType, periodValue, selectedYear]);
 
   const periodMonths = useMemo(() => {
     if (periodType === 'month') return 1;
@@ -201,9 +202,8 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
   }, [periodType]);
 
   const periodRange = useMemo(() => {
-    const d = new Date(now);
+    const d = new Date(selectedYear, 0, 1);
     d.setHours(0, 0, 0, 0);
-    d.setDate(1);
     let start = 0;
     let end = 0;
     
@@ -232,7 +232,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
     const startDateStr = getLocalDateString(start);
     const endDateStr = getLocalDateString(end - 1);
     return { start, end, startDateStr, endDateStr };
-  }, [periodType, periodValue, now]);
+  }, [periodType, periodValue, selectedYear]);
 
   const monthsInPeriod = useMemo(() => {
     const months: string[] = [];
@@ -255,8 +255,8 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
     if (periodType === 'month') return Array.from({length: 12}, (_, i) => ({ label: `${i+1}月`, value: i+1 }));
     if (periodType === 'quarter') return Array.from({length: 4}, (_, i) => ({ label: `Q${i+1}`, value: i+1 }));
     if (periodType === 'half') return [{ label: '上半年', value: 1 }, { label: '下半年', value: 2 }];
-    return [{ label: `${now.getFullYear()}年度`, value: now.getFullYear() }];
-  }, [periodType, now]);
+    return [{ label: `${selectedYear}年度`, value: selectedYear }];
+  }, [periodType, selectedYear]);
 
   // 按经营单元统计刚性工资包 (扣除已核准的非有效工时对冲)
   const salaryByCenter = useMemo(() => {
@@ -765,7 +765,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
           const details = `统筹兜底处理：统筹池向收产包流入 ${formatMoney(amountToInject)} 收款积分。操作前：刚性工资包=${formatMoney(rigidSalaryPackage)}，收产包=${formatMoney(incomeWaterPool)}，差额=${formatMoney(netBalance)}`;
           onSystemAdjustment(newLog as any, details);
           toast.success(`统筹兜底注入成功：已注入 ${formatMoney(amountToInject)} 收款积分`);
-          showAlert(`统筹兜底资金注入成功！已向收产包注入 ${formatMoney(amountToInject)} 收款积分。`);
+          toast.success(`统筹兜底资金注入成功！已向收产包注入 ${formatMoney(amountToInject)} 收款积分。`);
         }
       },
       undefined,
@@ -856,7 +856,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
           const success = await onSaveMeetingSample(sampleToSave);
           if (success) {
             setSampleViewMode('sample');
-            showAlert(
+            toast.success(
               `【${currentPeriodLabel} 会务留样】已成功生成并冻结落库！\n\n凭证信息：\n• 冻结时间：${new Date(frozenAt).toLocaleString()}\n• 经办人员：${frozenByName} (${frozenByUserId})\n• 校验摘要：${checksum}\n• 规则：会务留样 · 仅对生成时刻数据负责`
             );
           } else {
@@ -936,7 +936,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
 
     exportWorkbook(wb, filename);
 
-    showAlert(`报告已成功导出！\n\n文件名：${filename}\n口径：${isFrozen ? '已冻结会务留样' : '未留样 · 即时数据'}`);
+    toast.success(`报告已成功导出！\n\n文件名：${filename}\n口径：${isFrozen ? '已冻结会务留样' : '未留样 · 即时数据'}`);
   };
 
   // 导出报告触发处理
@@ -1026,19 +1026,34 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
             </div>
           </div>
 
-          {/* Right: Period Type Selector */}
-          <div className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200 shadow-inner">
-             {(['month', 'quarter', 'half', 'year'] as const).map((p) => (
-               <button
-                 key={p}
-                 onClick={() => setPeriodType(p)}
-                 className={`px-4 md:px-6 py-2 rounded-xl text-[10px] font-black tracking-widest transition-all whitespace-nowrap ${
-                   periodType === p ? 'bg-white text-slate-900 shadow-md scale-105' : 'text-slate-400 hover:text-slate-600'
-                 }`}
-               >
-                 {p === 'month' ? '月度' : p === 'quarter' ? '季度' : p === 'half' ? '半年度' : '年度'}
-               </button>
-             ))}
+          {/* Right: Year Selector & Period Type Selector */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-2 h-10">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">年份</span>
+              <select 
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                className="bg-transparent border-none outline-none font-black text-xs text-slate-900 cursor-pointer"
+              >
+                {[...Array(5)].map((_, i) => {
+                  const y = new Date().getFullYear() - 2 + i;
+                  return <option key={y} value={y}>{y}</option>;
+                })}
+              </select>
+            </div>
+            <div className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200 shadow-inner">
+               {(['month', 'quarter', 'half', 'year'] as const).map((p) => (
+                 <button
+                   key={p}
+                   onClick={() => setPeriodType(p)}
+                   className={`px-4 md:px-6 py-2 rounded-xl text-[10px] font-black tracking-widest transition-all whitespace-nowrap ${
+                     periodType === p ? 'bg-white text-slate-900 shadow-md scale-105' : 'text-slate-400 hover:text-slate-600'
+                   }`}
+                 >
+                   {p === 'month' ? '月度' : p === 'quarter' ? '季度' : p === 'half' ? '半年度' : '年度'}
+                 </button>
+               ))}
+            </div>
           </div>
         </div>
 
@@ -1841,14 +1856,14 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                   <select 
                     value={selectedMiningId}
                     onChange={(e) => setSelectedMiningId(e.target.value)}
-                    className="appearance-none bg-slate-50 border-2 border-emerald-100 hover:border-emerald-500 rounded-2xl pl-4 pr-10 py-2.5 text-xs font-black text-emerald-700 outline-none transition-all cursor-pointer shadow-sm hover:shadow-md min-w-[160px]"
+                    className="appearance-none bg-white border border-[#b8d0f7] rounded-[4px] pl-3 pr-9 py-2 text-[13px] font-bold text-slate-800 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all cursor-pointer h-10 min-w-[160px]"
                   >
                     <option value="">🎯 全盘资产流转</option>
                     {filteredResources.map(r => (
                       <option key={r.id} value={r.id}>{r.id} | {r.types[0]}</option>
                     ))}
                   </select>
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-emerald-500">
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
                     <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
                   </div>
                 </div>

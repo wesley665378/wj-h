@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   User,
   Role,
@@ -50,6 +50,7 @@ import {
 } from "@/utils/dateUtils";
 import { InfoTip } from "@/components/InfoTip";
 import { BusinessDateFilter } from "@/components/BusinessDateFilter";
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 import { fetchWorkspaceData } from "@/api/workspace";
 import { toast } from "sonner";
@@ -83,6 +84,12 @@ const Auditing: React.FC<AuditingProps> = ({
   >("pending");
   const [confirmingLog, setConfirmingLog] = useState<ValueCreationLog | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 50;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
 
   // Map ValueCreationLog (from audit list) to AuditApiData required by ConsumptionAudit
   const mappedAuditApiData = useMemo<AuditApiData | null>(() => {
@@ -181,6 +188,31 @@ const Auditing: React.FC<AuditingProps> = ({
       .filter((log) => log.dynamicCost > 0 || log.confirmationType === '手动确权')
       .reverse();
   }, [monthlyLogs]);
+
+  const paginatedHistoryTasks = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return historyTasks.slice(start, start + PAGE_SIZE);
+  }, [historyTasks, currentPage]);
+
+  const paginatedConsumptionTasks = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return consumptionTasks.slice(start, start + PAGE_SIZE);
+  }, [consumptionTasks, currentPage]);
+
+  const paginatedConfirmedTasks = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return confirmedTasks.slice(start, start + PAGE_SIZE);
+  }, [confirmedTasks, currentPage]);
+
+  const paginatedAuditTasks = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return auditTasks.slice(start, start + PAGE_SIZE);
+  }, [auditTasks, currentPage]);
+
+  const paginatedLinkedTasks = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return linkedTasks.slice(start, start + PAGE_SIZE);
+  }, [linkedTasks, currentPage]);
 
   // 3. 汇总数据计算逻辑
   const summaryData = useMemo(() => {
@@ -350,7 +382,41 @@ const Auditing: React.FC<AuditingProps> = ({
     } else {
       nextStatus = AuditStatus.Confirmed;
     }
-    onAudit(log.id, nextStatus);
+
+    const isConsumption = log.dynamicCost > 0;
+    const collectorDisplay = formatCollectorDisplay(log.recordedCollectorId, users);
+    const businessDateStr = resolveLogBusinessDate(log);
+    const confirmationTypeStr = log.confirmationType || "手动确权";
+
+    if (action === "reject") {
+      showConfirm(
+        `确定要【驳回】该笔价值提报单据吗？\n\n` +
+        `• 申报编号：${log.id}\n` +
+        `• 业务日期：${businessDateStr}\n` +
+        `• 矿山编号：${log.miningId}\n` +
+        `• 采集主体：${collectorDisplay}\n` +
+        `• 提积分额：${(log.amount || 0).toLocaleString()} 积分\n\n` +
+        `驳回后，单据状态将更新为【已驳回】。`,
+        () => {
+          onAudit(log.id, nextStatus);
+        }
+      );
+    } else {
+      showConfirm(
+        `确定要【${isConsumption ? '审核确认' : '手动确权'}】该笔价值提报单据吗？\n\n` +
+        `• 申报编号：${log.id}\n` +
+        `• 业务日期：${businessDateStr}\n` +
+        `• 矿山编号：${log.miningId}\n` +
+        `• 采集主体：${collectorDisplay}\n` +
+        `• 确权类型：${confirmationTypeStr}\n` +
+        `• 提积分额：${(log.amount || 0).toLocaleString()} 积分\n` +
+        `• 净包金额：￥${Math.round(log.netValue || 0).toLocaleString()}\n\n` +
+        `确认后，该笔待确权资产将正式转为【已确权】。`,
+        () => {
+          onAudit(log.id, nextStatus);
+        }
+      );
+    }
   };
 
   const handleRefresh = async () => {
@@ -396,7 +462,7 @@ const Auditing: React.FC<AuditingProps> = ({
           '提报日期': resolveLogBusinessDate(log),
           '提报时间': formatSubmissionTime(log.timestamp),
           '矿山编号': log.miningId,
-          '采集主体': users.find(u => u.id === log.recordedCollectorId)?.name || log.recordedCollectorId,
+          '采集主体': formatCollectorDisplay(log.recordedCollectorId, users),
           '经营单元': users.find(u => u.id === log.rankId)?.center || "未分配",
           '非效对冲': (log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? getNonEffectiveHoursDeduction(log) : '-',
           'A': log.costCategory === 'A' ? log.dynamicCost : '-',
@@ -421,10 +487,7 @@ const Auditing: React.FC<AuditingProps> = ({
           矿山编号: log.miningId,
           确权类型: log.confirmationType || "收款确权",
           申请角色: log.rankId,
-          采集主体:
-            users.find((u) => u.id === log.recordedCollectorId)?.name ||
-            log.recordedCollectorId ||
-            "系统",
+          采集主体: formatCollectorDisplay(log.recordedCollectorId, users),
           注入积分: log.amount,
           A: log.costCategory === "A" ? log.dynamicCost : 0,
           B1:
@@ -465,18 +528,6 @@ const Auditing: React.FC<AuditingProps> = ({
     );
   };
 
-  const getMonthList = () => {
-    const months = [];
-    const now = new Date();
-    for (let i = 0; i < 12; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      months.push(
-        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
-      );
-    }
-    return months;
-  };
-
   return (
     <div className="w-full space-y-4 md:space-y-6 lg:space-y-8 animate-in fade-in duration-500 pb-6">
       <ConsumptionAudit 
@@ -487,6 +538,7 @@ const Auditing: React.FC<AuditingProps> = ({
           onAudit(id, AuditStatus.Confirmed, finalConfirmedValue, auditNotes);
         }}
       />
+      <CityGuardianModal state={modalState} onClose={closeModal} />
       {/* 单层统一工具条（合并确权规则与标题导航） */}
       <div className="bg-white p-4 md:p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="flex items-center space-x-3">
@@ -504,7 +556,7 @@ const Auditing: React.FC<AuditingProps> = ({
               />
             </div>
             <p className="text-[10px] font-bold text-slate-400 mt-0.5">
-              采集主体：{user.name} ({user.role}) · 依据 7.1 分配律实时校验
+              采集主体：{formatCollectorDisplay(user)} · 依据 7.1 分配律实时校验
             </p>
           </div>
         </div>
@@ -858,6 +910,7 @@ const Auditing: React.FC<AuditingProps> = ({
                 onDateRangeChange={(s, e) => {
                   setStartDate(s);
                   setEndDate(e);
+                  setSelectedMonth('');
                 }}
                 onClear={() => {
                   setSelectedMonth(getLocalMonthString());
@@ -951,29 +1004,29 @@ const Auditing: React.FC<AuditingProps> = ({
               <table className="w-full text-left min-w-[1600px] border-collapse">
                 <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 whitespace-nowrap">
                   <tr>
-                    <th className="px-4 py-6 whitespace-nowrap min-w-[90px]">申报编号</th>
-                    <th className="px-4 py-6 whitespace-nowrap min-w-[90px]">业务日期</th>
-                    <th className="px-4 py-6 whitespace-nowrap min-w-[90px]">提报日期</th>
+                    <th className="px-4 py-6 whitespace-nowrap min-w-[120px]">申报编号</th>
+                    <th className="px-4 py-6 whitespace-nowrap min-w-[100px]">业务日期</th>
+                    <th className="px-4 py-6 whitespace-nowrap min-w-[100px]">提报日期</th>
                     <th className="px-4 py-6 whitespace-nowrap min-w-[80px]">提炼类型</th>
-                    <th className="px-4 py-6 text-center whitespace-nowrap min-w-[80px]">{TERMINOLOGY.BUSINESS_UNIT}</th>
-                    <th className="px-4 py-6 font-bold text-slate-800 whitespace-nowrap min-w-[80px]">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
-                    <th className="px-3 py-6 text-right text-indigo-600 whitespace-nowrap min-w-[80px]">非效对冲</th>
+                    <th className="px-4 py-6 text-center whitespace-nowrap min-w-[100px]">{TERMINOLOGY.BUSINESS_UNIT}</th>
+                    <th className="px-4 py-6 font-bold text-slate-800 whitespace-nowrap min-w-[100px]">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
+                    <th className="px-3 py-6 text-right text-indigo-600 whitespace-nowrap min-w-[90px]">非效对冲</th>
                     <th className="px-3 py-6 text-right text-blue-600 whitespace-nowrap min-w-[50px]">A</th>
-                    <th className="px-3 py-6 text-right text-amber-600 whitespace-nowrap min-w-[70px]">C积分</th>
-                    <th className="px-4 py-6 text-right text-amber-700 font-extrabold bg-amber-50/20 whitespace-nowrap min-w-[50px]">C权</th>
-                    <th className="px-4 py-6 text-right text-amber-800 font-extrabold bg-amber-50/10 whitespace-nowrap min-w-[110px]">款初/款当</th>
-                    <th className="px-4 py-6 text-right text-amber-900 font-extrabold bg-amber-50/15 whitespace-nowrap min-w-[110px]">产初/产当</th>
+                    <th className="px-3 py-6 text-right text-amber-600 whitespace-nowrap min-w-[80px]">C积分</th>
+                    <th className="px-4 py-6 text-right text-amber-700 font-extrabold bg-amber-50/20 whitespace-nowrap min-w-[60px]">C权</th>
+                    <th className="px-4 py-6 text-right text-amber-800 font-extrabold bg-amber-50/10 whitespace-nowrap min-w-[120px]">款初/款当</th>
+                    <th className="px-4 py-6 text-right text-amber-900 font-extrabold bg-amber-50/15 whitespace-nowrap min-w-[120px]">产初/产当</th>
                     <th className="px-3 py-6 text-right text-rose-600 whitespace-nowrap min-w-[50px]">B1</th>
-                    <th className="px-3 py-6 text-right text-emerald-600 whitespace-nowrap min-w-[70px]">B2积分</th>
-                    <th className="px-4 py-6 text-right text-emerald-700 font-extrabold bg-emerald-50/20 whitespace-nowrap min-w-[50px]">B2权</th>
-                    <th className="px-4 py-6 text-right text-emerald-800 font-extrabold bg-emerald-50/10 whitespace-nowrap min-w-[110px]">产初/产当</th>
-                    <th className="px-6 py-6 text-center whitespace-nowrap min-w-[90px]">确权日期</th>
+                    <th className="px-3 py-6 text-right text-emerald-600 whitespace-nowrap min-w-[80px]">B2积分</th>
+                    <th className="px-4 py-6 text-right text-emerald-700 font-extrabold bg-emerald-50/20 whitespace-nowrap min-w-[60px]">B2权</th>
+                    <th className="px-4 py-6 text-right text-emerald-800 font-extrabold bg-emerald-50/10 whitespace-nowrap min-w-[120px]">产初/产当</th>
+                    <th className="px-6 py-6 text-center whitespace-nowrap min-w-[100px]">确权日期</th>
                     <th className="px-6 py-6 text-right whitespace-nowrap min-w-[80px]">确权状态</th>
-                    {activeTab === "consumption" && <th className="px-4 py-6 text-right whitespace-nowrap min-w-[90px]">操作控制</th>}
+                    {activeTab === "consumption" && <th className="px-4 py-6 text-right whitespace-nowrap min-w-[100px]">操作控制</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {(activeTab === "history" ? historyTasks : consumptionTasks).map((log) => {
+                  {(activeTab === "history" ? paginatedHistoryTasks : paginatedConsumptionTasks).map((log) => {
                     if (!log) return null;
                     const { cWeightValue, b2WeightValue, revLimitStr, valLimitCStr, valLimitB2Str } = calculateConsumptionMirrorFields(log, resources, logs);
                     
@@ -982,7 +1035,7 @@ const Auditing: React.FC<AuditingProps> = ({
                     return (
                       <tr key={log.id} className="hover:bg-rose-50/30 transition-colors group">
                         <td className="px-4 py-6">
-                          <span className="font-mono text-[11px] font-black text-slate-900 group-hover:text-rose-600">#{log.id}</span>
+                          <span className="font-mono text-[11px] font-black text-slate-900 group-hover:text-rose-600">{log.id.includes('#') ? log.id.substring(log.id.lastIndexOf('#')) : '#' + log.id}</span>
                         </td>
                         <td className="px-4 py-6 text-[10px] font-mono font-bold text-slate-600">{resolveLogBusinessDate(log)} ({resolveLogBusinessMonth(log)})</td>
                         <td className="px-4 py-6 text-[10px] font-mono text-slate-500">{formatSubmissionDate(log.timestamp)}</td>
@@ -1041,14 +1094,14 @@ const Auditing: React.FC<AuditingProps> = ({
                             <div className="flex items-center justify-end space-x-2">
                                 <button
                                     onClick={() => handleAction(log, "reject")}
-                                    disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
+                                    disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
                                     className="px-3 py-1 border border-rose-100 text-rose-500 text-[9px] font-black uppercase rounded hover:bg-rose-500 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     驳回
                                 </button>
                                 <button
                                     onClick={() => setConfirmingLog(log)}
-                                    disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
+                                    disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
                                     className="px-3 py-1 bg-slate-900 text-white text-[9px] font-black uppercase rounded hover:bg-blue-600 shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     确权审核
@@ -1061,9 +1114,7 @@ const Auditing: React.FC<AuditingProps> = ({
                   })}
                   {(activeTab === "history" ? historyTasks.length : consumptionTasks.length) === 0 && (
                     <tr>
-                      <td colSpan={activeTab === "consumption" ? 18 : 17} className="py-20 text-center opacity-20 text-xs font-black uppercase tracking-widest">
-                        当前结算周期内无任何{activeTab === "consumption" ? "消耗确权任务" : "成本审计记录"}
-                      </td>
+                      <td colSpan={activeTab === "consumption" ? 18 : 17} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
                     </tr>
                   )}
                 </tbody>
@@ -1100,13 +1151,13 @@ const Auditing: React.FC<AuditingProps> = ({
                   {(() => {
                     switch (activeTab) {
                       case "pending":
-                        return auditTasks;
+                        return paginatedAuditTasks;
                       case "linked":
-                        return linkedTasks;
+                        return paginatedLinkedTasks;
                       case "confirmed":
-                        return confirmedTasks;
+                        return paginatedConfirmedTasks;
                       default:
-                        return historyTasks;
+                        return paginatedHistoryTasks;
                     }
                   })().map((log) => {
                     if (!log) return null;
@@ -1178,8 +1229,8 @@ const Auditing: React.FC<AuditingProps> = ({
                             </span>
                           </td>
                           <td className="hidden md:table-cell px-6 py-6">
-                            <span className="text-[10px] font-black text-slate-500 uppercase">
-                              {users.find((u) => u.id === log.recordedCollectorId)?.name || log.recordedCollectorId || "系统"}
+                            <span className="text-[10px] font-black text-slate-700">
+                              {formatCollectorDisplay(log.recordedCollectorId, users)}
                             </span>
                           </td>
                           <td className="px-4 md:px-6 py-6 text-right">
@@ -1227,7 +1278,7 @@ const Auditing: React.FC<AuditingProps> = ({
                                         onClick={() =>
                                           handleAction(log, "reject")
                                         }
-                                        disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
+                                        disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
                                         title="驳回该笔申请"
                                         className="px-4 py-1.5 border border-rose-100 text-rose-500 text-[9px] font-black uppercase rounded-lg hover:bg-rose-500 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                       >
@@ -1246,7 +1297,7 @@ const Auditing: React.FC<AuditingProps> = ({
                                     <div className="flex items-center space-x-2">
                                       <button
                                         onClick={() => handleAction(log, "reject")}
-                                        disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
+                                        disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
                                         title="驳回该笔申请，记录将标记为已驳回"
                                         className="px-4 py-1.5 border border-rose-100 text-rose-500 text-[9px] font-black uppercase rounded-lg hover:bg-rose-500 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                       >
@@ -1255,7 +1306,7 @@ const Auditing: React.FC<AuditingProps> = ({
                                       {isNpcxie && log.dynamicCost > 0 ? (
                                         <button
                                           onClick={() => setConfirmingLog(log)}
-                                          disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
+                                          disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
                                           className="px-4 py-1.5 bg-rose-600 text-white text-[9px] font-black uppercase rounded-lg hover:bg-rose-700 shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                           消耗确权
@@ -1263,7 +1314,7 @@ const Auditing: React.FC<AuditingProps> = ({
                                       ) : (
                                         <button
                                           onClick={() => handleAction(log, "approve")}
-                                          disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
+                                          disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
                                           title={
                                             log.dynamicCost > 0
                                               ? "确认审核该笔消耗申报"
@@ -1368,6 +1419,46 @@ const Auditing: React.FC<AuditingProps> = ({
               </table>
             )}
           </div>
+
+          {/* Pagination Controls */}
+          {(() => {
+            const currentTasksLength = activeTab === "history" ? historyTasks.length : 
+                                     activeTab === "consumption" ? consumptionTasks.length :
+                                     activeTab === "confirmed" ? confirmedTasks.length :
+                                     activeTab === "pending" ? auditTasks.length :
+                                     activeTab === "linked" ? linkedTasks.length : 0;
+            if (currentTasksLength <= PAGE_SIZE) return null;
+            return (
+              <div className="flex items-center justify-between px-6 py-4 bg-white border-t border-slate-100">
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  显示 {Math.min(currentTasksLength, (currentPage - 1) * PAGE_SIZE + 1)}-{Math.min(currentTasksLength, currentPage * PAGE_SIZE)} / 共 {currentTasksLength} 条
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-1">
+                    <button 
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      className="p-2 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <ChevronLeft size={18} className="text-slate-600" />
+                    </button>
+                    <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-50 rounded-lg border border-slate-200">
+                      <span className="text-xs font-black text-slate-900">{currentPage}</span>
+                      <span className="text-[10px] font-bold text-slate-400">/</span>
+                      <span className="text-[10px] font-bold text-slate-400">{Math.ceil(currentTasksLength / PAGE_SIZE)}</span>
+                    </div>
+                    <button 
+                      disabled={currentPage === Math.ceil(currentTasksLength / PAGE_SIZE)}
+                      onClick={() => setCurrentPage(prev => Math.min(Math.ceil(currentTasksLength / PAGE_SIZE), prev + 1))}
+                      className="p-2 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <ChevronRight size={18} className="text-slate-600" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </Card>
       </div>
     );

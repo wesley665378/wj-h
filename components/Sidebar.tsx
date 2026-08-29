@@ -1,7 +1,7 @@
 
 import React, { useRef } from 'react';
 import { User, Role } from '../types';
-import { MENU_ITEMS } from '../constants';
+import { MENU_ITEMS } from '../src/constants';
 import { checkUserPermission } from '../src/utils/business';
 import pkg from '../package.json';
 

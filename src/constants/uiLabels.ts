@@ -1,3 +1,5 @@
+import { TERMINOLOGY } from './terminology';
+
 export const UI_LABELS = {
   VALUE_FLOW: '价值动态流',
   REVENUE: '收款',
@@ -19,12 +21,12 @@ export const UI_LABELS = {
   BTN_CANCEL: '取消',
   BTN_SUBMIT: '提交',
 
-  COLLECTOR: '采集主体',
-  RANK: '职级',
-  BUSINESS_UNIT: '经营单元',
+  COLLECTOR: TERMINOLOGY.LOG_OPERATOR_ID,
+  RANK: TERMINOLOGY.USER_RANK,
+  BUSINESS_UNIT: TERMINOLOGY.BUSINESS_UNIT,
   EFFICIENCY_TIER: '评价等级',
 
-  LOGIN_ACCOUNT: '账号',
+  LOGIN_ACCOUNT: TERMINOLOGY.LOGIN_ID,
   MY_ACCOUNT_PAGE: '我的帐户',
 
   EMPTY_DEFAULT: '暂无数据',

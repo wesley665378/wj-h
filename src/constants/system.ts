@@ -1,22 +1,6 @@
-
-import { RefineType, ProjectType } from './types';
+import { ProjectType } from '../types';
 
 export const USER_LIST = [];
-
-// 系数定义：收款(Marketing)系数 与 产值(Technical)系数
-// 依据用户指令：收款 A=0.27, B=0.2, C=0.3 | 产值 A=0.48, B=0.55
-// 安全评价：营销 30% (Revenue 0.3), 技术 50%-10%管理=40% (Wood 0.4)
-export const REFINE_FACTORS: Record<RefineType, { revenue: number; value: number }> = {
-  [RefineType.Enterprise]: { revenue: 0.27, value: 0.48 },
-  [RefineType.OccHealth]: { revenue: 0.30, value: 0.52 }, // 60%-8%=52%
-  [RefineType.SafetyEval]: { revenue: 0.30, value: 0.40 }, // 50%-10%=40%
-  [RefineType.OccHealthElectric]: { revenue: 0.30, value: 0.52 }, // 53%-5%=48% -> Adjusted to match D mapping if needed, but keeping factors for now
-  [RefineType.Bidding]: { revenue: 0.20, value: 0.55 },
-  [RefineType.Outsourced]: { revenue: 0.27, value: 0.55 },
-  [RefineType.EmergencyG]: { revenue: 0.30, value: 0.55 },
-  [RefineType.TrainingG]: { revenue: 0.30, value: 0.55 },
-  [RefineType.NonEffectiveHours]: { revenue: 0.27, value: 0.48 }
-};
 
 export const PROJECT_RATIOS: Record<ProjectType, { marketing: number; tech: number }> = {
   [ProjectType.OccupationalHealth]: { marketing: 0.30, tech: 0.60 },
@@ -47,8 +31,10 @@ export const RANK_DICTIONARY = [
   'NPC',
   '系统管理员',
   'VP',
-  '经管员NPC'
-];
+  '经管员NPC',
+  '水库管理员',
+  '统筹水库管理员'
+] as const;
 
 export const MENU_ITEMS = [
   { id: 'kanban', label: '经营看板', icon: '📊' },

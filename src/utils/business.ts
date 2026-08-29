@@ -2,6 +2,7 @@ import { User, Role, ValueCreationLog, MiningResource, RefineCategory, AuditStat
 import { isSystemAdmin } from './accessControl';
 import { TIER_COEFFICIENTS } from '../constants/coefficients';
 import { roundMoney } from './formatMoney';
+import { normalizeRefineTier } from './consumptionHedge';
 import {
   getInitialRevenueCapacity,
   getInitialValueCapacity,
@@ -67,17 +68,19 @@ interface KFactorValueTrackContext {
   }>;
 }
 
-export function calculateT1PlusRevenue(amount: number, isHighExpert: boolean, tier: 'A' | 'B' | 'C', cWeight: number) {
+export function calculateT1PlusRevenue(amount: number, isHighExpert: boolean, tierInput: string, cWeight: number) {
   const coeffs = isHighExpert ? TIER_COEFFICIENTS.REVENUE_HIGH : TIER_COEFFICIENTS.REVENUE_MID_INITIAL;
-  const rates = { A: coeffs.Enterprise, B: coeffs.Bidding, C: coeffs.SafetyEval };
+  const tier = normalizeRefineTier(tierInput);
+  const rates = { T1: coeffs.Enterprise, T2: coeffs.Bidding, T3: coeffs.SafetyEval };
   const rate = rates[tier] || coeffs.SafetyEval;
   // REMOVED: TIER_COEFFICIENTS.BASE_LOSS
   return amount * rate * cWeight;
 }
 
-export function calculateT1PlusValue(amount: number, isHighExpert: boolean, tier: 'A' | 'B' | 'C', cWeight: number, b2Weight: number) {
+export function calculateT1PlusValue(amount: number, isHighExpert: boolean, tierInput: string, cWeight: number, b2Weight: number) {
   const coeffs = isHighExpert ? TIER_COEFFICIENTS.VALUE_MANAGER : TIER_COEFFICIENTS.VALUE_CHAN;
-  const rates = { A: coeffs.Enterprise, B: coeffs.Bidding, C: coeffs.SafetyEval };
+  const tier = normalizeRefineTier(tierInput);
+  const rates = { T1: coeffs.Enterprise, T2: coeffs.Bidding, T3: coeffs.SafetyEval };
   const rate = rates[tier] || coeffs.SafetyEval;
   // REMOVED: TIER_COEFFICIENTS.BASE_LOSS
   return amount * rate * cWeight * b2Weight;
@@ -112,19 +115,19 @@ export const calculateHistoricalNetValue = (log: ValueCreationLog, resources: Mi
   }
 
   if (factor === 0) {
-    const tier = log.costCategory || 'C';
+    const tier = normalizeRefineTier(log.costCategory);
     if (log.category === RefineCategory.Value || (log.category as string) === 'Value' || (log.category as string) === '产值') {
       // Use TIER_COEFFICIENTS here
       const coeffs = isHighValueExpert ? TIER_COEFFICIENTS.VALUE_MANAGER : TIER_COEFFICIENTS.VALUE_CHAN;
-      if (tier === 'A') factor = coeffs.Enterprise;
-      else if (tier === 'B') factor = coeffs.Bidding;
-      else if (tier === 'C') factor = coeffs.SafetyEval;
+      if (tier === 'T1') factor = coeffs.Enterprise;
+      else if (tier === 'T2') factor = coeffs.Bidding;
+      else if (tier === 'T3') factor = coeffs.SafetyEval;
       else factor = coeffs.SafetyEval;
     } else {
       const coeffs = isHighRevenueExpert ? TIER_COEFFICIENTS.REVENUE_HIGH : isRevenueSpecialist ? TIER_COEFFICIENTS.REVENUE_MID_INITIAL : TIER_COEFFICIENTS.REVENUE_HIGH;
-      if (tier === 'A') factor = coeffs.Enterprise;
-      else if (tier === 'B') factor = coeffs.Bidding;
-      else if (tier === 'C') factor = coeffs.SafetyEval;
+      if (tier === 'T1') factor = coeffs.Enterprise;
+      else if (tier === 'T2') factor = coeffs.Bidding;
+      else if (tier === 'T3') factor = coeffs.SafetyEval;
       else factor = coeffs.SafetyEval;
     }
   }

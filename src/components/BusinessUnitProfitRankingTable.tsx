@@ -287,9 +287,7 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
 
                 {pairedRows.length === 0 && (
                   <tr>
-                    <td colSpan={12} className="py-12 text-center text-slate-400 font-bold">
-                      {UI_LABELS.EMPTY_DEFAULT}
-                    </td>
+                    <td colSpan={12} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
                   </tr>
                 )}
               </tbody>

@@ -34,6 +34,7 @@ import { XLSX, exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
 import { CostPrivacyToggle } from '../src/components/CostPrivacyToggle';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCostPrivacy, formatCostDisplay } from '../src/hooks/useCostPrivacy';
+import { UI_LABELS } from '../src/constants/uiLabels';
 
 interface ReservoirProps {
   logs: ValueCreationLog[];
@@ -637,26 +638,26 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
           </div>
 
           {/* 搜索与排序与统计栏 */}
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-600 shadow-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="px-3 py-2 bg-slate-50 border border-[#b8d0f7] rounded-[4px] text-[13px] font-mono font-bold text-slate-600 h-10 flex items-center">
               共 {sortedAndFilteredMetrics.length} 单元
             </span>
 
             <div className="relative min-w-[200px] flex-1 sm:flex-none">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
               <input
                 type="text"
                 value={searchUnit}
                 onChange={e => setSearchUnit(e.target.value)}
                 placeholder="搜索经营单元..."
-                className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 transition-colors shadow-sm"
+                className="w-full pl-9 pr-3 py-2 text-[13px] bg-white border border-[#b8d0f7] rounded-[4px] outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-colors h-10 placeholder:text-[#94a3b8]"
               />
             </div>
 
             <select
               value={sortBy}
               onChange={e => setSortBy(e.target.value as any)}
-              className="px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:border-blue-500 cursor-pointer shadow-sm"
+              className="px-3 py-2 text-[13px] bg-white border border-[#b8d0f7] rounded-[4px] font-bold text-slate-700 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 cursor-pointer h-10"
             >
               <option value="inflow">按 20% 流入降序</option>
               <option value="supplement">按统筹补足降序</option>
@@ -739,12 +740,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
               })}
               {sortedAndFilteredMetrics.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-16 text-center">
-                    <div className="flex flex-col items-center justify-center text-slate-400 space-y-2">
-                      <Activity className="w-8 h-8 stroke-1 text-slate-300" />
-                      <p className="text-xs font-bold text-slate-400">未找到匹配的经营单元统筹数据</p>
-                    </div>
-                  </td>
+                  <td colSpan={7} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
                 </tr>
               )}
             </tbody>

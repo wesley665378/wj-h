@@ -3,6 +3,7 @@ import { UI_TOKENS } from '../src/constants/uiTokens';
 import { User, InternalTransaction, TransactionType, TransactionStatus, MiningResource } from '../types';
 import { centerMatch } from '../src/utils/centerScope';
 import { userCenterMatchesBusinessUnit } from '../src/utils/businessUnitName';
+import { UI_LABELS } from '../src/constants/uiLabels';
 
 export interface TradingTabProps {
   currentUserId: string;
@@ -185,12 +186,7 @@ export const TradingTab: React.FC<TradingTabProps> = ({
               })}
               {pendingTransactions.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-10 py-20 text-center">
-                    <div className="flex flex-col items-center justify-center space-y-4">
-                      <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center text-2xl">✨</div>
-                      <p className="text-slate-400 text-xs font-black uppercase tracking-[0.2em]">暂无待处理的流转指令</p>
-                    </div>
-                  </td>
+                  <td colSpan={5} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
                 </tr>
               )}
             </tbody>
