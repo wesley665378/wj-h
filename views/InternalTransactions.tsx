@@ -8,6 +8,7 @@ import {
   Cell, Legend, CartesianGrid, PieChart, Pie 
 } from 'recharts';
 import { Card, ProgressBar } from '../src/components/UI';
+import { useDedupe } from '../src/hooks/useDedupe';
 import { XLSX, exportWorkbook } from '../src/utils/excelIo';
 import { formatMoney } from '../src/utils/formatMoney';
 import { UI_LABELS } from '../src/constants/uiLabels';
@@ -88,6 +89,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   persistWorkspaceWithOverrides
 }) => {
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
+  const { isLocked } = useDedupe(500);
   const [type, setType] = useState<TransactionType>(TransactionType.Resource);
   const [receiverIds, setReceiverIds] = useState<string[]>([]);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -360,6 +362,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLocked('it-submit')) return;
 
     // 熔断检查
     const breaker = checkBreaker(currentUser.id, 'initiation');

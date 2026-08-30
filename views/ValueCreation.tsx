@@ -1,5 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useDedupe } from '../src/hooks/useDedupe';
+import { useCircuitBreaker } from '../src/hooks/useCircuitBreaker';
 import { TIER_COEFFICIENTS, USER_LIST, UI_LABELS } from '@/constants';
 import { 
   User, MiningResource, ValueCreationLog, RefineCategory, AuditStatus, Role, RefineType,
@@ -156,6 +158,8 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   const [selectedMiningId, setSelectedMiningId] = useState('');
   const [miningSearchTerm, setMiningSearchTerm] = useState('');
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
+  const { isLocked } = useDedupe(500);
+  const { isBroken, retryAfter, recordFailure, recordSuccess } = useCircuitBreaker();
   const [selectedRefineType, setSelectedRefineType] = useState<RefineType>(RefineType.Enterprise);
   const [selectedCategory, setSelectedCategory] = useState<RefineCategory>(RefineCategory.Revenue);
   const [selectedTier, setSelectedTier] = useState<string>('T1');
@@ -653,6 +657,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLocked('vc-submit')) return;
 
     // 熔断锁定判定
     const activeBreaker = (circuitBreakers || []).find(cb => 
@@ -878,7 +883,22 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         }
         const jzczLogs = logs.filter(l => l.confirmationType !== '手动确权');
         const payloadLogs = isGlobalReader(user) ? [...jzczLogs, ...logsToSubmit] : logsToSubmit;
-        await persistWorkspaceWithOverrides({ logs: payloadLogs }, { loadingMessage: '提报落库中…', successMessage: '已落库' });
+        
+        const executeSync = async () => {
+          await persistWorkspaceWithOverrides({ logs: payloadLogs }, { loadingMessage: '提报落库中…', successMessage: '已落库' });
+          recordSuccess();
+        };
+
+        if (isBroken) {
+          showAlert(`系统处于熔断状态，请等待至 ${new Date(retryAfter!).toLocaleTimeString()} 后重试。`);
+          return;
+        }
+
+        try {
+          await executeSync();
+        } catch (err) {
+          recordFailure(executeSync);
+        }
       } catch (err) {
         // Handled inside persistWorkspaceWithOverrides via toast
       }
@@ -1150,7 +1170,49 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
               </select>
             </div>
 
-            {/* Row 1 - Right Column: 矿山编号 */}
+            {/* Row 1 - Right Column: 提报类型 (移动到采集主体旁边) */}
+            <div className="flex flex-col space-y-1.5 sm:col-span-2">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between h-4">
+                <span>提报类型 <span className="text-rose-500 ml-1 font-bold">*</span></span>
+                {isCategoryLocked && (
+                  <span className="text-[9px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                    已根据主体自动匹配
+                  </span>
+                )}
+              </label>
+              {isCategoryLocked ? (
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-500 h-10 flex items-center shadow-inner">
+                  {selectedCategory === RefineCategory.Revenue ? "收款类" : "产值类"}
+                </div>
+              ) : (
+                <div className="flex border border-[#b8d0f7] rounded-[4px] overflow-hidden h-10 shadow-xs">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCategory(RefineCategory.Revenue)}
+                    className={`flex-1 text-[12px] font-bold transition-all ${
+                      selectedCategory === RefineCategory.Revenue 
+                        ? 'bg-slate-900 text-white' 
+                        : 'bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    收款类
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCategory(RefineCategory.Value)}
+                    className={`flex-1 text-[12px] font-bold transition-all ${
+                      selectedCategory === RefineCategory.Value 
+                        ? 'bg-slate-900 text-white' 
+                        : 'bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    产值类
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Row 2 - Col 1: 矿山 */}
             <div className="flex flex-col space-y-1.5 sm:col-span-2 relative">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
                 矿山编号 <span className="text-rose-500 ml-1 font-bold">*</span>
@@ -1162,16 +1224,13 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     setSelectedMiningId(e.target.value);
                     setMiningSearchTerm('');
                   }} 
-                  className="w-full min-w-48 bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all font-bold text-slate-800 h-10 cursor-pointer" 
+                  className={`w-full min-w-48 bg-white border ${availableResources.length === 0 ? 'border-rose-300' : 'border-[#b8d0f7]'} rounded-[4px] px-3 py-2 text-[13px] outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all font-bold text-slate-800 h-10 cursor-pointer`}
                   required
                 >
-                  <option value="">自动匹配矿山编号...</option>
+                  <option value="">{availableResources.length === 0 ? '暂无可用矿山' : '请选择矿山编号...'}</option>
                   {availableResources.map(r => {
                     const { status } = deriveProjectStatus(r);
-                    // VC-01-F: 下拉框数值对齐单元 quotas 口径
                     const q = r.quotas?.find(qItem => centerMatch(qItem.centerId, user.center));
-                    
-                    // 获取单元视角的四象限数据 (DB-02-GAP-F: 无 quota 时回退 0)
                     const uq = aggregateMiningQuadrantsFromLogs(logs, resources, r.id, user.center, managedUsers);
                     const unitRemaining = selectedCategory === RefineCategory.Value ? uq.value.unconfirmed : uq.revenue.unconfirmed;
                     const unitConfirmed = selectedCategory === RefineCategory.Value ? uq.value.confirmed : uq.revenue.confirmed;
@@ -1186,6 +1245,14 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     );
                   })}
                 </select>
+                {!selectedMiningId && (
+                  <p className="text-[11px] text-amber-600 font-medium bg-amber-50/50 border border-amber-200/60 rounded px-2.5 py-1 mt-1 flex items-center">
+                    <span className="mr-1 text-[12px]">ℹ️</span>
+                    {availableResources.length === 0 
+                      ? "当前主体暂无可用矿山，请先确认主体或经营单元。" 
+                      : "请先选择对应的矿山编号以完成价值申报。"}
+                  </p>
+                )}
                 {selectedMiningId && (
                   <div className="w-full bg-slate-50 border border-slate-200 p-3 rounded-md shadow-sm space-y-2">
                     <div className="flex justify-between items-center text-[9px] font-bold">
@@ -1226,57 +1293,6 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
               </div>
             </div>
 
-            {/* Row 2 - Col 1: 提炼配方 */}
-            <div className="flex flex-col space-y-1.5 sm:col-span-1">
-              <div className="flex items-center space-x-1.5 h-4">
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">提炼配方</label>
-                {hasCustomFactor ? (
-                  <span className="text-[8px] font-black text-emerald-600 animate-pulse bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 whitespace-nowrap">协议配方</span>
-                ) : selectedResource && (
-                  <span className="text-[8px] font-black text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 whitespace-nowrap">标准配方</span>
-                )}
-              </div>
-              <select 
-                value={selectedTier} 
-                onChange={(e) => setSelectedTier(e.target.value)} 
-                className={`w-full border rounded-[4px] px-3 py-2 text-[13px] outline-none ${
-                  hasCustomFactor ? 'bg-emerald-50 border-emerald-200 text-emerald-700 font-bold' : 'bg-slate-100 border-[#b8d0f7] text-slate-400'
-                } cursor-not-allowed h-10`}
-                disabled={true}
-              >
-                <option value="T1">T1</option>
-                <option value="T2">T2</option>
-                <option value="T3">T3</option>
-                {selectedCategory === RefineCategory.Value && (
-                  <option value="D">T4</option>
-                )}
-              </select>
-              {isRefineTypeCustomFactor && (
-                <div className="mt-1 text-[9px] font-black text-emerald-600 animate-fade-in flex items-center">
-                  <span className="inline-block w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1 animate-pulse"></span>
-                  <span>专属自定义配方[类型]</span>
-                </div>
-              )}
-              {!isRefineTypeCustomFactor && isResourceCustomFactor && (
-                <div className="mt-1 text-[9px] font-black text-emerald-600 animate-fade-in flex items-center">
-                  <span className="inline-block w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1 animate-pulse"></span>
-                  <span>专属自定义配方</span>
-                </div>
-              )}
-            </div>
-
-            {/* Row 2 - Col 2: 提炼类型 */}
-            <div className="flex flex-col space-y-1.5 sm:col-span-1">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">提炼类型</label>
-              <select value={selectedRefineType} onChange={(e) => setSelectedRefineType(e.target.value as RefineType)} className="w-full bg-slate-100 border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] outline-none text-slate-400 cursor-not-allowed h-10" required disabled={true}>
-                {selectedResource ? selectedResource.types.map(type => (
-                  <option key={type} value={type}>{type}</option>
-                )) : Object.values(RefineType).filter(t => t !== RefineType.NonEffectiveHours).map(type => (
-                  <option key={type} value={type}>{type}</option>
-                ))}
-              </select>
-            </div>
-
             {/* Row 2 - Col 3: 业务日期 */}
             <div className="flex flex-col space-y-1.5 sm:col-span-1">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
@@ -1308,8 +1324,61 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
               />
             </div>
 
-            {/* Row 2 - Col 5: 执行类型 */}
+            {/* Row 3 - Col 1: 提炼配方 */}
             <div className="flex flex-col space-y-1.5 sm:col-span-1">
+              <div className="flex items-center space-x-1.5 h-4">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">提炼配方</label>
+                {hasCustomFactor ? (
+                  <span className="text-[8px] font-black text-emerald-600 animate-pulse bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 whitespace-nowrap">协议配方</span>
+                ) : selectedResource && (
+                  <span className="text-[8px] font-black text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 whitespace-nowrap">标准配方</span>
+                )}
+              </div>
+              <select 
+                value={selectedTier} 
+                onChange={(e) => setSelectedTier(e.target.value)} 
+                className={`w-full border rounded-[4px] px-3 py-2 text-[13px] outline-none ${
+                  hasCustomFactor ? 'bg-emerald-50 border-emerald-200 text-emerald-700 font-bold' : 'bg-slate-100 border-[#b8d0f7] text-slate-400'
+                } cursor-not-allowed h-10`}
+                disabled={true}
+              >
+                <option value="T1">T1</option>
+                <option value="T2">T2</option>
+                <option value="T3">T3</option>
+                {(selectedTier === 'D' || selectedTier === 'T4') && (
+                  <option value={selectedTier} disabled>
+                    历史 D 已归 T3
+                  </option>
+                )}
+              </select>
+              {isRefineTypeCustomFactor && (
+                <div className="mt-1 text-[9px] font-black text-emerald-600 animate-fade-in flex items-center">
+                  <span className="inline-block w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1 animate-pulse"></span>
+                  <span>专属自定义配方[类型]</span>
+                </div>
+              )}
+              {!isRefineTypeCustomFactor && isResourceCustomFactor && (
+                <div className="mt-1 text-[9px] font-black text-emerald-600 animate-fade-in flex items-center">
+                  <span className="inline-block w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1 animate-pulse"></span>
+                  <span>专属自定义配方</span>
+                </div>
+              )}
+            </div>
+
+            {/* Row 3 - Col 2: 提炼类型 */}
+            <div className="flex flex-col space-y-1.5 sm:col-span-1">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">提炼类型</label>
+              <select value={selectedRefineType} onChange={(e) => setSelectedRefineType(e.target.value as RefineType)} className="w-full bg-slate-100 border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] outline-none text-slate-400 cursor-not-allowed h-10" required disabled={true}>
+                {selectedResource ? selectedResource.types.map(type => (
+                  <option key={type} value={type}>{type}</option>
+                )) : Object.values(RefineType).filter(t => t !== RefineType.NonEffectiveHours).map(type => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Row 3 - Col 3: 执行类型 */}
+            <div className="flex flex-col space-y-1.5 sm:col-span-2">
               <div className="flex items-center justify-between h-4">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                   执行类型
@@ -1341,7 +1410,6 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
               </div>
             </div>
 
-
           </div>
 
           {/* 第二行：矿山资源进度条 */}
@@ -1364,29 +1432,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             </div>
           )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6 items-end">
-            <div className="lg:col-span-12 space-y-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase">提炼属性类别</label>
-              <div className="flex border border-slate-300 rounded-sm overflow-hidden h-10">
-                <button
-                  type="button"
-                  disabled={isCategoryLocked}
-                  onClick={() => setSelectedCategory(RefineCategory.Revenue)}
-                  className={`flex-1 text-[10px] font-bold transition-all ${selectedCategory === RefineCategory.Revenue ? 'bg-slate-900 text-white' : 'bg-white text-slate-600'} ${isCategoryLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  收款类
-                </button>
-                <button
-                  type="button"
-                  disabled={isCategoryLocked}
-                  onClick={() => setSelectedCategory(RefineCategory.Value)}
-                  className={`flex-1 text-[10px] font-bold transition-all ${selectedCategory === RefineCategory.Value ? 'bg-slate-900 text-white' : 'bg-white text-slate-600'} ${isCategoryLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  产值类
-                </button>
-              </div>
-            </div>
-          </div>
+
 
           <div className="space-y-4">
             {(() => {

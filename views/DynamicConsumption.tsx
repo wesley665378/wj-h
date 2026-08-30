@@ -8,6 +8,8 @@ import { useCostPrivacy } from '../src/hooks/useCostPrivacy';
 import { XLSX, exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
 import { UI_LABELS } from '../src/constants/uiLabels';
 import { TERMINOLOGY } from '../src/constants/terminology';
+import { useDedupe } from '../src/hooks/useDedupe';
+import { useCircuitBreaker } from '../src/hooks/useCircuitBreaker';
 import { aggregateMiningQuadrantsFromLogs, businessUnitLabelsEqual } from '../src/utils/purification';
 import { isProjectWritable, deriveProjectStatus } from '../src/utils/projectStatus';
 import { isNonEffectiveHoursEffective } from '../src/utils/employmentStatus';
@@ -150,6 +152,8 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
   user, users, resources, logs, jzczLogs, dtcbLogs, onLogSubmit, persistWorkspaceWithOverrides, updateLastSyncedFingerprint 
 }) => {
   const { isCostVisible, toggleCostVisible, maskMoney, maskText } = useCostPrivacy();
+  const { isLocked } = useDedupe(500);
+  const { isBroken, retryAfter, recordFailure, recordSuccess } = useCircuitBreaker();
 
   const jzczLogsToUse = useMemo(() => {
     return jzczLogs || logs.filter(l => l.confirmationType !== '手动确权');
@@ -340,6 +344,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLocked('dc-submit')) return;
     const isB2 = costCategory === 'B' && valueConsumptionMode === 'B2';
     const isD = costCategory === 'D';
     
@@ -388,11 +393,14 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
         onLogSubmit(newLog);
         setDynamicCost(0);
-        try {
-          const nextDtcb = [...dtcbLogsToUse, newLog];
-          const payload = isGlobalReader(user) ? nextDtcb : [newLog];
-          const toastId = toast.loading('申报保存中…');
+        
+        const nextDtcb = [...dtcbLogsToUse, newLog];
+        const payload = isGlobalReader(user) ? nextDtcb : [newLog];
+        const toastId = toast.loading('申报保存中…');
+        
+        const executeSync = async () => {
           const res = await persistDtcbLogs(payload);
+          recordSuccess();
           if (res && res.workspaceVersion !== undefined) {
             (window as any).workspaceVersion = res.workspaceVersion;
           }
@@ -400,7 +408,17 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
             setTimeout(() => updateLastSyncedFingerprint(), 0);
           }
           toast.success('已落库', { id: toastId });
+        };
+
+        if (isBroken) {
+          showAlert(`系统处于熔断状态，请等待至 ${new Date(retryAfter!).toLocaleTimeString()} 后重试。`);
+          return;
+        }
+
+        try {
+          await executeSync();
         } catch (err: any) {
+          recordFailure(executeSync);
           toastApiError(err, '申报保存失败');
         }
       }
@@ -417,6 +435,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
   const handleDeductionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLocked('dc-deduction-submit')) return;
     if (!deductionCollectorId || deductionAmount <= 0) {
       showAlert('请选择采集主体并输入有效对冲积分。');
       return;

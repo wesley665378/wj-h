@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
+import { useDedupe } from '../src/hooks/useDedupe';
 import {
   User,
   Role,
@@ -77,6 +78,7 @@ const Auditing: React.FC<AuditingProps> = ({
   onRefreshWorkspace,
   onDeleteLog,
 }) => {
+  const { isLocked } = useDedupe(500);
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const { isCostVisible, toggleCostVisible, maskMoney, maskText } = useCostPrivacy();
   const [activeTab, setActiveTab] = useState<
@@ -95,8 +97,12 @@ const Auditing: React.FC<AuditingProps> = ({
   const mappedAuditApiData = useMemo<AuditApiData | null>(() => {
     if (!confirmingLog) return null;
     
-    let activeType: 'A' | 'B1' | 'B2' | 'C' = 'A';
-    if (confirmingLog.costCategory === 'A') {
+    let activeType: 'A' | 'B1' | 'B2' | 'C' | 'D' | 'FXDC' = 'A';
+    if (confirmingLog.type === RefineType.NonEffectiveHours) {
+      activeType = 'FXDC';
+    } else if (confirmingLog.costCategory === 'D') {
+      activeType = 'D';
+    } else if (confirmingLog.costCategory === 'A') {
       activeType = 'A';
     } else if (confirmingLog.costCategory === 'C') {
       activeType = 'C';
@@ -115,7 +121,7 @@ const Auditing: React.FC<AuditingProps> = ({
       id: confirmingLog.id,
       operatingUnit: logUser?.center || user.center || "未分配",
       miningId: confirmingLog.miningId,
-      miningName: mineObj ? `选区-${mineObj.id}` : "主力生产选选厂厂",
+      miningName: confirmingLog.costCategory === 'D' ? "中心开支·无项目列支" : (mineObj ? `选区-${mineObj.id}` : "主力生产选选厂厂"),
       type: activeType,
       basePoints: confirmingLog.amount || 0,
       calculatedValue: confirmingLog.dynamicCost || 0,
@@ -376,6 +382,7 @@ const Auditing: React.FC<AuditingProps> = ({
     log: ValueCreationLog,
     action: "approve" | "reject",
   ) => {
+    if (isLocked(`action-${log.id}-${action}`)) return;
     let nextStatus: AuditStatus = log.status;
     if (action === "reject") {
       nextStatus = AuditStatus.Rejected;
@@ -1037,7 +1044,7 @@ const Auditing: React.FC<AuditingProps> = ({
                         <td className="px-4 py-6">
                           <span className="font-mono text-[11px] font-black text-slate-900 group-hover:text-rose-600">{log.id.includes('#') ? log.id.substring(log.id.lastIndexOf('#')) : '#' + log.id}</span>
                         </td>
-                        <td className="px-4 py-6 text-[10px] font-mono font-bold text-slate-600">{resolveLogBusinessDate(log)} ({resolveLogBusinessMonth(log)})</td>
+                        <td className="px-4 py-6 text-[10px] font-mono font-bold text-slate-600">{resolveLogBusinessDate(log).split(' ')[0]}</td>
                         <td className="px-4 py-6 text-[10px] font-mono text-slate-500">{formatSubmissionDate(log.timestamp)}</td>
                         <td className="px-4 py-6 text-[10px] font-black text-slate-500">{log.type}</td>
                         <td className="px-4 py-6 text-center">
@@ -1123,28 +1130,27 @@ const Auditing: React.FC<AuditingProps> = ({
               <table className="w-full text-left min-w-[1000px]">
                 <thead>
                   <tr className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] border-b border-slate-100">
-                    <th className="px-4 md:px-10 py-6">标识符/日期</th>
-                    <th className="px-4 md:px-6 py-6">{TERMINOLOGY.BUSINESS_UNIT}</th>
-                    <th className="hidden lg:table-cell px-6 py-6">
-                      经理/水库
-                    </th>
-                    <th className="hidden md:table-cell px-6 py-6">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
-                    <th className="px-4 md:px-6 py-6 text-right">注入积分</th>
+                    <th className="px-4 py-6 whitespace-nowrap min-w-[100px]">申报编号</th>
+                    <th className="px-4 py-6 whitespace-nowrap min-w-[100px]">业务日期</th>
+                    <th className="px-4 md:px-6 py-6 whitespace-nowrap min-w-[80px]">{TERMINOLOGY.BUSINESS_UNIT}</th>
+                    <th className="px-4 md:px-6 py-6 whitespace-nowrap min-w-[80px]">矿山编号</th>
+                    <th className="hidden md:table-cell px-6 py-6 whitespace-nowrap min-w-[100px]">采集主体</th>
+                    <th className="px-4 md:px-6 py-6 text-right whitespace-nowrap min-w-[80px]">注入积分</th>
                     {(activeTab === "linked" ||
                       activeTab === "confirmed") && (
                       <>
-                        <th className="hidden xl:table-cell px-6 py-6 text-center">
+                        <th className="hidden xl:table-cell px-6 py-6 text-center whitespace-nowrap min-w-[80px]">
                           确权时间
                         </th>
-                        <th className="hidden xl:table-cell px-6 py-6 text-center">
+                        <th className="hidden xl:table-cell px-6 py-6 text-center whitespace-nowrap min-w-[80px]">
                           预计入库
                         </th>
                       </>
                     )}
-                    <th className="px-4 md:px-6 py-6 text-right">
+                    <th className="px-4 md:px-6 py-6 text-right whitespace-nowrap min-w-[90px]">
                       {activeTab === "pending" ? "收款包" : (activeTab === "linked" ? "产兑包" : "收款包/产兑包")}
                     </th>
-                    <th className="px-4 md:px-10 py-6 text-right">操作控制</th>
+                    <th className="px-4 md:px-10 py-6 text-right whitespace-nowrap min-w-[80px]">操作控制</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -1197,35 +1203,22 @@ const Auditing: React.FC<AuditingProps> = ({
                         <tr
                           className={`hover:bg-slate-50/80 transition-all group ${isConsumption ? "bg-rose-50/20" : ""} ${isDeduction ? "bg-rose-100/30" : ""}`}
                         >
-                          <td className="px-4 md:px-10 py-6">
-                            <span className="font-mono text-[10px] font-black text-slate-300 block mb-1 group-hover:text-blue-500">
+                          <td className="px-4 py-6">
+                            <span className="font-mono text-[10px] font-black text-slate-900 group-hover:text-blue-500 block mb-1">
                               #{log.id}
                             </span>
-                            <div className="flex items-center space-x-2 mb-1">
-                              <span
-                                className={`text-[9px] font-black px-1.5 py-0.5 rounded ${isDeduction ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-800"}`}
-                              >
-                                {log.type}
-                              </span>
-                            </div>
                             <span className="text-[9px] font-bold text-slate-500 block">
-                              业务: {resolveLogBusinessDate(log)} ({resolveLogBusinessMonth(log)})
-                            </span>
-                            <span className="text-[8px] text-slate-400 block">
-                              提报: {formatSubmissionDate(log.timestamp)}
+                              {resolveLogBusinessDate(log)}
                             </span>
                           </td>
-                          <td className="px-4 md:px-6 py-6">
+                          <td className="px-4 py-6">
                             <span className="text-xs font-black text-slate-900 block">
                               {users.find((u) => u.id === log.rankId)?.center || "未分配"}
                             </span>
-                            <span className="text-[8px] font-black text-slate-300 uppercase mt-1 block">
-                              矿产: {log.miningId}
-                            </span>
                           </td>
-                          <td className="hidden lg:table-cell px-6 py-6">
-                            <span className="text-xs font-bold text-slate-700 block">
-                              {users.find((u) => u.id === log.rankId)?.name || log.rankId}
+                          <td className="px-4 py-6">
+                            <span className="text-[10px] font-black text-slate-500 uppercase">
+                              {log.miningId}
                             </span>
                           </td>
                           <td className="hidden md:table-cell px-6 py-6">
@@ -1294,20 +1287,12 @@ const Auditing: React.FC<AuditingProps> = ({
                                     </div>
                                   </div>
                                   ) : (
-                                    <div className="flex items-center space-x-2">
-                                      <button
-                                        onClick={() => handleAction(log, "reject")}
-                                        disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
-                                        title="驳回该笔申请，记录将标记为已驳回"
-                                        className="px-4 py-1.5 border border-rose-100 text-rose-500 text-[9px] font-black uppercase rounded-lg hover:bg-rose-500 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                      >
-                                        驳回
-                                      </button>
+                                    <div className="flex flex-col items-end gap-1.5 w-24">
                                       {isNpcxie && log.dynamicCost > 0 ? (
                                         <button
                                           onClick={() => setConfirmingLog(log)}
                                           disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
-                                          className="px-4 py-1.5 bg-rose-600 text-white text-[9px] font-black uppercase rounded-lg hover:bg-rose-700 shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                                          className="w-full px-2 py-1.5 bg-rose-600 text-white text-[9px] font-black uppercase rounded-lg hover:bg-rose-700 shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                           消耗确权
                                         </button>
@@ -1320,11 +1305,19 @@ const Auditing: React.FC<AuditingProps> = ({
                                               ? "确认审核该笔消耗申报"
                                               : "确认确权，待确权资产将转为已确权"
                                           }
-                                          className="px-4 py-1.5 bg-slate-900 text-white text-[9px] font-black uppercase rounded-lg hover:bg-blue-600 shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                                          className="w-full px-2 py-1.5 bg-slate-900 text-white text-[9px] font-black uppercase rounded-lg hover:bg-blue-600 shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                           {log.dynamicCost > 0 ? "确认审核" : "确认确权"}
                                         </button>
                                       )}
+                                      <button
+                                        onClick={() => handleAction(log, "reject")}
+                                        disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
+                                        title="驳回该笔申请，记录将标记为已驳回"
+                                        className="w-full px-2 py-1.5 border border-rose-100 text-rose-500 text-[9px] font-black uppercase rounded-lg hover:bg-rose-500 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        驳回
+                                      </button>
                                     </div>
                                   )}
                               </div>

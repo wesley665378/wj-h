@@ -16,6 +16,8 @@ export interface EvaluationResult extends ValueEfficiencySnapshot {
   cCost: number;
   dCost: number;
   nonEffectiveDeduction: number;
+  confirmedValueConfirmed?: number;
+  pendingValueConfirmed?: number;
 }
 
 /**
@@ -104,14 +106,10 @@ export function computePersonEvaluation(
   // 匹配规则：recordedCollectorId 优先，其次是 rankId 回退
   const matchUser = (l: ValueCreationLog) => l.recordedCollectorId === user.id || (!l.recordedCollectorId && l.rankId === user.id);
 
-  // 收入包口径对齐 reconcileMiningFromLogs.ts
+  // 收入包口径对齐 reconcileMiningFromLogs.ts (仅计算已确权/已入库的收款/产值)
   const isIncomeLog = (l: ValueCreationLog) => {
     const isRevenue = l.category === RefineCategory.Revenue && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved);
-    const isValue = l.category === RefineCategory.Value && (
-      l.status === AuditStatus.Confirmed || 
-      l.status === AuditStatus.Approved ||
-      (l.status === AuditStatus.Pending && l.confirmationType === '联动确权')
-    );
+    const isValue = l.category === RefineCategory.Value && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved);
     return isRevenue || isValue;
   };
 
@@ -227,6 +225,21 @@ export function computePersonEvaluation(
   const contribution = monthlyIncome - monthlyCost;
   const fixedRatio = monthlyIncome > 0 ? (monthlyCost / monthlyIncome) * 100 : 0;
 
+  // 产值类确权情况统计 (用于 InfoTip 产兑包明细提示)
+  const valueLogs = logs.filter(l => 
+    matchUser(l) && 
+    l.category === RefineCategory.Value &&
+    isLogInFilter(l, filterMonth, startDate, endDate)
+  );
+
+  const confirmedValueConfirmed = valueLogs
+    .filter(l => l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved)
+    .reduce((acc, log) => acc + calculateHistoricalNetValue(log, resources, allUsers), 0);
+
+  const pendingValueConfirmed = valueLogs
+    .filter(l => l.status === AuditStatus.Pending)
+    .reduce((acc, log) => acc + calculateHistoricalNetValue(log, resources, allUsers), 0);
+
   // 能级阈值：>2.5 S，>=1.5 A，>=1.2 B，否则 C (维持现状)
   let tier = 'C';
   let tierLabel = '改进级';
@@ -270,7 +283,9 @@ export function computePersonEvaluation(
     b2Cost,
     cCost,
     dCost,
-    nonEffectiveDeduction
+    nonEffectiveDeduction,
+    confirmedValueConfirmed,
+    pendingValueConfirmed
   };
 }
 

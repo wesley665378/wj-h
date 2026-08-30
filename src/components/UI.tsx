@@ -130,3 +130,19 @@ export const StatItem: React.FC<{
     </div>
   </div>
 );
+
+export const Tooltip: React.FC<{
+  children: React.ReactNode;
+  content: string;
+  className?: string;
+}> = ({ children, content, className = '' }) => {
+  return (
+    <div className={`relative group inline-block ${className}`}>
+      {children}
+      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block z-50 bg-slate-900 text-white text-[10px] font-bold py-1.5 px-3 rounded shadow-xl whitespace-nowrap leading-none transition-all duration-200">
+        {content}
+        <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1 border-4 border-transparent border-t-slate-900"></div>
+      </div>
+    </div>
+  );
+};

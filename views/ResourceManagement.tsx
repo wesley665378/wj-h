@@ -582,7 +582,10 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                       '产值指派': units[0] || '默认单元',
                       '核算类别': '100%'
                     }];
-                    exportJsonToExcel(templateData, '矿山资源模板', '矿山资源导入模板.xlsx');
+                    const worksheet = XLSX.utils.json_to_sheet(templateData);
+                    const workbook = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(workbook, worksheet, '矿山资源模板');
+                    exportWorkbook(workbook, '矿山资源导入模板.xlsx');
                   }}
                   className="px-3 bg-slate-50 text-slate-600 border border-slate-200 rounded-[4px] text-[11px] font-black hover:bg-slate-100 transition-all flex items-center shadow-xs whitespace-nowrap h-10 shrink-0 cursor-pointer ml-2"
                   title="下载导入模板"

@@ -35,9 +35,17 @@ export function filterUsersByCenter(users: User[], currentUser: User | null | un
  */
 export function isResourceAssignedToCenter(resource: MiningResource, center: string | null | undefined): boolean {
   if (!center) return false;
-  return centerMatch(resource.assignedTo, center) || 
+  const assignedMatch = centerMatch(resource.assignedTo, center) || 
          centerMatch(resource.assignedToRevenue, center) || 
          centerMatch(resource.assignedToValue, center);
+  
+  if (assignedMatch) return true;
+
+  if (resource.quotas && resource.quotas.length > 0) {
+    return resource.quotas.some(q => centerMatch(q.centerId, center));
+  }
+  
+  return false;
 }
 
 /**

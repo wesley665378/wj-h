@@ -47,6 +47,7 @@ import {
   syncJydyList
 } from './src/api';
 import { useSessionMeta } from './src/hooks/useSessionMeta';
+import { useCircuitBreaker } from './src/hooks/useCircuitBreaker';
 import { buildSyncPayload, buildAppSyncPayload } from './src/app/workspaceSync';
 import { getLocalDateString, getLocalMonthString } from './src/utils/dateUtils';
 import { roundMoney } from './src/utils/formatMoney';
@@ -107,6 +108,15 @@ const App: React.FC = () => {
   // Unified session sync hook (IP, time, operation logs, clear state)
   const { clientIp, currentTime, systemLogs, addSystemLog, clearSessionState } = useSessionMeta(currentUser);
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
+
+  const [syncRetryTrigger, setSyncRetryTrigger] = useState(0);
+  const {
+    isBroken: isSyncBroken,
+    retryAfter: syncRetryAfter,
+    recordFailure: recordSyncFailure,
+    recordSuccess: recordSyncSuccess,
+    failureCount: syncFailureCount
+  } = useCircuitBreaker();
 
   const handleOpenLegal = (tab: 'agreement' | 'privacy') => {
     setLegalTab(tab);
@@ -901,7 +911,7 @@ const App: React.FC = () => {
     }
   }, [onClearTestData]);
 
-  // 3. 数据持久化与后端同步 (600ms 去抖动，动静分离与静默同步)
+  // 3. 数据持久化与后端同步 (500ms 去抖动，动静分离与静默同步)
   useEffect(() => {
     const currentFingerprint = getWorkspaceFingerprint();
 
@@ -913,6 +923,10 @@ const App: React.FC = () => {
     const syncData = async () => {
       // 门禁：未登录或未完成首次加载，不允许同步写
       if (!currentUser || !workspaceLoaded) return;
+      if (isSyncBroken) {
+        console.log('自动同步已熔断，等待自动重试中...');
+        return;
+      }
 
       try {
         const payload = buildAppSyncPayload({
@@ -930,10 +944,18 @@ const App: React.FC = () => {
         });
         
         await syncWorkspace(payload);
+        recordSyncSuccess();
         lastSyncedFingerprintRef.current = currentFingerprint;
       } catch (err: any) {
-        console.error('数据同步失败:', err);
-        toastApiError(err, '工作区数据同步失败');
+        console.error('自动同步数据失败:', err);
+        const retryCallback = () => {
+          setSyncRetryTrigger(prev => prev + 1);
+        };
+        recordSyncFailure(retryCallback);
+        
+        const nextCount = syncFailureCount + 1;
+        const waitMinutes = nextCount === 1 ? 5 : nextCount === 2 ? 10 : 30;
+        toast.error(`自动同步失败，系统将在 ${waitMinutes} 分钟后自动重试`, { id: 'auto-sync-breaker' });
       }
     };
 
@@ -948,7 +970,7 @@ const App: React.FC = () => {
 
       return () => clearTimeout(timer);
     }
-  }, [managedUsers, logs, transactions, miningResources, circuitBreakers, systemLogs, meetingSamples, acceptanceRecords, filterMonth, currentUser, workspaceLoaded, getWorkspaceFingerprint]);
+  }, [managedUsers, logs, transactions, miningResources, circuitBreakers, systemLogs, meetingSamples, acceptanceRecords, filterMonth, currentUser, workspaceLoaded, getWorkspaceFingerprint, isSyncBroken, syncFailureCount, syncRetryTrigger, recordSyncFailure, recordSyncSuccess]);
 
   useEffect(() => {
     if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
