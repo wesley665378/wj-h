@@ -73,6 +73,45 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
   const [selectedUnitFilter, setSelectedUnitFilter] = useState<string>('');
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
 
+  const [appliedFilters, setAppliedFilters] = useState({
+    businessMonth: getLocalMonthString(),
+    selectedUnitFilter: '',
+    customStatusFilter: ''
+  });
+
+  const handleApplyCustomQuery = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setAppliedFilters({
+      businessMonth,
+      selectedUnitFilter,
+      customStatusFilter
+    });
+  };
+
+  const filteredResources = useMemo(() => {
+    return resources.filter(res => {
+      if (appliedFilters.selectedUnitFilter) {
+        const uf = appliedFilters.selectedUnitFilter.toLowerCase();
+        if (
+          !res.assignedTo?.toLowerCase().includes(uf) &&
+          !res.assignedToRevenue?.toLowerCase().includes(uf) &&
+          !res.assignedToValue?.toLowerCase().includes(uf)
+        ) {
+          return false;
+        }
+      }
+      if (appliedFilters.customStatusFilter) {
+        const sf = appliedFilters.customStatusFilter.toLowerCase();
+        const { status } = deriveProjectStatus(res);
+        const statusLabel = formatProjectStatusLabel(status);
+        if (!status.toLowerCase().includes(sf) && !statusLabel.toLowerCase().includes(sf)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [resources, appliedFilters.selectedUnitFilter, appliedFilters.customStatusFilter]);
+
   const isDepleted = useMemo(() => {
     if (!editingId) return false;
     const res = resources.find(r => r.id === editingId);
@@ -98,19 +137,19 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       待封存: 0,
       已结案: 0,
     };
-    resources.forEach(r => {
+    filteredResources.forEach(r => {
       const { status } = deriveProjectStatus(r);
       if (status === '进行中') counts['进行中']++;
       else if (status === '待封存') counts['待封存']++;
       else if (status === '已结案') counts['已结案']++;
     });
     return counts;
-  }, [resources]);
+  }, [filteredResources]);
 
   // 全盘价值流四象限汇总（严格调用 aggregateMiningQuadrantsFromLogs 汇总当前页所有矿）
   const overallQuadrants = useMemo(() => {
-    return aggregateMiningQuadrantsFromLogs(logs, resources, undefined, selectedUnitFilter, managedUsers);
-  }, [logs, resources, selectedUnitFilter, managedUsers]);
+    return aggregateMiningQuadrantsFromLogs(logs, filteredResources, undefined, appliedFilters.selectedUnitFilter, managedUsers);
+  }, [logs, filteredResources, appliedFilters.selectedUnitFilter, managedUsers]);
 
   const handleEdit = (res: MiningResource) => {
     setEditingId(res.id);
@@ -261,7 +300,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
   };
 
   const exportToExcel = () => {
-    const dataToExport = resources.map(res => ({
+    const dataToExport = filteredResources.map(res => ({
       '矿山编号': res.id,
       '提炼类型': res.types.join(', '),
       '款初': res.revenueCapacity,
@@ -357,7 +396,18 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                 onClick={() => setIsCustomQueryOpen(!isCustomQueryOpen)}
                 className="flex items-center justify-between cursor-pointer py-2.5 px-1 text-[13px] font-medium text-slate-700 hover:text-[#1a56db] transition-colors select-none"
               >
-                <span>自定义查询</span>
+                <div className="flex items-center space-x-3">
+                  <span>自定义查询</span>
+                  {isCustomQueryOpen && (
+                    <button
+                      type="button"
+                      onClick={handleApplyCustomQuery}
+                      className="px-3 py-0.5 bg-[#1a56db] hover:bg-blue-600 active:scale-95 text-white font-bold text-[11px] rounded shadow-sm transition-all cursor-pointer flex items-center justify-center whitespace-nowrap"
+                    >
+                      查询
+                    </button>
+                  )}
+                </div>
                 <span className="text-slate-400 text-xs">
                   {isCustomQueryOpen ? '▴' : '▾'}
                 </span>
@@ -446,7 +496,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                 总览
               </h3>
               <span className="text-[10px] font-black text-slate-400 tracking-widest uppercase">
-                共 {resources.length} 座矿山
+                共 {filteredResources.length} 座矿山
               </span>
             </div>
 
@@ -1032,12 +1082,12 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
            </div>
         </div>
 
-        {resources.length === 0 ? (
+        {filteredResources.length === 0 ? (
           <div className="px-6 py-12 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_MINING}</div>
         ) : viewMode === 'card' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 lg:gap-8">
-            {resources.map(res => {
-              const quadrants = aggregateMiningQuadrantsFromLogs(logs, resources, res.id);
+            {filteredResources.map(res => {
+              const quadrants = aggregateMiningQuadrantsFromLogs(logs, filteredResources, res.id);
               const rev = quadrants.revenue;
               const val = quadrants.value;
 
@@ -1151,8 +1201,8 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs font-bold text-slate-700">
-                {resources.map(res => {
-                  const quadrants = aggregateMiningQuadrantsFromLogs(logs, resources, res.id);
+                {filteredResources.map(res => {
+                  const quadrants = aggregateMiningQuadrantsFromLogs(logs, filteredResources, res.id);
                   const rev = quadrants.revenue;
                   const val = quadrants.value;
                   const revTotalCap = (rev.capacity || 0) + (rev.mined || 0) || 1;

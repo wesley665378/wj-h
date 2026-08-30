@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Calendar, Search, RotateCcw, X } from 'lucide-react';
 import { getLocalDateString, getLocalMonthString } from '../utils/dateUtils';
 
@@ -24,7 +24,7 @@ export interface BusinessDateFilterProps {
  * 统一业务日期与月份筛选组件
  * 
  * 控件顺序统一为右簇排布：
- * 自定义查询 | 起止日（仅自定义激活时） | 清除 | 分隔 | 业务月份：月份选择
+ * 自定义查询 | 起止日（仅自定义激活时） | 查询 | 清除 | 分隔 | 业务月份：月份选择
  */
 export const BusinessDateFilter: React.FC<BusinessDateFilterProps> = ({
   month,
@@ -39,6 +39,14 @@ export const BusinessDateFilter: React.FC<BusinessDateFilterProps> = ({
 }) => {
   const isCustomRange = Boolean(startDate || endDate);
   const supportsRange = Boolean(onDateRangeChange);
+
+  const [localStartDate, setLocalStartDate] = useState(startDate || '');
+  const [localEndDate, setLocalEndDate] = useState(endDate || '');
+
+  useEffect(() => {
+    setLocalStartDate(startDate || '');
+    setLocalEndDate(endDate || '');
+  }, [startDate, endDate]);
 
   // 默认备选月份列表
   const defaultMonths = useMemo(() => {
@@ -65,15 +73,17 @@ export const BusinessDateFilter: React.FC<BusinessDateFilterProps> = ({
   };
 
   const handleCustomDateChange = (type: 'start' | 'end', value: string) => {
-    if (onMonthChange) {
-      onMonthChange('');
+    if (type === 'start') {
+      setLocalStartDate(value);
+    } else {
+      setLocalEndDate(value);
     }
+  };
+
+  const handleApplyDateRange = () => {
+    if (onMonthChange) onMonthChange('');
     if (onDateRangeChange) {
-      if (type === 'start') {
-        onDateRangeChange(value, endDate || value || getLocalDateString());
-      } else {
-        onDateRangeChange(startDate || value || getLocalDateString(), value);
-      }
+      onDateRangeChange(localStartDate || getLocalDateString(), localEndDate || getLocalDateString());
     }
   };
 
@@ -124,7 +134,7 @@ export const BusinessDateFilter: React.FC<BusinessDateFilterProps> = ({
             <div className="flex items-center gap-2 bg-white border border-[#b8d0f7] rounded-[4px] px-3 h-10 text-[13px] shadow-xs">
               <input
                 type="date"
-                value={startDate || ''}
+                value={localStartDate || ''}
                 onChange={(e) => handleCustomDateChange('start', e.target.value)}
                 className="bg-transparent text-slate-800 font-mono text-[13px] font-bold outline-none cursor-pointer"
                 title="起始日期"
@@ -132,12 +142,22 @@ export const BusinessDateFilter: React.FC<BusinessDateFilterProps> = ({
               <span className="text-slate-400 font-bold text-[11px]">至</span>
               <input
                 type="date"
-                value={endDate || ''}
+                value={localEndDate || ''}
                 onChange={(e) => handleCustomDateChange('end', e.target.value)}
                 className="bg-transparent text-slate-800 font-mono text-[13px] font-bold outline-none cursor-pointer"
                 title="截止日期"
               />
             </div>
+          )}
+
+          {isCustomRange && (
+            <button
+              type="button"
+              onClick={handleApplyDateRange}
+              className="px-4 h-10 bg-[#1a56db] hover:bg-blue-600 active:scale-95 text-white font-bold text-[13px] rounded-[4px] shadow-sm transition-all cursor-pointer flex items-center justify-center whitespace-nowrap"
+            >
+              查 询
+            </button>
           )}
 
           {isCustomRange && (
@@ -151,7 +171,6 @@ export const BusinessDateFilter: React.FC<BusinessDateFilterProps> = ({
               <span>清除</span>
             </button>
           )}
-
           <span className="text-slate-300 mx-0.5">|</span>
         </div>
       )}
