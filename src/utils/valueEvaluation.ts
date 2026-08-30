@@ -18,6 +18,22 @@ export interface EvaluationResult extends ValueEfficiencySnapshot {
   nonEffectiveDeduction: number;
   confirmedValueConfirmed?: number;
   pendingValueConfirmed?: number;
+  isProdExpert?: boolean;
+  isRevenueExpert?: boolean;
+  monthlyIncomeUpper?: number;
+  monthlyIncomeLower?: number;
+  contributionUpper?: number;
+  contributionLower?: number;
+  monthlyEfficiencyUpper?: number;
+  monthlyEfficiencyLower?: number;
+  yearlyIncomeUpper?: number;
+  yearlyIncomeLower?: number;
+  yearlyEfficiencyUpper?: number;
+  yearlyEfficiencyLower?: number;
+  tierUpper?: string;
+  tierLower?: string;
+  tierLabelUpper?: string;
+  tierLabelLower?: string;
 }
 
 /**
@@ -225,7 +241,7 @@ export function computePersonEvaluation(
   const contribution = monthlyIncome - monthlyCost;
   const fixedRatio = monthlyIncome > 0 ? (monthlyCost / monthlyIncome) * 100 : 0;
 
-  // 产值类确权情况统计 (用于 InfoTip 产兑包明细提示)
+  // 产值类确权情况统计 (用于 InfoTip 产兑包明细提示 及 产专双行计算)
   const valueLogs = logs.filter(l => 
     matchUser(l) && 
     l.category === RefineCategory.Value &&
@@ -239,6 +255,48 @@ export function computePersonEvaluation(
   const pendingValueConfirmed = valueLogs
     .filter(l => l.status === AuditStatus.Pending)
     .reduce((acc, log) => acc + calculateHistoricalNetValue(log, resources, allUsers), 0);
+
+  const userCat = user.category || '';
+  const isProdExpert = userCat.includes('产专') || userCat === '经管员高产专';
+  const isRevenueExpert = userCat.includes('款专');
+
+  const monthlyIncomeUpper = isProdExpert ? (confirmedValueConfirmed + pendingValueConfirmed) : monthlyIncome;
+  const monthlyIncomeLower = isProdExpert ? confirmedValueConfirmed : monthlyIncome;
+  const contributionUpper = monthlyIncomeUpper - monthlyCost;
+  const contributionLower = monthlyIncomeLower - monthlyCost;
+  const monthlyEfficiencyUpper = monthlyCost > 0 ? monthlyIncomeUpper / monthlyCost : 0;
+  const monthlyEfficiencyLower = monthlyCost > 0 ? monthlyIncomeLower / monthlyCost : 0;
+
+  // 年度产值拆分 (产专)
+  const yearlyValueLogs = logs.filter(l => 
+    matchUser(l) && 
+    l.category === RefineCategory.Value &&
+    resolveLogBusinessMonth(l).startsWith(currentYear) &&
+    resolveLogBusinessMonth(l) <= refMonth
+  );
+
+  const yearlyConfirmedValue = yearlyValueLogs
+    .filter(l => l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved)
+    .reduce((acc, log) => acc + calculateHistoricalNetValue(log, resources, allUsers), 0);
+
+  const yearlyPendingValue = yearlyValueLogs
+    .filter(l => l.status === AuditStatus.Pending)
+    .reduce((acc, log) => acc + calculateHistoricalNetValue(log, resources, allUsers), 0);
+
+  const yearlyIncomeUpper = isProdExpert ? (yearlyConfirmedValue + yearlyPendingValue) : yearlyIncome;
+  const yearlyIncomeLower = isProdExpert ? yearlyConfirmedValue : yearlyIncome;
+  const yearlyEfficiencyUpper = yearlyCost > 0 ? yearlyIncomeUpper / yearlyCost : 0;
+  const yearlyEfficiencyLower = yearlyCost > 0 ? yearlyIncomeLower / yearlyCost : 0;
+
+  const getTierFromEff = (eff: number) => {
+    if (eff > 2.5) return { tier: 'S', tierLabel: '卓越级', tierColor: 'text-amber-500' };
+    if (eff >= 1.5) return { tier: 'A', tierLabel: '进取级', tierColor: 'text-blue-500' };
+    if (eff >= 1.2) return { tier: 'B', tierLabel: '稳健级', tierColor: 'text-emerald-500' };
+    return { tier: 'C', tierLabel: '改进级', tierColor: 'text-rose-500' };
+  };
+
+  const upperTierInfo = getTierFromEff(monthlyEfficiencyUpper);
+  const lowerTierInfo = getTierFromEff(monthlyEfficiencyLower);
 
   // 能级阈值：>2.5 S，>=1.5 A，>=1.2 B，否则 C (维持现状)
   let tier = 'C';
@@ -285,7 +343,23 @@ export function computePersonEvaluation(
     dCost,
     nonEffectiveDeduction,
     confirmedValueConfirmed,
-    pendingValueConfirmed
+    pendingValueConfirmed,
+    isProdExpert,
+    isRevenueExpert,
+    monthlyIncomeUpper,
+    monthlyIncomeLower,
+    contributionUpper,
+    contributionLower,
+    monthlyEfficiencyUpper,
+    monthlyEfficiencyLower,
+    yearlyIncomeUpper,
+    yearlyIncomeLower,
+    yearlyEfficiencyUpper,
+    yearlyEfficiencyLower,
+    tierUpper: upperTierInfo.tier,
+    tierLower: lowerTierInfo.tier,
+    tierLabelUpper: upperTierInfo.tierLabel,
+    tierLabelLower: lowerTierInfo.tierLabel,
   };
 }
 

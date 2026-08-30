@@ -128,19 +128,20 @@ export function deriveProjectStatus(resource?: MiningResource | null): { status:
     return { status: ProjectStatus.InProgress };
   }
 
-  if (isMineralArchived(resource)) {
+  const lifecycle = (resource.lifecycleStatus || '').toLowerCase();
+  
+  if (lifecycle === 'archived' || isMineralArchived(resource)) {
     return { status: ProjectStatus.Archived };
   }
 
   const reachedMs = toReachedMs(resource);
   const isCapped = isMineralCapReached(resource) && reachedMs > 0;
-  const isStockIn = resource.status === ResourceStatus.StockIn;
 
-  if (isCapped || isStockIn) {
+  if (lifecycle === 'settling' || isCapped) {
     return { 
-      status: ProjectStatus.Capping, 
-      remainingDays: getSettlingDaysLeft(resource) 
-    };
+       status: ProjectStatus.Capping, 
+       remainingDays: getSettlingDaysLeft(resource) 
+     };
   }
 
   return { status: ProjectStatus.InProgress };

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useDedupe } from '../src/hooks/useDedupe';
 import { useCircuitBreaker } from '../src/hooks/useCircuitBreaker';
 import { TIER_COEFFICIENTS, USER_LIST, UI_LABELS } from '@/constants';
@@ -22,7 +22,7 @@ import { Card, ProgressBar, Badge, ProjectStatusBadge } from '@/components/UI';
 import StandardModal from '@/components/StandardModal';
 import { TERMINOLOGY } from '@/constants/terminology';
 import { aggregateMiningQuadrantsFromLogs } from '@/utils/purification';
-import { XLSX, exportWorkbook, buildExcelFilename } from '@/utils/excelIo';
+import { XLSX, exportWorkbook, buildExcelFilename, EXCEL_IMPORT_MAX_BYTES, EXCEL_IMPORT_MAX_ROWS } from '@/utils/excelIo';
 import { calculateHistoricalNetValue, calculateDualTrackCoreMatrices, calculateT1PlusValue, calculateT1PlusRevenue } from '@/utils/business';
 import { calculateHedgeCapacitiesAndWeights, normalizeRefineTier } from '@/utils/consumptionHedge';
 import { deriveProjectStatus, isProjectWritable } from '@/utils/projectStatus';
@@ -990,7 +990,261 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     }
   };
 
+
+  const handleDownloadTemplate = () => {
+    const templateData = [{
+      '矿山编号': 'R001',
+      '类别': '收款', // 或 产值
+      '业务日期': new Date().toISOString().slice(0, 10),
+      '采集主体': '工号或姓名(张三)',
+      '注入金额': 10000,
+      '提炼类型': '企业项目',
+      '成本档位': 'T1',
+      '操作员': '当前登入账号(可选)'
+    }];
+    const worksheet = XLSX.utils.json_to_sheet(templateData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "导入模板");
+    exportWorkbook(workbook, "价值创造批量导入模板.xlsx");
+  };
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importLoading, setImportLoading] = useState(false);
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > EXCEL_IMPORT_MAX_BYTES) {
+      toast.error(`文件大小不能超过 ${EXCEL_IMPORT_MAX_BYTES / 1024 / 1024}MB`);
+      return;
+    }
+
+    setImportLoading(true);
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array' });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      const rows = XLSX.utils.sheet_to_json<any>(worksheet);
+
+      if (rows.length > EXCEL_IMPORT_MAX_ROWS) {
+        toast.error(`一次最多导入 ${EXCEL_IMPORT_MAX_ROWS} 行`);
+        return;
+      }
+
+      const logsToSubmit: ValueCreationLog[] = [];
+      const errorLines: string[] = [];
+      const miningTotalMap = new Map<string, { [RefineCategory.Value]: number, [RefineCategory.Revenue]: number }>();
+
+      let lineNum = 1;
+      for (const row of rows) {
+        lineNum++;
+        
+        const miningId = row['矿山编号']?.toString().trim();
+        const categoryStr = row['类别']?.toString().trim();
+        const businessDateStr = row['业务日期']?.toString().trim();
+        const collectorStr = row['采集主体']?.toString().trim();
+        const rawAmount = parseFloat(row['注入金额']);
+        const refineTypeStr = row['提炼类型']?.toString().trim();
+        const tierStr = row['成本档位']?.toString().trim() || 'T1';
+        const operatorStr = row['操作员']?.toString().trim();
+
+        if (!miningId || !categoryStr || !businessDateStr || !collectorStr || isNaN(rawAmount) || rawAmount <= 0) {
+          errorLines.push(`第 ${lineNum} 行: 缺少必填字段或金额格式不正确`);
+          continue;
+        }
+        
+        const bDate = new Date(businessDateStr);
+        if (isNaN(bDate.getTime())) {
+            errorLines.push(`第 ${lineNum} 行: 业务日期格式错误`);
+            continue;
+        }
+
+        const resource = resources.find(r => r.id === miningId);
+        if (!resource) {
+          errorLines.push(`第 ${lineNum} 行: 找不到矿山 [${miningId}]`);
+          continue;
+        }
+        if (!isProjectWritable(resource)) {
+          errorLines.push(`第 ${lineNum} 行: 矿山 [${miningId}] 状态不可提报`);
+          continue;
+        }
+
+        const { status } = deriveProjectStatus(resource);
+        if (status !== ProjectStatus.InProgress) {
+          errorLines.push(`第 ${lineNum} 行: 矿山 [${miningId}] 处于${status}状态`);
+          continue;
+        }
+
+        const category = categoryStr === '产值' ? RefineCategory.Value : (categoryStr === '收款' ? RefineCategory.Revenue : null);
+        if (!category) {
+          errorLines.push(`第 ${lineNum} 行: 类别必须是 收款 或 产值`);
+          continue;
+        }
+        
+        if (category === RefineCategory.Value && resource.valueDepleted) {
+          errorLines.push(`第 ${lineNum} 行: 矿山产出已满，无法继续提报产值`);
+          continue;
+        }
+
+        const collector = managedUsers.find(u => u.id === collectorStr || u.name === collectorStr);
+        if (!collector) {
+          errorLines.push(`第 ${lineNum} 行: 找不到采集主体 [${collectorStr}]`);
+          continue;
+        }
+
+        if (category === RefineCategory.Revenue) {
+           if (!centerMatch(resource.assignedToRevenue, collector.center) && !centerMatch(resource.assignedTo, collector.center)) {
+              errorLines.push(`第 ${lineNum} 行: 采集主体不具备该矿山的收款权限`);
+              continue;
+           }
+        } else {
+           if (!centerMatch(resource.assignedToValue, collector.center) && !centerMatch(resource.assignedTo, collector.center)) {
+              errorLines.push(`第 ${lineNum} 行: 采集主体不具备该矿山的产值权限`);
+              continue;
+           }
+        }
+
+        const operatorObj = operatorStr ? managedUsers.find(u => u.id === operatorStr || u.name === operatorStr) : user;
+        const operatorIdToUse = operatorObj?.id || user.id;
+
+        let refineType = refineTypeStr as RefineType;
+        if (!refineType) {
+           if (miningId.startsWith('A')) refineType = RefineType.Enterprise;
+           else if (miningId.startsWith('B')) refineType = RefineType.Bidding;
+           else if (miningId.startsWith('C')) refineType = RefineType.SafetyEval;
+           else refineType = resource.types?.[0] || RefineType.Enterprise;
+        }
+        
+        let factor = 0;
+        if (category === RefineCategory.Value) {
+          if (refineType && resource.refineTypeFactors?.[refineType]?.customValueFactor !== undefined) factor = resource.refineTypeFactors[refineType]!.customValueFactor;
+          else if (resource.customValueFactor !== undefined) factor = resource.customValueFactor;
+        } else {
+          if (refineType && resource.refineTypeFactors?.[refineType]?.customRevenueFactor !== undefined) factor = resource.refineTypeFactors[refineType]!.customRevenueFactor;
+          else if (resource.customRevenueFactor !== undefined) factor = resource.customRevenueFactor;
+        }
+
+        if (factor === 0) {
+          const isHighValueExpert = (collector.category || '').includes('高产专') || (collector.secondaryRoles || []).includes('高产专');
+          const isHighRevenueExpert = (collector.category || '').includes('高款专') || (collector.secondaryRoles || []).includes('高款专');
+          const vCoeffs = isHighValueExpert ? TIER_COEFFICIENTS.VALUE_MANAGER : TIER_COEFFICIENTS.VALUE_CHAN;
+          const rCoeffs = isHighRevenueExpert ? TIER_COEFFICIENTS.REVENUE_HIGH : TIER_COEFFICIENTS.REVENUE_MID_INITIAL;
+          const tier = normalizeRefineTier(tierStr);
+
+          if (category === RefineCategory.Value) {
+            if (tier === 'T1') factor = vCoeffs.Enterprise;
+            else if (tier === 'T2') factor = vCoeffs.Bidding;
+            else if (tier === 'T3') factor = vCoeffs.SafetyEval;
+            else factor = vCoeffs.OccHealth;
+          } else {
+            if (tier === 'T1') factor = rCoeffs.Enterprise;
+            else if (tier === 'T2') factor = rCoeffs.Bidding;
+            else if (tier === 'T3') factor = rCoeffs.SafetyEval;
+            else factor = rCoeffs.SafetyEval;
+          }
+        }
+
+        const allResourceLogs = logs.filter(l => l && l.miningId === miningId && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved));
+        const hedgeInfo = calculateHedgeCapacitiesAndWeights(resource, allResourceLogs);
+        const cWeight = hedgeInfo.cWeightRev;
+        const b2Weight = hedgeInfo.b2Weight;
+
+        const isHighExpert = isValueExpert(collector) || isRevenueExpert(collector);
+        let pPre = 0;
+        if (category === RefineCategory.Value) {
+            pPre = calculateT1PlusValue(rawAmount, !!isHighExpert, tierStr as any, cWeight, b2Weight);
+        } else {
+            pPre = calculateT1PlusRevenue(rawAmount, !!isHighExpert, tierStr as any, cWeight);
+        }
+        
+        const currentCap = getCurrentValueCapacity(resource) || 0;
+        const kFactor = (category === RefineCategory.Value && pPre > currentCap)
+           ? (currentCap / pPre)
+           : 1.0;
+        
+        const netValue = pPre * kFactor;
+
+        let cClassCostStr = '';
+        if (collector.category) {
+          const parts = collector.category.split('/');
+          cClassCostStr = parts[parts.length - 1] || 'C0';
+        } else {
+          cClassCostStr = 'C0';
+        }
+
+        const mStr = `${bDate.getFullYear()}-${String(bDate.getMonth() + 1).padStart(2, '0')}`;
+
+        if (!miningTotalMap.has(miningId)) {
+            miningTotalMap.set(miningId, { [RefineCategory.Value]: 0, [RefineCategory.Revenue]: 0 });
+        }
+        miningTotalMap.get(miningId)![category] += rawAmount;
+
+        if (category === RefineCategory.Value && refineType === RefineType.Outsourced && resource.monthlyQuota !== undefined) {
+            const monthlyUsed = resource.monthlyUsed || 0;
+            if (monthlyUsed + miningTotalMap.get(miningId)![category] > resource.monthlyQuota + 0.01) {
+                errorLines.push(`第 ${lineNum} 行: 矿山 [${miningId}] 本月外派额度不足`);
+                miningTotalMap.get(miningId)![category] -= rawAmount;
+                continue;
+            }
+        }
+
+        logsToSubmit.push({
+            id: `${category === RefineCategory.Revenue ? 'J' : 'M'}${(Date.now() % 100000000 + lineNum).toString().padStart(8, '0')}`,
+            miningId: miningId,
+            rankId: operatorIdToUse,
+            recordedCollectorId: collector.id,
+            category: category,
+            type: refineType,
+            costCategory: tierStr as any,
+            amount: rawAmount,
+            rawAmount: rawAmount,
+            dynamicCost: 0,
+            cClassCost: getCClassCostForCollector(collector.id),
+            cClassRatio: cWeight,
+            b2ClassRatio: b2Weight,
+            netValue: netValue,
+            timestamp: Date.now(),
+            status: AuditStatus.Pending,
+            confirmationType: (category === RefineCategory.Value ? '联动确权' : '收款确权') as any,
+            month: mStr,
+            businessDate: businessDateStr
+        });
+      }
+
+      if (errorLines.length > 0) {
+        const errorText = errorLines.slice(0, 5).join('\n') + (errorLines.length > 5 ? '\n...' : '');
+        if (toast) toast.error(`部分数据导入失败，共 ${errorLines.length} 条:\n${errorText}`, { duration: 5000 });
+        else alert(`部分数据导入失败，共 ${errorLines.length} 条:\n${errorText}`);
+      }
+
+      if (logsToSubmit.length > 0) {
+        onLogSubmit(logsToSubmit);
+        if (typeof persistWorkspaceWithOverrides === "function") {
+          const jzczLogs = logs.filter(l => l.confirmationType !== '手动确权');
+          const payloadLogs = isGlobalReader(user) ? [...jzczLogs, ...logsToSubmit] : logsToSubmit;
+          await persistWorkspaceWithOverrides({ logs: payloadLogs }, { loadingMessage: '批量导入落库中…', successMessage: `成功导入 ${logsToSubmit.length} 条确权记录` });
+        }
+      }
+      
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    } catch (err) {
+      if (toast) toast.error('导入失败：' + (err as Error).message);
+      else alert('导入失败：' + (err as Error).message);
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
   const exportToExcel = () => {
+
     const dataToExport = filteredLogs.map(log => {
       const collector = managedUsers.find(u => u.id === log.recordedCollectorId);
       const resource = resources.find(r => r.id === log.miningId);
@@ -1093,8 +1347,8 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       <Card title="提交提炼价值确权" noPadding>
         <form onSubmit={handleSubmit} className="p-4 md:p-6 space-y-4 md:space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
-            {/* Row 1 - Left Column: 采集主体 */}
-            <div className="flex flex-col space-y-1.5 sm:col-span-2">
+            {/* 第 1 行 - 左：采集主体 */}
+            <div className="flex flex-col space-y-1.5 sm:col-span-1 lg:col-span-2">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
                 采集主体 <span className="text-rose-500 ml-1 font-bold">*</span>
               </label>
@@ -1170,8 +1424,8 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
               </select>
             </div>
 
-            {/* Row 1 - Right Column: 提报类型 (移动到采集主体旁边) */}
-            <div className="flex flex-col space-y-1.5 sm:col-span-2">
+            {/* 第 1 行 - 右：提报类型 (主体自动锁定收款/产值，锁定态显示“已根据主体自动匹配”) */}
+            <div className="flex flex-col space-y-1.5 sm:col-span-1 lg:col-span-2">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between h-4">
                 <span>提报类型 <span className="text-rose-500 ml-1 font-bold">*</span></span>
                 {isCategoryLocked && (
@@ -1212,8 +1466,8 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
               )}
             </div>
 
-            {/* Row 2 - Col 1: 矿山 */}
-            <div className="flex flex-col space-y-1.5 sm:col-span-2 relative">
+            {/* 第 2 行：矿山编号 (整行 col-span-1 sm:col-span-2 lg:col-span-4) */}
+            <div className="flex flex-col space-y-1.5 col-span-1 sm:col-span-2 lg:col-span-4 relative">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
                 矿山编号 <span className="text-rose-500 ml-1 font-bold">*</span>
               </label>
@@ -1230,17 +1484,14 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                   <option value="">{availableResources.length === 0 ? '暂无可用矿山' : '请选择矿山编号...'}</option>
                   {availableResources.map(r => {
                     const { status } = deriveProjectStatus(r);
-                    const q = r.quotas?.find(qItem => centerMatch(qItem.centerId, user.center));
                     const uq = aggregateMiningQuadrantsFromLogs(logs, resources, r.id, user.center, managedUsers);
                     const unitRemaining = selectedCategory === RefineCategory.Value ? uq.value.unconfirmed : uq.revenue.unconfirmed;
-                    const unitConfirmed = selectedCategory === RefineCategory.Value ? uq.value.confirmed : uq.revenue.confirmed;
+                    const typeTag = selectedCategory === RefineCategory.Value ? '产值' : '收款';
+                    const isFull = selectedCategory === RefineCategory.Value && unitRemaining <= 0 && status === ProjectStatus.InProgress;
 
-                    const quotaInfo = q ? ` | 款当: ${formatMoney(selectedCategory === RefineCategory.Value ? q.valueQuota : q.revenueQuota)}` : '';
-                    const remainingInfo = ` | 产当: ${formatMoney(unitRemaining)}`;
-                    
                     return (
-                      <option key={r.id} value={r.id} disabled={selectedCategory === RefineCategory.Value && unitRemaining <= 0 && status === ProjectStatus.InProgress}>
-                        {r.id} | [{status}]{quotaInfo}{remainingInfo} | 已确: {formatMoney(unitConfirmed)} {selectedCategory === RefineCategory.Value && unitRemaining <= 0 && status === ProjectStatus.InProgress ? '[已满]' : ''}
+                      <option key={r.id} value={r.id} disabled={isFull}>
+                        {r.id} | {typeTag} | {status}{isFull ? ' [已满]' : ''}
                       </option>
                     );
                   })}
@@ -1272,29 +1523,54 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     )}
                   </div>
                 )}
-                <input 
-                  type="text" 
-                  placeholder="搜索编号..." 
-                  title="输入矿山编号进行快速搜索"
-                  value={miningSearchTerm}
-                  onChange={(e) => {
-                    const term = e.target.value;
-                    setMiningSearchTerm(term);
-                    if ((term || '').trim() === '') return;
-                    const match = availableResources.find(r => 
-                      r.id?.toLowerCase().includes((term || '').toLowerCase())
-                    );
-                    if (match) {
-                      setSelectedMiningId(match.id);
-                    }
-                  }}
-                  className="w-full min-w-48 bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all font-bold text-slate-800 h-10"
-                />
+                <div className="flex items-center space-x-2 w-full">
+                  <input 
+                    type="text" 
+                    placeholder="搜索编号..." 
+                    title="输入矿山编号进行快速搜索"
+                    value={miningSearchTerm}
+                    onChange={(e) => setMiningSearchTerm(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const term = miningSearchTerm;
+                        if ((term || '').trim() === '') return;
+                        const match = availableResources.find(r => 
+                          r.id?.toLowerCase().includes((term || '').toLowerCase())
+                        );
+                        if (match) {
+                          setSelectedMiningId(match.id);
+                        } else {
+                          toast.error('未找到对应矿山编号');
+                        }
+                      }
+                    }}
+                    className="flex-1 w-full min-w-[120px] bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all font-bold text-slate-800 h-10"
+                  />
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      const term = miningSearchTerm;
+                      if ((term || '').trim() === '') return;
+                      const match = availableResources.find(r => 
+                        r.id?.toLowerCase().includes((term || '').toLowerCase())
+                      );
+                      if (match) {
+                        setSelectedMiningId(match.id);
+                      } else {
+                        toast.error('未找到对应矿山编号');
+                      }
+                    }}
+                    className="h-10 px-3 bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 rounded-[4px] text-[12px] font-bold transition-colors whitespace-nowrap flex items-center shrink-0"
+                  >
+                    搜索
+                  </button>
+                </div>
               </div>
             </div>
 
-            {/* Row 2 - Col 3: 业务日期 */}
-            <div className="flex flex-col space-y-1.5 sm:col-span-1">
+            {/* 第 3 行 - Col 1: 业务日期 (必填，带红星) */}
+            <div className="flex flex-col space-y-1.5 col-span-1 sm:col-span-1 lg:col-span-1">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
                 业务日期 <span className="text-rose-500 ml-1 font-bold">*</span>
               </label>
@@ -1311,85 +1587,58 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
               />
             </div>
 
-            {/* Row 2 - Col 4: 业务月份 (只读) */}
-            <div className="flex flex-col space-y-1.5 sm:col-span-1">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
-                业务月份
-              </label>
-              <input 
-                type="month" 
-                value={selectedMonth} 
-                readOnly
-                className="w-full bg-slate-50 border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] outline-none text-slate-400 cursor-not-allowed font-bold h-10"
-              />
-            </div>
-
-            {/* Row 3 - Col 1: 提炼配方 */}
-            <div className="flex flex-col space-y-1.5 sm:col-span-1">
+            {/* 第 3 行 - Col 2: 提炼配方 (只读) */}
+            <div className="flex flex-col space-y-1.5 col-span-1 sm:col-span-1 lg:col-span-1">
               <div className="flex items-center space-x-1.5 h-4">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">提炼配方</label>
-                {hasCustomFactor ? (
-                  <span className="text-[8px] font-black text-emerald-600 animate-pulse bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 whitespace-nowrap">协议配方</span>
-                ) : selectedResource && (
-                  <span className="text-[8px] font-black text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 whitespace-nowrap">标准配方</span>
+                {selectedResource && (
+                  hasCustomFactor ? (
+                    <span className="text-[8px] font-black text-emerald-600 animate-pulse bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 whitespace-nowrap">协议配方</span>
+                  ) : (
+                    <span className="text-[8px] font-black text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 whitespace-nowrap">标准配方</span>
+                  )
                 )}
               </div>
-              <select 
-                value={selectedTier} 
-                onChange={(e) => setSelectedTier(e.target.value)} 
-                className={`w-full border rounded-[4px] px-3 py-2 text-[13px] outline-none ${
-                  hasCustomFactor ? 'bg-emerald-50 border-emerald-200 text-emerald-700 font-bold' : 'bg-slate-100 border-[#b8d0f7] text-slate-400'
-                } cursor-not-allowed h-10`}
-                disabled={true}
-              >
-                <option value="T1">T1</option>
-                <option value="T2">T2</option>
-                <option value="T3">T3</option>
-                {(selectedTier === 'D' || selectedTier === 'T4') && (
-                  <option value={selectedTier} disabled>
-                    历史 D 已归 T3
-                  </option>
+              <div className={`w-full border rounded-[4px] px-3 py-2 text-[13px] flex items-center h-10 font-bold ${
+                !selectedResource 
+                  ? 'bg-slate-50 border-[#b8d0f7] text-slate-400 font-normal'
+                  : hasCustomFactor 
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-700' 
+                    : 'bg-slate-50 border-[#b8d0f7] text-slate-700'
+              }`}>
+                {selectedResource ? (
+                  <span>{selectedTier || 'T1'}</span>
+                ) : (
+                  <span>—</span>
                 )}
-              </select>
-              {isRefineTypeCustomFactor && (
-                <div className="mt-1 text-[9px] font-black text-emerald-600 animate-fade-in flex items-center">
-                  <span className="inline-block w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1 animate-pulse"></span>
-                  <span>专属自定义配方[类型]</span>
-                </div>
-              )}
-              {!isRefineTypeCustomFactor && isResourceCustomFactor && (
-                <div className="mt-1 text-[9px] font-black text-emerald-600 animate-fade-in flex items-center">
-                  <span className="inline-block w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1 animate-pulse"></span>
-                  <span>专属自定义配方</span>
-                </div>
-              )}
+              </div>
             </div>
 
-            {/* Row 3 - Col 2: 提炼类型 */}
-            <div className="flex flex-col space-y-1.5 sm:col-span-1">
+            {/* 第 3 行 - Col 3: 提炼类型 (只读) */}
+            <div className="flex flex-col space-y-1.5 col-span-1 sm:col-span-1 lg:col-span-1">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">提炼类型</label>
-              <select value={selectedRefineType} onChange={(e) => setSelectedRefineType(e.target.value as RefineType)} className="w-full bg-slate-100 border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] outline-none text-slate-400 cursor-not-allowed h-10" required disabled={true}>
-                {selectedResource ? selectedResource.types.map(type => (
-                  <option key={type} value={type}>{type}</option>
-                )) : Object.values(RefineType).filter(t => t !== RefineType.NonEffectiveHours).map(type => (
-                  <option key={type} value={type}>{type}</option>
-                ))}
-              </select>
+              <div className="w-full bg-slate-50 border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] flex items-center h-10 font-bold text-slate-700">
+                {selectedResource ? (
+                  <span>{selectedRefineType}</span>
+                ) : (
+                  <span className="text-slate-400 font-normal">—</span>
+                )}
+              </div>
             </div>
 
-            {/* Row 3 - Col 3: 执行类型 */}
-            <div className="flex flex-col space-y-1.5 sm:col-span-2">
+            {/* 第 3 行 - Col 4: 执行类型 (只读，随矿山+经营单元自动计算) */}
+            <div className="flex flex-col space-y-1.5 col-span-1 sm:col-span-1 lg:col-span-1">
               <div className="flex items-center justify-between h-4">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                   执行类型
                 </label>
                 {selectedResource && (
-                  <span className="text-[9px] text-slate-400 font-medium truncate max-w-[120px]" title={`当前视角: ${selectedOperator?.center || user.center || '无'}`}>
-                    视角: {selectedOperator?.center || user.center || '无'}
+                  <span className="text-[9px] text-slate-400 font-medium truncate max-w-[100px]" title={`当前视角: ${selectedOperator?.center || user.center || '无'}`}>
+                    {selectedOperator?.center || user.center || '无'}
                   </span>
                 )}
               </div>
-              <div className="w-full bg-slate-50 border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] flex items-center justify-between h-10 shadow-xs">
+              <div className="w-full bg-slate-50 border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] flex items-center h-10 shadow-xs">
                 {selectedResource ? (() => {
                   const currentUnitForVC = selectedOperator?.center || user.center || '';
                   const et = getExecutionType(selectedResource, currentUnitForVC);
@@ -1405,7 +1654,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     </div>
                   );
                 })() : (
-                  <span className="text-slate-400 font-medium text-[11px]">请先选择矿山编号</span>
+                  <span className="text-slate-400 font-normal text-[12px]">—</span>
                 )}
               </div>
             </div>
@@ -1723,8 +1972,32 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         noPadding
         headerAction={
           <div className="flex items-center space-x-2">
+            
+            <button 
+              onClick={handleDownloadTemplate}
+              className="px-3 py-1 text-[10px] font-bold bg-amber-50 text-amber-600 border border-amber-200 rounded-sm hover:bg-amber-100 transition-colors flex items-center"
+            >
+              <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+              模板
+            </button>
+            <input 
+              type="file" 
+              accept=".xlsx,.xls,.csv" 
+              className="hidden" 
+              ref={fileInputRef} 
+              onChange={handleImport} 
+            />
+            <button 
+              onClick={handleImportClick}
+              disabled={importLoading}
+              className="px-3 py-1 text-[10px] font-bold bg-blue-50 text-blue-600 border border-blue-200 rounded-sm hover:bg-blue-100 transition-colors flex items-center disabled:opacity-50"
+            >
+              <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+              {importLoading ? '导入中...' : '导入'}
+            </button>
             <button 
               onClick={exportToExcel}
+
               className="px-3 py-1 text-[10px] font-bold bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-sm hover:bg-emerald-100 transition-colors flex items-center"
             >
               <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>

@@ -410,7 +410,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     }).join(', ');
 
     showConfirm(
-      `确定发起内部交易指令？\n\n【交易类别】${type}\n【接收节点】${receiverNames}${miningId ? `\n【关联矿山】${miningId}` : ''}\n【业务月份】${selectedMonth}`,
+      `确定发起内部交易指令？\n\n【交易类别】${type}\n【接收节点】${receiverNames}${miningId ? `\n【关联矿山】${miningId}` : ''}`,
       async () => {
         const newTxs: InternalTransaction[] = [];
         receiverIds.forEach((rid, index) => {
@@ -1235,16 +1235,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">业务月份</label>
-                    <input 
-                      type="month" 
-                      value={selectedMonth} 
-                      readOnly
-                      className="w-full bg-slate-50 border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-400 outline-none cursor-not-allowed h-10"
-                    />
-                  </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">业务日期</label>
                     <input 

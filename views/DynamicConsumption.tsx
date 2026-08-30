@@ -625,19 +625,6 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
               />
             </div>
 
-            {/* 3.1 业务月份 (只读) */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
-                业务月份
-              </label>
-              <input
-                type="month"
-                value={businessMonth}
-                readOnly
-                className="w-full bg-slate-50 border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-mono font-bold text-slate-400 outline-none cursor-not-allowed h-10"
-              />
-            </div>
-
             {/* 4. 视角 */}
             <div className="space-y-1.5">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">

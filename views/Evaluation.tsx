@@ -1,17 +1,14 @@
-
-import React, { useMemo, useState, useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { Search, ChevronDown } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Search, ChevronDown, ChevronUp } from 'lucide-react';
 import { useCostPrivacy } from '../src/hooks/useCostPrivacy';
 import { CostPrivacyToggle } from '../src/components/CostPrivacyToggle';
-import { User, ValueCreationLog, MiningResource, AuditStatus, Role } from '../types';
+import { User, ValueCreationLog, MiningResource } from '../types';
 import { computeAllEvaluations } from '../src/utils/valueEvaluation';
 import { formatAmount, formatRatio } from '../src/utils/formatters';
 import { InfoTip } from '../src/components/InfoTip';
 import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
 import { getLocalMonthString } from '../src/utils/dateUtils';
 import { UI_LABELS } from '../src/constants/uiLabels';
-import { CostBreakdown } from '@/components/CostBreakdown';
 
 interface EvaluationProps {
   users: User[];
@@ -22,180 +19,47 @@ interface EvaluationProps {
   onFilterMonthChange?: (month: string) => void;
 }
 
-const CostTooltipIcon: React.FC<{ tooltip: string }> = ({ tooltip }) => {
-  const [show, setShow] = useState(false);
-  const [coords, setCoords] = useState<{ x: number; y: number } | null>(null);
-  const triggerRef = useRef<HTMLSpanElement>(null);
-
-  const handleMouseEnter = () => {
-    if (triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      setCoords({
-        x: rect.left + rect.width / 2,
-        y: rect.top - 6,
-      });
-      setShow(true);
-    }
-  };
-
-  const handleMouseLeave = () => {
-    setShow(false);
-  };
-
-  return (
-    <span
-      ref={triggerRef}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-      className="inline-flex items-center justify-center w-[14px] h-[14px] rounded-full bg-[#e2e8f0] text-[#475569] text-[10px] font-medium leading-none cursor-help mx-[2px] shrink-0 select-none align-middle"
-    >
-      i
-      {show && coords && typeof document !== 'undefined' && createPortal(
-        <div
-          style={{
-            position: 'fixed',
-            left: `${coords.x}px`,
-            top: `${coords.y}px`,
-            transform: 'translate(-50%, -100%)',
-            zIndex: 9999,
-            backgroundColor: '#1e293b',
-            color: '#ffffff',
-            borderRadius: '6px',
-            padding: '8px 12px',
-            width: '220px',
-            fontSize: '12px',
-            lineHeight: '1.5',
-            boxShadow: '0 10px 15px -3px rgba(0,0,0,0.3)',
-            pointerEvents: 'none',
-            whiteSpace: 'normal',
-            textAlign: 'left',
-            fontWeight: 'normal',
-          }}
-          className="animate-in fade-in zoom-in-95 duration-100 font-sans"
-        >
-          {tooltip}
-          <div
-            style={{
-              position: 'absolute',
-              top: '100%',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              width: 0,
-              height: 0,
-              borderLeft: '4px solid transparent',
-              borderRight: '4px solid transparent',
-              borderTop: '4px solid #1e293b',
-            }}
-          />
-        </div>,
-        document.body
-      )}
-    </span>
-  );
+const getTierBadgeText = (tier?: string) => {
+  if (tier === 'S') return '核心资产/重点保护';
+  if (tier === 'A') return '核心晋升储备';
+  if (tier === 'B') return '标准评价/持续激励';
+  return '负向资产/熔断淘汰';
 };
 
-const CostDetailCard: React.FC<{
-  evaluation: {
-    monthlyCost: number;
-    baseSalary: number;
-    category: string;
-    aCost: number;
-    b1Cost: number;
-    dCost?: number;
-    nonEffectiveDeduction?: number;
-  };
-  maskMoney: (amount: number | string | null | undefined) => string;
-}> = ({ evaluation: e, maskMoney }) => {
-  const [expanded, setExpanded] = useState(false);
-
-  const isRevenue = e.category?.includes('款专');
-  const dynamicCategoryLabel = isRevenue ? 'A类' : 'B1';
-  const dynamicCategoryCost = isRevenue ? e.aCost : e.b1Cost;
-
-  return (
-    <div className="bg-white rounded-[8px] p-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.05)] border border-slate-200/80 transition-all text-left w-full min-w-[220px]">
-      {/* 顶部：总成本标题、明细展开按钮及总成本金额 */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-1.5">
-          <span className="text-[13px] font-bold text-slate-800">总成本</span>
-          <button
-            type="button"
-            onClick={() => setExpanded(prev => !prev)}
-            className="inline-flex items-center space-x-1 text-[11px] text-[#1a56db] hover:text-blue-700 bg-blue-50/80 hover:bg-blue-100 px-2 py-0.5 rounded-[4px] font-medium transition-colors cursor-pointer select-none"
-          >
-            <span>{expanded ? '收起' : '明细'}</span>
-            <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
-          </button>
-        </div>
-        <span className="text-[16px] font-bold font-mono text-slate-900 [font-variant-numeric:tabular-nums] text-right">
-          {maskMoney(e.monthlyCost)}
-        </span>
-      </div>
-
-      {/* 可折叠轻量明细区域 */}
-      {expanded && (
-        <div className="mt-2 pt-2 border-t border-slate-100 bg-[#fafbfc] rounded-[6px] p-2 space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
-          {/* 工资 */}
-          <div className="flex items-center justify-between text-[12px]">
-            <span className="text-slate-600 font-medium">工资</span>
-            <span className="font-mono text-slate-800 font-semibold [font-variant-numeric:tabular-nums] text-right">
-              {maskMoney(e.baseSalary || 0)}
-            </span>
-          </div>
-
-          {/* B1 (或款专对应A类) */}
-          <div className="flex items-center justify-between text-[12px]">
-            <span className="text-slate-600 font-medium">{dynamicCategoryLabel}</span>
-            <span className="font-mono text-slate-800 font-semibold [font-variant-numeric:tabular-nums] text-right">
-              {maskMoney(dynamicCategoryCost || 0)}
-            </span>
-          </div>
-
-          {/* D类 */}
-          <div className="flex items-center justify-between text-[12px]">
-            <span className="text-slate-600 font-medium inline-flex items-center">
-              D类
-              <CostTooltipIcon tooltip="经营单元开支，无项目。按实际发生月人员平均分摊" />
-            </span>
-            <span className="font-mono text-slate-800 font-semibold [font-variant-numeric:tabular-nums] text-right">
-              {maskMoney(e.dCost || 0)}
-            </span>
-          </div>
-
-          {/* FXDC */}
-          <div className="flex items-center justify-between text-[12px]">
-            <span className="text-slate-600 font-medium inline-flex items-center">
-              FXDC
-              <CostTooltipIcon tooltip="非有效工时对冲，冲抵刚性工资包" />
-            </span>
-            <span className="font-mono text-slate-800 font-semibold [font-variant-numeric:tabular-nums] text-right">
-              {maskMoney(e.nonEffectiveDeduction || 0)}
-            </span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+const getTierBadgeClass = (tier?: string) => {
+  if (tier === 'S') return 'bg-amber-50 text-amber-700 border-amber-200';
+  if (tier === 'A') return 'bg-blue-50 text-blue-700 border-blue-200';
+  if (tier === 'B') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+  return 'bg-rose-50 text-rose-700 border-rose-200';
 };
 
 const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, resources, currentTime, onFilterMonthChange }) => {
-  const { isCostVisible, toggleCostVisible, maskMoney, maskText } = useCostPrivacy();
+  const { maskMoney } = useCostPrivacy();
   const effectiveLogs = auditLogs || logs;
   const [filterMonth, setFilterMonth] = useState<string>(() => getLocalMonthString());
   const [filterStartDate, setFilterStartDate] = useState<string>('');
   const [filterEndDate, setFilterEndDate] = useState<string>('');
 
-  // 新增：自定义查询状态（模糊搜索、等级、类别）
+  // 自定义查询状态（模糊搜索、等级、类别）
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedTier, setSelectedTier] = useState<string>('ALL');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
+  const [expandedCosts, setExpandedCosts] = useState<Set<string>>(new Set());
+  const toggleCost = (id: string) => {
+    setExpandedCosts(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // 核心评价逻辑：使用全量审计日志 auditLogs（包含 JZCZ + DTCB）作为计算基准
   const evaluations = useMemo(() => {
     return computeAllEvaluations(users, effectiveLogs, resources, filterMonth, filterStartDate, filterEndDate);
   }, [users, effectiveLogs, resources, filterMonth, filterStartDate, filterEndDate]);
 
-  // 新增：过滤后的评价数据
+  // 过滤后的评价数据
   const filteredEvaluations = useMemo(() => {
     return evaluations.filter(e => {
       // 姓名/编号模糊搜索
@@ -248,8 +112,8 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
         ))}
       </div>
 
-      {/* 全员评价明细表：操作台卡片 */}
-      <div className="bg-white border border-slate-200 rounded-sm shadow-xs overflow-hidden">
+      {/* 全员评价明细表：朴素财务表 */}
+      <div className="bg-white border border-[#e8e8e8] rounded-sm shadow-xs overflow-hidden">
         <div className="bg-slate-50 px-4 sm:px-6 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center space-x-2">
             <span className="text-[11px] font-bold text-slate-900 uppercase tracking-widest">全量价值贡献审计记录</span>
@@ -342,131 +206,290 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
             </button>
           )}
         </div>
+
         <div className="overflow-x-auto">
-          <table className="w-full table-auto text-center border-collapse">
+          <table className="w-full table-auto border-collapse">
             <thead>
-              <tr className="bg-slate-50/80 border-b border-slate-200">
-                <th className="py-2.5 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-left whitespace-nowrap">采集主体</th>
+
+              <tr className="bg-slate-50/80 border-b-2 border-[#e0e0e0]">
+                <th className="py-2.5 px-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-left whitespace-nowrap border-r border-[#f0f0f0]">
+                  采集主体
+                </th>
                 <th className="py-2.5 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right whitespace-nowrap">
                   <span className="inline-flex items-center justify-end w-full">
                     收产包
-                    <InfoTip title="收产包口径" content="当月所有审核通过/已确权的提纯业务积分（收款包/产兑包）总和。" />
+                    <InfoTip 
+                      title="收产包口径" 
+                      content="产专：上行展示已确权+待确权产兑包；下行展示仅已确权产兑包。款专：当期收款包。" 
+                    />
                   </span>
                 </th>
-                <th className="py-2.5 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right whitespace-nowrap">
+                <th className="py-2.5 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right whitespace-nowrap border-x border-[#f0f0f0]">
                   <div className="flex items-center justify-end space-x-1">
                     <span>成本包</span>
-                    <InfoTip title="成本包口径" content="刚性工资包 + 对应职级消耗成本（款专：工资+A；产专：工资+B1）。" />
+                    <InfoTip 
+                      title="成本包口径" 
+                      content="刚性工资包 + 对应职级消耗成本（款专：工资+A；产专：工资+B1）+ D类 - FXDC。" 
+                    />
                     <CostPrivacyToggle size="sm" showLabel={false} className="ml-1" />
                   </div>
                 </th>
                 <th className="py-2.5 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right whitespace-nowrap">
                   <span className="inline-flex items-center justify-end w-full">
                     月度贡献
-                    <InfoTip title="月度贡献口径" content="月度收产包 - 月度成本包 = 月度贡献。正值代表正向价值积累。" />
+                    <InfoTip title="月度贡献口径" content="该行收产包 − 成本包。正值代表正向价值积累。" />
                   </span>
                 </th>
                 <th className="py-2.5 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right whitespace-nowrap">
                   <span className="inline-flex items-center justify-end w-full">
                     月度效率
-                    <InfoTip title="月度效率口径" content="月度总收产包 ÷ 月度总成本包。>1.5 为卓越，>1.2 为稳健。" />
+                    <InfoTip title="月度效率口径" content="该行收产包 ÷ 成本包。>2.5 卓越，>=1.5 进取，>=1.2 稳健。" />
                   </span>
                 </th>
                 <th className="py-2.5 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right whitespace-nowrap">
                   <span className="inline-flex items-center justify-end w-full">
                     年度效率
-                    <InfoTip title="年度效率口径" content="当年累计总收产包 ÷ 当年累计总成本包。" />
+                    <InfoTip title="年度效率口径" content="当年累计收产包 ÷ 当年累计成本包。" />
                   </span>
                 </th>
-                <th className="py-2.5 px-4 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-left whitespace-nowrap">管理决策路由</th>
+                <th className="py-2.5 px-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-left whitespace-nowrap">
+                  <span className="inline-flex items-center">
+                    管理决策路由
+                    <InfoTip title="管理决策路由" content="根据各行效率分档自动生成的管理决策分类。" />
+                  </span>
+                </th>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
+            
+</thead>
+            <tbody className="[&_tr:last-child>td]:border-b-0 [&_tr:last-child]:border-b-0">
+
               {filteredEvaluations.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
+                  <td colSpan={7} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">
+                    {UI_LABELS.EMPTY_DEFAULT}
+                  </td>
                 </tr>
               ) : (
-                filteredEvaluations.map(e => (
-                  <tr key={e.userId} className={`hover:bg-slate-50/70 transition-colors group ${e.tier === 'S' ? 'bg-amber-50/20' : ''}`}>
-                    <td className="py-2.5 px-4 text-left whitespace-nowrap">
-                      <div className="flex items-center space-x-2.5">
-                        <div className={`w-7 h-7 rounded-sm flex items-center justify-center text-white font-bold text-xs shadow-2xs shrink-0 ${e.tier === 'S' ? 'bg-amber-500' : (e.monthlyEfficiency < 1 ? 'bg-rose-500' : 'bg-slate-900')}`}>
-                          {e.userName.charAt(0)}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center space-x-1.5">
-                            <span className="font-bold text-slate-900 text-xs tracking-tight">{e.userName}</span>
-                            <span className="text-slate-300">|</span>
-                            <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded-xs border ${e.tierColor} border-current opacity-85 uppercase`}>{e.category}</span>
-                          </div>
-                          <div className="text-[9px] text-slate-400 font-mono tracking-tight uppercase">ID: {e.userId} · {e.tierLabel}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono">
-                      <div className="flex items-center justify-end gap-2">
-                        {formatAmount(e.monthlyIncome)}
-                        {!(e.category?.includes("款专")) && (
-                          <InfoTip 
-                            title="产兑包明细" 
-                            content={
-                              <div className="text-[11px] font-sans">
-                                <div className="flex justify-between gap-4"><span>产兑包(已确权+待确权):</span> <span className="font-mono font-bold">{formatAmount((e.confirmedValueConfirmed || 0) + (e.pendingValueConfirmed || 0))}</span></div>
-                                <div className="flex justify-between gap-4"><span>产兑包(仅已确权):</span> <span className="font-mono font-bold">{formatAmount(e.confirmedValueConfirmed || 0)}</span></div>
+                filteredEvaluations.map(e => {
+                  const isProd = e.isProdExpert ?? (e.category?.includes('产专') || e.category === '经管员高产专');
+
+                  if (isProd) {
+                    const incomeUpper = e.monthlyIncomeUpper ?? ((e.confirmedValueConfirmed || 0) + (e.pendingValueConfirmed || 0));
+                    const incomeLower = e.monthlyIncomeLower ?? (e.confirmedValueConfirmed || 0);
+                    const contribUpper = e.contributionUpper ?? (incomeUpper - e.monthlyCost);
+                    const contribLower = e.contributionLower ?? (incomeLower - e.monthlyCost);
+                    const effUpper = e.monthlyEfficiencyUpper ?? (e.monthlyCost > 0 ? incomeUpper / e.monthlyCost : 0);
+                    const effLower = e.monthlyEfficiencyLower ?? (e.monthlyCost > 0 ? incomeLower / e.monthlyCost : 0);
+                    const yrEffUpper = e.yearlyEfficiencyUpper ?? e.yearlyEfficiency;
+                    const yrEffLower = e.yearlyEfficiencyLower ?? e.yearlyEfficiency;
+                    const tierUpper = e.tierUpper || e.tier;
+                    const tierLower = e.tierLower || e.tier;
+
+                    return (
+                      <React.Fragment key={e.userId}>
+                        {/* 上行 (已确权+待确权产兑包) */}
+                        <tr className="hover:bg-slate-50/70 transition-colors">
+                          {/* 1. 采集主体 (上下合并为一格) */}
+                          <td rowSpan={2} className="py-2.5 px-3.5 text-left whitespace-nowrap align-middle border-b border-[#f0f0f0] border-r border-[#f0f0f0] bg-white">
+                            <div className="font-bold text-xs text-slate-900">{e.userName}</div>
+                            <div className="text-[10px] text-slate-400 font-mono tracking-tight mt-0.5">{e.category} · {e.userId}</div>
+                          </td>
+                          {/* 2. 收产包 (上行) */}
+                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs text-slate-800 border-b border-[#f0f0f0] font-medium">
+                            {formatAmount(incomeUpper)}
+                          </td>
+                          {/* 3. 成本包 (上下合并为一格) */}
+                          <td rowSpan={2} className="py-2.5 px-3 text-right whitespace-nowrap align-middle border-b border-[#f0f0f0] border-x border-[#f0f0f0] bg-white">
+                            <div className="flex flex-col items-end w-full min-w-[120px]">
+                              <div className="flex items-center justify-end space-x-2 w-full">
+                                <span className="font-mono text-xs font-semibold text-slate-800">{maskMoney(e.monthlyCost)}</span>
+                                <button onClick={() => toggleCost(e.userId)} className="text-slate-400 hover:text-slate-600 transition-colors flex items-center text-[9px] bg-slate-50 px-1 py-0.5 rounded border border-[#f0f0f0]">
+                                  明细 {expandedCosts.has(e.userId) ? <ChevronUp className="w-3 h-3 ml-0.5" /> : <ChevronDown className="w-3 h-3 ml-0.5" />}
+                                </button>
                               </div>
-                            }
-                          />
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono">
-                      <CostDetailCard evaluation={e} maskMoney={maskMoney} />
-                    </td>
-                    <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono">
-                      <div className="flex flex-col items-end">
-                        <span className={`font-bold text-xs ${e.contribution > 0 ? 'text-emerald-600' : (e.contribution < 0 ? 'text-rose-500' : 'text-slate-400')}`}>
+                              {expandedCosts.has(e.userId) && (
+                                <div className="mt-2 w-full bg-slate-50/80 border border-[#f0f0f0] rounded p-1.5 space-y-1 text-[10px] text-slate-500 font-mono text-right">
+                                  <div className="flex justify-between items-center">
+                                    <span>工资</span>
+                                    <span className="text-slate-700">{maskMoney(e.baseSalary || 0)}</span>
+                                  </div>
+                                  {e.isRevenueExpert && (
+                                    <div className="flex justify-between items-center">
+                                      <span>A类</span>
+                                      <span className="text-slate-700">{maskMoney(e.aCost || 0)}</span>
+                                    </div>
+                                  )}
+                                  {e.isProdExpert && (
+                                    <div className="flex justify-between items-center">
+                                      <span>B1类</span>
+                                      <span className="text-slate-700">{maskMoney(e.b1Cost || 0)}</span>
+                                    </div>
+                                  )}
+                                  <div className="flex justify-between items-center">
+                                    <span className="flex items-center text-slate-400">
+                                      D类
+                                      <InfoTip title="D类成本" content="经营单元开支，无项目。按实际发生月人员平均分摊" className="ml-1 opacity-70 hover:opacity-100" />
+                                    </span>
+                                    <span className="text-slate-700">{maskMoney(e.dCost || 0)}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center">
+                                    <span className="flex items-center text-slate-400">
+                                      FXDC
+                                      <InfoTip title="FXDC" content="非有效工时对冲，冲抵刚性工资包" className="ml-1 opacity-70 hover:opacity-100" />
+                                    </span>
+                                    <span className="text-emerald-600">-{maskMoney(e.nonEffectiveDeduction || 0)}</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          {/* 4. 月度贡献 (上行) */}
+                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-semibold border-b border-[#f0f0f0]">
+                            <span className={contribUpper > 0 ? 'text-emerald-600' : contribUpper < 0 ? 'text-rose-500' : 'text-slate-500'}>
+                              {contribUpper > 0 ? `+${formatAmount(contribUpper)}` : formatAmount(contribUpper)}
+                            </span>
+                          </td>
+                          {/* 5. 月度效率 (上行) */}
+                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-bold border-b border-[#f0f0f0]">
+                            <span className={effUpper >= 1.5 ? 'text-blue-600' : effUpper >= 1.2 ? 'text-emerald-600' : 'text-rose-500'}>
+                              {formatRatio(effUpper)}
+                            </span>
+                          </td>
+                          {/* 6. 年度效率 (上行) */}
+                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-bold border-b border-[#f0f0f0]">
+                            <span className={yrEffUpper >= 1.5 ? 'text-blue-600' : yrEffUpper >= 1.2 ? 'text-emerald-600' : 'text-slate-500'}>
+                              {formatRatio(yrEffUpper)}
+                            </span>
+                          </td>
+                          {/* 7. 管理决策路由 (上行) */}
+                          <td className="py-2 px-3.5 text-left whitespace-nowrap border-b border-[#f0f0f0]">
+                            <span className={`inline-block px-1.5 py-0.5 text-[9px] font-bold rounded-xs border ${getTierBadgeClass(tierUpper)}`}>
+                              {getTierBadgeText(tierUpper)}
+                            </span>
+                          </td>
+                        </tr>
+                        {/* 下行 (仅已确权产兑包) */}
+                        <tr className="hover:bg-slate-50/70 transition-colors">
+                          {/* 2. 收产包 (下行) */}
+                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs text-slate-800 border-b border-[#f0f0f0] font-medium">
+                            {formatAmount(incomeLower)}
+                          </td>
+                          {/* 4. 月度贡献 (下行) */}
+                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-semibold border-b border-[#f0f0f0]">
+                            <span className={contribLower > 0 ? 'text-emerald-600' : contribLower < 0 ? 'text-rose-500' : 'text-slate-500'}>
+                              {contribLower > 0 ? `+${formatAmount(contribLower)}` : formatAmount(contribLower)}
+                            </span>
+                          </td>
+                          {/* 5. 月度效率 (下行) */}
+                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-bold border-b border-[#f0f0f0]">
+                            <span className={effLower >= 1.5 ? 'text-blue-600' : effLower >= 1.2 ? 'text-emerald-600' : 'text-rose-500'}>
+                              {formatRatio(effLower)}
+                            </span>
+                          </td>
+                          {/* 6. 年度效率 (下行) */}
+                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-bold border-b border-[#f0f0f0]">
+                            <span className={yrEffLower >= 1.5 ? 'text-blue-600' : yrEffLower >= 1.2 ? 'text-emerald-600' : 'text-slate-500'}>
+                              {formatRatio(yrEffLower)}
+                            </span>
+                          </td>
+                          {/* 7. 管理决策路由 (下行) */}
+                          <td className="py-2 px-3.5 text-left whitespace-nowrap border-b border-[#f0f0f0]">
+                            <span className={`inline-block px-1.5 py-0.5 text-[9px] font-bold rounded-xs border ${getTierBadgeClass(tierLower)}`}>
+                              {getTierBadgeText(tierLower)}
+                            </span>
+                          </td>
+                        </tr>
+                      </React.Fragment>
+                    );
+                  }
+
+                  // 款专 (单行)
+                  return (
+                    <tr key={e.userId} className="hover:bg-slate-50/70 transition-colors border-b border-[#f0f0f0] last:border-b-0">
+                      {/* 1. 采集主体 */}
+                      <td className="py-2.5 px-3.5 text-left whitespace-nowrap align-middle border-r border-[#f0f0f0]">
+                        <div className="font-bold text-xs text-slate-900">{e.userName}</div>
+                        <div className="text-[10px] text-slate-400 font-mono tracking-tight mt-0.5">{e.category} · {e.userId}</div>
+                      </td>
+                      {/* 2. 收产包 */}
+                      <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs text-slate-800 font-medium">
+                        {formatAmount(e.monthlyIncome)}
+                      </td>
+                      {/* 3. 成本包 */}
+                      <td className="py-2.5 px-3 text-right whitespace-nowrap align-middle border-x border-[#f0f0f0]">
+                        <div className="flex flex-col items-end w-full min-w-[120px]">
+                          <div className="flex items-center justify-end space-x-2 w-full">
+                            <span className="font-mono text-xs font-semibold text-slate-800">{maskMoney(e.monthlyCost)}</span>
+                            <button onClick={() => toggleCost(e.userId)} className="text-slate-400 hover:text-slate-600 transition-colors flex items-center text-[9px] bg-slate-50 px-1 py-0.5 rounded border border-[#f0f0f0]">
+                              明细 {expandedCosts.has(e.userId) ? <ChevronUp className="w-3 h-3 ml-0.5" /> : <ChevronDown className="w-3 h-3 ml-0.5" />}
+                            </button>
+                          </div>
+                          {expandedCosts.has(e.userId) && (
+                            <div className="mt-2 w-full bg-slate-50/80 border border-[#f0f0f0] rounded p-1.5 space-y-1 text-[10px] text-slate-500 font-mono text-right">
+                              <div className="flex justify-between items-center">
+                                <span>工资</span>
+                                <span className="text-slate-700">{maskMoney(e.baseSalary || 0)}</span>
+                              </div>
+                              {e.isRevenueExpert && (
+                                <div className="flex justify-between items-center">
+                                  <span>A类</span>
+                                  <span className="text-slate-700">{maskMoney(e.aCost || 0)}</span>
+                                </div>
+                              )}
+                              {e.isProdExpert && (
+                                <div className="flex justify-between items-center">
+                                  <span>B1类</span>
+                                  <span className="text-slate-700">{maskMoney(e.b1Cost || 0)}</span>
+                                </div>
+                              )}
+                              <div className="flex justify-between items-center">
+                                <span className="flex items-center text-slate-400">
+                                  D类
+                                  <InfoTip title="D类成本" content="经营单元开支，无项目。按实际发生月人员平均分摊" className="ml-1 opacity-70 hover:opacity-100" />
+                                </span>
+                                <span className="text-slate-700">{maskMoney(e.dCost || 0)}</span>
+                              </div>
+                              <div className="flex justify-between items-center">
+                                <span className="flex items-center text-slate-400">
+                                  FXDC
+                                  <InfoTip title="FXDC" content="非有效工时对冲，冲抵刚性工资包" className="ml-1 opacity-70 hover:opacity-100" />
+                                </span>
+                                <span className="text-emerald-600">-{maskMoney(e.nonEffectiveDeduction || 0)}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      {/* 4. 月度贡献 */}
+                      <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-semibold">
+                        <span className={e.contribution > 0 ? 'text-emerald-600' : e.contribution < 0 ? 'text-rose-500' : 'text-slate-500'}>
                           {e.contribution > 0 ? `+${formatAmount(e.contribution)}` : formatAmount(e.contribution)}
                         </span>
-                        <span className={`text-[8px] font-bold px-1.5 py-0.2 rounded-xs mt-0.5 border ${e.contributionStatus === '优秀' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : (e.contributionStatus === '预警' ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-amber-50 text-amber-600 border-amber-200')}`}>
-                          {e.contributionStatus}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono">
-                      <div className="flex flex-col items-end">
-                        <span className={`text-xs font-bold ${e.monthlyEfficiency >= 1.5 ? 'text-blue-600' : (e.monthlyEfficiency >= 1.2 ? 'text-emerald-600' : 'text-rose-500')}`}>
+                      </td>
+                      {/* 5. 月度效率 */}
+                      <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-bold">
+                        <span className={e.monthlyEfficiency >= 1.5 ? 'text-blue-600' : e.monthlyEfficiency >= 1.2 ? 'text-emerald-600' : 'text-rose-500'}>
                           {formatRatio(e.monthlyEfficiency)}
                         </span>
-                        <div className="w-12 h-1 bg-slate-100 rounded-full overflow-hidden flex mt-1">
-                          <div 
-                            className={`h-full transition-all duration-500 ${e.monthlyEfficiency >= 1 ? 'bg-blue-500' : 'bg-rose-500'}`} 
-                            style={{ width: `${Math.min(100, e.monthlyEfficiency * 30)}%` }}
-                          />
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono">
-                      <span className={`text-xs font-bold ${e.yearlyEfficiency >= 1.5 ? 'text-blue-500' : (e.yearlyEfficiency >= 1.2 ? 'text-emerald-500' : 'text-slate-400')}`}>
-                        {formatRatio(e.yearlyEfficiency)}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-4 text-left whitespace-nowrap">
-                      <div className="flex flex-col items-start space-y-0.5">
-                        {e.tier === 'S' && <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-bold rounded-xs uppercase tracking-wider">核心资产/重点保护</span>}
-                        {e.tier === 'A' && <span className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 text-[9px] font-bold rounded-xs uppercase tracking-wider">核心晋升储备</span>}
-                        {e.tier === 'B' && <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] font-bold rounded-xs uppercase tracking-wider">标准评价/持续激励</span>}
-                        {e.tier === 'C' && <span className="px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 text-[9px] font-bold rounded-xs uppercase tracking-wider">负向资产/熔断淘汰</span>}
-                        
-                        <p className="text-[8px] font-medium text-slate-400 tracking-tight">
-                          {e.fixedRatio > 70 ? '薪酬刚性过高：触发降薪' : (e.fixedRatio < 40 && e.contribution > 5000 ? '弹性空间充裕：建议加薪' : '薪酬结构 stable')}
-                        </p>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      {/* 6. 年度效率 */}
+                      <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-bold">
+                        <span className={e.yearlyEfficiency >= 1.5 ? 'text-blue-600' : e.yearlyEfficiency >= 1.2 ? 'text-emerald-600' : 'text-slate-500'}>
+                          {formatRatio(e.yearlyEfficiency)}
+                        </span>
+                      </td>
+                      {/* 7. 管理决策路由 */}
+                      <td className="py-2 px-3.5 text-left whitespace-nowrap">
+                        <span className={`inline-block px-1.5 py-0.5 text-[9px] font-bold rounded-xs border ${getTierBadgeClass(e.tier)}`}>
+                          {getTierBadgeText(e.tier)}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
-            </tbody>
+            
+</tbody>
           </table>
         </div>
       </div>

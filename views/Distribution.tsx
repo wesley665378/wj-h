@@ -47,6 +47,7 @@ import {
   History,
   CheckCircle,
   FileSpreadsheet,
+  Search,
 } from "lucide-react";
 
 interface DistributionProps {
@@ -225,6 +226,7 @@ const Distribution: React.FC<DistributionProps> = ({
   const [filterMonth, setFilterMonth] = useState<string>(() => getLocalMonthString()); // 默认当月
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   const effectiveMonth = useMemo(() => {
     if (startDate) return startDate.slice(0, 7);
@@ -763,8 +765,16 @@ const Distribution: React.FC<DistributionProps> = ({
     return totalValue > 0 ? totalGold / totalValue : 0;
   }, [distributionData]);
 
+  const filteredDistributionData = useMemo(() => {
+    return distributionData.filter(d => {
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase();
+      return d.userName.toLowerCase().includes(q) || String(d.userId).toLowerCase().includes(q);
+    });
+  }, [distributionData, searchQuery]);
+
   const exportToExcel = () => {
-    const data = distributionData.map((d) => {
+    const data = filteredDistributionData.map((d) => {
       const yearlyIncomeKey = d.isRevenueExpert
         ? "年度累计收款包"
         : "年度累计产兑包";
@@ -856,6 +866,16 @@ const Distribution: React.FC<DistributionProps> = ({
                   setEndDate('');
                 }}
               />
+              <div className="flex-1 min-w-[200px] relative max-w-[240px]">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="搜索姓名或员工编号..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full h-10 bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all placeholder:text-slate-400 shadow-xs"
+                />
+              </div>
               <button
                 onClick={exportToExcel}
                 className="px-4 py-2 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all flex items-center shadow-2xs"
@@ -944,7 +964,7 @@ const Distribution: React.FC<DistributionProps> = ({
               专家价值核算矩阵
             </h4>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest hidden sm:inline">
-              共 {distributionData.length} 位专家参与分配
+              共 {filteredDistributionData.length} 位专家参与分配
             </span>
           </div>
 
@@ -969,6 +989,16 @@ const Distribution: React.FC<DistributionProps> = ({
                 setEndDate('');
               }}
             />
+            <div className="flex-1 min-w-[200px] relative max-w-[240px]">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="搜索姓名或员工编号..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full h-10 bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all placeholder:text-slate-400 shadow-xs"
+              />
+            </div>
             <button
               onClick={exportToExcel}
               className="px-4 py-2 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all flex items-center shadow-2xs"
@@ -1033,8 +1063,15 @@ const Distribution: React.FC<DistributionProps> = ({
               </tr>
             </thead>
             <tbody>
-              {distributionData.map((data) => {
-                const userObj = users.find((u) => u.id === data.userId);
+              {filteredDistributionData.length === 0 ? (
+                <tr>
+                  <td colSpan={14} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">
+                    没有找到符合条件的专家
+                  </td>
+                </tr>
+              ) : (
+                filteredDistributionData.map((data) => {
+                  const userObj = users.find((u) => u.id === data.userId);
                 const userCenter = userObj?.center || "";
                 const userCenters = parseCenterList(userCenter);
 
@@ -1592,7 +1629,7 @@ const Distribution: React.FC<DistributionProps> = ({
                     </AnimatePresence>
                   </React.Fragment>
                 );
-              })}
+              }))}
             </tbody>
           </table>
         </div>
@@ -1600,7 +1637,7 @@ const Distribution: React.FC<DistributionProps> = ({
         {/* Mobile Card View Removed - Table is now responsive with scroll */}
         <div className="hidden">
           <AnimatePresence>
-            {distributionData.map((data) => {
+            {filteredDistributionData.map((data) => {
               const userObj = users.find((u) => u.id === data.userId);
               const userCenter = userObj?.center || "";
               const userCenters = parseCenterList(userCenter);
