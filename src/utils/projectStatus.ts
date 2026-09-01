@@ -1,4 +1,4 @@
-import { MiningResource, ProjectStatus, ResourceStatus } from '../../types';
+import { MiningResource, ProjectStatus } from '../../types';
 
 /**
  * 项目态公式 SSOT (前端第二道闸)
@@ -137,7 +137,7 @@ export function deriveProjectStatus(resource?: MiningResource | null): { status:
   const reachedMs = toReachedMs(resource);
   const isCapped = isMineralCapReached(resource) && reachedMs > 0;
 
-  if (lifecycle === 'settling' || isCapped) {
+  if (isCapped) {
     return { 
        status: ProjectStatus.Capping, 
        remainingDays: getSettlingDaysLeft(resource) 

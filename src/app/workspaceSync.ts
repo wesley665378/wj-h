@@ -64,6 +64,7 @@ export interface BuildAppSyncPayloadInput {
     circuitBreakers: CircuitBreaker[];
     meetingSamples: MeetingSample[];
     acceptanceRecords: AcceptanceRecord[];
+    importBatchId: string;
   }>;
 }
 
@@ -90,12 +91,12 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
     };
   });
 
-  const nextLogs = overrides ? overrides.logs : input.logs;
-  const nextTxs = overrides ? overrides.transactions : input.transactions;
-  const nextRes = overrides ? overrides.miningResources : input.miningResources;
-  const nextCBs = overrides ? overrides.circuitBreakers : input.circuitBreakers;
-  const nextSamples = overrides ? overrides.meetingSamples : input.meetingSamples;
-  const nextAcc = overrides ? overrides.acceptanceRecords : input.acceptanceRecords;
+  const nextLogs = overrides?.logs ?? input.logs;
+  const nextTxs = overrides?.transactions ?? input.transactions;
+  const nextRes = overrides?.miningResources ?? input.miningResources;
+  const nextCBs = overrides?.circuitBreakers ?? input.circuitBreakers;
+  const nextSamples = overrides?.meetingSamples ?? input.meetingSamples;
+  const nextAcc = overrides?.acceptanceRecords ?? input.acceptanceRecords;
 
   const dtcbLogs = nextLogs ? nextLogs.filter(l => l.confirmationType === '手动确权') : undefined;
   const jzczLogs = nextLogs ? nextLogs.filter(l => l.confirmationType !== '手动确权') : undefined;
@@ -125,6 +126,8 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
     jzfp: jzfpSnapshots,
     rdq: nextCBs,
     meetingSamples: nextSamples,
+    importBatchId: overrides?.importBatchId,
+    import_batch_id: overrides?.importBatchId,
   };
 
   // 关键修复：非 Admin 用户强制省略 users 字段，防止触发后端快照比对 403

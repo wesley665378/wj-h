@@ -39,8 +39,8 @@ export function calculateDualTrackCoreMatrices(mining: DualTrackMiningContext) {
     mining.totalConfirmedValue
   );
 
-  // N = round(款初 × 0.933)
-  const N = Math.round(updatedRevenueLimit * 0.933);
+  // N = round(款初) (款初已是净值)
+  const N = Math.round(updatedRevenueLimit);
 
   const sumCRevenuePoints = mining.cRevenuePointsList.reduce((sum, p) => sum + p, 0);
   const sumCValuePoints = mining.cValuePointsList.reduce((sum, p) => sum + p, 0);
@@ -134,11 +134,11 @@ export const calculateHistoricalNetValue = (log: ValueCreationLog, resources: Mi
 
   const weight = log.cClassRatio || 1;
   const b2Weight = (log.category === RefineCategory.Value || (log.category as string) === 'Value' || (log.category as string) === '产值') ? (log.b2ClassRatio || 1) : 1;
-  const baseAmount = Number(log.rawAmount !== undefined && log.rawAmount !== null ? log.rawAmount : log.amount) || 0; 
+  const baseAmount = calculateInjectedAmount(log); 
   return baseAmount * weight * b2Weight * factor;
 };
 
-import { applyConsumptionHedgeToLogs, calculateHedgeCapacitiesAndWeights } from './consumptionHedge';
+import { calculateInjectedAmount, applyConsumptionHedgeToLogs, calculateHedgeCapacitiesAndWeights } from './consumptionHedge';
 
 export { applyConsumptionHedgeToLogs };
 export function recalibrateLogsForMiningId(
@@ -361,7 +361,7 @@ export function computeValueOutput5Incentive(
     return 0;
   }
 
-  const baseAmount = Number(log.rawAmount !== undefined && log.rawAmount !== null ? log.rawAmount : log.amount) || 0;
+  const baseAmount = calculateInjectedAmount(log);
   // amount × 5%（中产专也是5%，不是6%）；不乘 C权、B2权
   return Math.round(baseAmount * 0.05);
 }
@@ -400,7 +400,7 @@ export function computeCollection2Incentive(
     return 0;
   }
 
-  const baseAmount = Number(log.rawAmount !== undefined && log.rawAmount !== null ? log.rawAmount : log.amount) || 0;
+  const baseAmount = calculateInjectedAmount(log);
   // amount × 2%；不乘 C权、B2权
   return Math.round(baseAmount * 0.02);
 }

@@ -38,6 +38,7 @@ import {
   saveMeetingSampleApi,
   toastApiError,
   deleteMiningResource,
+  updateResource,
   setAuthToken,
   clearAuthToken,
   fetchSessionUser,
@@ -277,6 +278,12 @@ const App: React.FC = () => {
   const [filterMonth, setFilterMonth] = useState<string>(() => getLocalMonthString());
 
   const lastSyncedFingerprintRef = React.useRef<string>('');
+  const isAutoSyncPausedRef = React.useRef<boolean>(false);
+
+  const setPauseAutoSync = React.useCallback((paused: boolean) => {
+    isAutoSyncPausedRef.current = paused;
+    (window as any).__PAUSE_AUTO_SYNC__ = paused;
+  }, []);
 
   const getWorkspaceFingerprint = React.useCallback((overrides?: any) => {
     const currentUsers = overrides?.users ?? managedUsers;
@@ -313,6 +320,7 @@ const App: React.FC = () => {
     meetingSamples?: MeetingSample[];
     acceptanceRecords?: AcceptanceRecord[];
     jydyUnits?: JydyUnit[];
+    importBatchId?: string;
   }, options?: { silent?: boolean; successMessage?: string; loadingMessage?: string; toastId?: string | number }) => {
     if (!currentUser) return;
     if (!workspaceLoaded) {
@@ -341,10 +349,16 @@ const App: React.FC = () => {
     });
 
     try {
-      const results = await Promise.all([
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('REQUEST_TIMEOUT_60S')), 60000);
+      });
+
+      const syncPromise = Promise.all([
         syncWorkspace(payload),
         overrides?.jydyUnits ? syncJydyList(overrides.jydyUnits) : Promise.resolve({ success: true }),
       ]);
+
+      const results = await Promise.race([syncPromise, timeoutPromise]);
       const [syncRes] = results;
       if (syncRes && (syncRes as any).success === false) {
         throw new Error((syncRes as any).error || '数据同步失败');
@@ -359,10 +373,15 @@ const App: React.FC = () => {
       }
     } catch (err: any) {
       console.error('Data sync error:', err);
+      const is60sTimeout = err?.message === 'REQUEST_TIMEOUT_60S';
+      const friendlyMsg = is60sTimeout
+        ? '请求超时（60秒）。后端可能仍在处理或已完成落库，请稍后刷新页面核对处理进度，切勿重复提交！'
+        : (err.message || '工作区数据同步失败');
+
       if (toastId) {
-        toast.error(err.message || '工作区数据同步失败', { id: toastId });
+        toast.error(friendlyMsg, { id: toastId });
       } else {
-        toastApiError(err, '工作区数据同步失败');
+        toastApiError(err, friendlyMsg);
       }
       throw err;
     }
@@ -591,12 +610,16 @@ const App: React.FC = () => {
     addSystemLog('系统调节', details);
   }, [processLogsSubmission, addSystemLog]);
 
-  const onLogSubmit = React.useCallback((newLogs: ValueCreationLog | ValueCreationLog[]) => {
+  const onLogSubmit = React.useCallback((newLogs: ValueCreationLog | ValueCreationLog[], options?: { isImport?: boolean; skipSystemLogs?: boolean }) => {
     const logsToAdd = Array.isArray(newLogs) ? newLogs : [newLogs];
     processLogsSubmission(logsToAdd);
-    logsToAdd.forEach(log => {
-      addSystemLog('产出申报', `提交了 ${log.amount} 积分的 ${log.category} 产出申报`);
-    });
+    if (options?.isImport) {
+      addSystemLog('批量导入', `成功批量导入确权了 ${logsToAdd.length} 条价值创造记录`);
+    } else if (!options?.skipSystemLogs) {
+      logsToAdd.forEach(log => {
+        addSystemLog('产出申报', `提交了 ${log.amount} 积分的 ${log.category} 产出申报`);
+      });
+    }
   }, [processLogsSubmission, addSystemLog]);
 
   const onConsumptionSubmit = React.useCallback((newLog: ValueCreationLog | ValueCreationLog[]) => {
@@ -733,54 +756,44 @@ const App: React.FC = () => {
   }, [addSystemLog, persistWorkspaceWithOverrides]);
 
   const onAddResource = React.useCallback(async (res: MiningResource) => {
-    let nextRes: MiningResource[] = [];
-    setMiningResources(prev => {
-      nextRes = [...prev, res];
-      return nextRes;
-    });
+    const nextRes = [...miningResources, res];
+    if (nextRes.length === 0) {
+      toast.error('本地矿山列表为空，拒绝同步');
+      return;
+    }
+    setMiningResources(nextRes);
     try {
       await persistWorkspaceWithOverrides({ miningResources: nextRes }, { successMessage: '新增资源成功' });
     } catch (err: any) {
       toastApiError(err, '新增资源同步失败');
     }
     addSystemLog('资源管理', `新增了矿山资源 ${res.id}`);
-  }, [addSystemLog, persistWorkspaceWithOverrides]);
+  }, [addSystemLog, persistWorkspaceWithOverrides, miningResources]);
 
   const onUpdateResource = React.useCallback(async (res: MiningResource) => {
-    let nextRes: MiningResource[] = [];
-    setMiningResources(prev => {
-      nextRes = prev.map(r => r.id === res.id ? res : r);
-      return nextRes;
-    });
     try {
-      await persistWorkspaceWithOverrides({ miningResources: nextRes }, { successMessage: '更新资源成功' });
+      await updateResource(res.id, res);
+      setMiningResources(prev => prev.map(r => r.id === res.id ? res : r));
+      toast.success('更新资源成功');
+      addSystemLog('资源管理', `更新了矿山资源 ${res.id}`);
     } catch (err: any) {
-      toastApiError(err, '更新资源同步失败');
+      toastApiError(err, '更新矿山资源失败');
+      throw err;
     }
-    addSystemLog('资源管理', `更新了矿山资源 ${res.id}`);
-  }, [addSystemLog, persistWorkspaceWithOverrides]);
+  }, [addSystemLog]);
 
   const onDeleteResource = React.useCallback(async (id: string) => {
     try {
       await deleteMiningResource(id);
+      setMiningResources(prev => prev.filter(r => r.id !== id));
+      toast.success('删除资源成功');
+      addSystemLog('资源管理', `删除了矿山资源 ${id}`);
+      return true;
     } catch (err: any) {
       toastApiError(err, '删除矿山资源失败');
       return false;
     }
-
-    let nextRes: MiningResource[] = [];
-    setMiningResources(prev => {
-      nextRes = prev.filter(r => r.id !== id);
-      return nextRes;
-    });
-    try {
-      await persistWorkspaceWithOverrides({ miningResources: nextRes }, { successMessage: '删除资源成功' });
-    } catch (err: any) {
-      toastApiError(err, '删除资源同步失败');
-    }
-    addSystemLog('资源管理', `删除了矿山资源 ${id}`);
-    return true;
-  }, [addSystemLog, persistWorkspaceWithOverrides]);
+  }, [addSystemLog]);
 
   const onDeleteLog = React.useCallback((logId: string) => {
     showConfirm(`确定要删除审计记录 #${logId} 吗？此操作不可逆！`, async () => {
@@ -913,6 +926,11 @@ const App: React.FC = () => {
 
   // 3. 数据持久化与后端同步 (500ms 去抖动，动静分离与静默同步)
   useEffect(() => {
+    // 导入或特别操作期间暂停自动 sync，规避并发与重复写库
+    if (isAutoSyncPausedRef.current || (window as any).__PAUSE_AUTO_SYNC__) {
+      return;
+    }
+
     const currentFingerprint = getWorkspaceFingerprint();
 
     // 显式写库已更新 fingerprint 或数据未变动，跳过自动 sync 避免重复请求
@@ -1130,7 +1148,7 @@ const App: React.FC = () => {
         jzczLogs: filteredLogs,
         auditLogs: auditLogs,
         resources: filteredResources, 
-        users: filteredUsers, 
+        users: managedUsers, 
         currentUser, 
         transactions: filteredTransactions,
         onSystemAdjustment,
@@ -1151,7 +1169,8 @@ const App: React.FC = () => {
         onAddCircuitBreaker,
         quotaSnapshots,
         processingLogIds,
-        persistWorkspaceWithOverrides
+        persistWorkspaceWithOverrides,
+        onPauseAutoSync: setPauseAutoSync
       },
       consumption: { 
         user: currentUser, 
@@ -1255,6 +1274,7 @@ const App: React.FC = () => {
         transactions: filteredTransactions, 
         resources: filteredResources, 
         onSubmitTransaction,
+        acceptanceRecords,
       },
       account: { currentUser, logs: auditLogs, transactions: filteredTransactions, resources: filteredResources, users: filteredUsers },
       personnel: { 

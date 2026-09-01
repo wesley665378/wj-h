@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { User, ValueCreationLog, MiningResource, InternalTransaction } from '../../types';
-import { computeBusinessUnitProfitRanking, UnitRankingRow } from '../utils/businessUnitProfitRanking';
+import { computeBusinessUnitProfitRanking, UnitRankingRow, getUnitManagerCategory } from '../utils/businessUnitProfitRanking';
 import { useCostPrivacy } from '../hooks/useCostPrivacy';
 import { CostPrivacyToggle } from './CostPrivacyToggle';
 import { formatMoney } from '../utils/formatMoney';
@@ -8,7 +8,7 @@ import { Card } from './UI';
 import { Trophy, ChevronDown, ChevronUp, Info } from 'lucide-react';
 import { UI_LABELS } from '../constants/uiLabels';
 
-interface BusinessUnitProfitRankingTableProps {
+export interface BusinessUnitProfitRankingTableProps {
   units: string[];
   selectedMonth: string; // YYYY-MM
   users: User[];
@@ -18,6 +18,7 @@ interface BusinessUnitProfitRankingTableProps {
   currentUser?: User;
   startDate?: string;
   endDate?: string;
+  defaultExpanded?: boolean;
 }
 
 export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingTableProps> = ({
@@ -29,9 +30,11 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
   transactions,
   startDate,
   endDate,
+  defaultExpanded = false,
 }) => {
   // 默认折叠，领导/用户点击展开才可见
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+  const [filterManagerType, setFilterManagerType] = useState('全部');
   const { isCostVisible, toggleCostVisible, maskMoney } = useCostPrivacy();
 
   // 计算榜单数据
@@ -65,6 +68,14 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
     }
     return pairs;
   }, [rankingRows]);
+
+  const filteredPairedRows = useMemo(() => {
+    if (filterManagerType === '全部') return pairedRows;
+    return pairedRows.filter(pair => {
+        const category = getUnitManagerCategory(pair.unitName, users);
+        return category === filterManagerType;
+    });
+  }, [pairedRows, filterManagerType, users]);
 
   const formatAmount = (val: number | null, isCostField = false) => {
     if (val === null || val === undefined) return '—';
@@ -101,6 +112,17 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
         </div>
 
         <div className="flex items-center space-x-3" onClick={(e) => e.stopPropagation()}>
+          <select
+            value={filterManagerType}
+            onChange={e => setFilterManagerType(e.target.value)}
+            className="px-3 py-2 text-[12px] bg-white border border-[#b8d0f7] rounded-[4px] font-bold text-slate-700 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 cursor-pointer h-9"
+          >
+            <option value="全部">全部</option>
+            <option value="经管员高款专">经管员高款专</option>
+            <option value="经管员高产专">经管员高产专</option>
+            <option value="经管员NPC">经管员NPC</option>
+          </select>
+
           <CostPrivacyToggle size="sm" />
 
           <button
@@ -135,7 +157,7 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
-                {pairedRows.map((pair, idx) => {
+                {filteredPairedRows.map((pair, idx) => {
                   const { row1, row2 } = pair;
                   const isEven = idx % 2 === 0;
 
@@ -285,7 +307,7 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
                   );
                 })}
 
-                {pairedRows.length === 0 && (
+                {filteredPairedRows.length === 0 && (
                   <tr>
                     <td colSpan={12} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
                   </tr>

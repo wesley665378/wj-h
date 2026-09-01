@@ -14,7 +14,7 @@ import { InfoTip } from "../src/components/InfoTip";
 import { CostPrivacyToggle } from "../src/components/CostPrivacyToggle";
 import { BusinessDateFilter } from "../src/components/BusinessDateFilter";
 import { fetchDistributionData } from "../src/api/distribution";
-import { createCdtzRecord } from "../src/api/cdtz";
+import { createCdtzRecord, fetchCdtzRecords } from "../src/api/cdtz";
 import { toast } from "sonner";
 import {
   ValueCreationLog,
@@ -57,6 +57,7 @@ interface DistributionProps {
   transactions: InternalTransaction[];
   resources: MiningResource[];
   onSubmitTransaction?: (tx: InternalTransaction) => void;
+  acceptanceRecords?: AcceptanceRecord[];
 }
 
 interface BonusCalculation {
@@ -107,14 +108,74 @@ const fmtAmount = (val: number | undefined | null): string => {
 };
 
 const fmtDebt = (val: number | undefined | null): string => {
-  if (val === undefined || val === null || isNaN(val) || Math.round(val) === 0) {
+  if (val === undefined || val === null || isNaN(val)) {
     return "0";
   }
   const rounded = Math.round(val);
-  if (rounded < 0) {
-    return rounded.toLocaleString();
+  if (rounded === 0) {
+    return "0";
   }
-  return `-${rounded.toLocaleString()}`;
+  const absValue = Math.abs(rounded);
+  return `-${absValue.toLocaleString()}`;
+};
+
+const TheoreticalCell: React.FC<{
+  isRevenueExpert: boolean;
+  theoreticalBonus: number;
+  expanded: boolean;
+  onToggle: () => void;
+}> = ({ isRevenueExpert, theoreticalBonus, expanded, onToggle }) => {
+  const rounded100 = Math.round(theoreticalBonus);
+  const rounded80 = Math.round(theoreticalBonus * 0.8);
+  const rounded60 = Math.round(theoreticalBonus * 0.6);
+
+  if (!isRevenueExpert) {
+    return (
+      <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-amber-600 whitespace-nowrap">
+        {fmtAmount(theoreticalBonus)}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 px-3 py-2 flex flex-col w-full text-right select-none">
+      <div className="flex items-center justify-end gap-2">
+        <span className="font-mono text-[11px] font-black text-amber-600">
+          {fmtAmount(rounded100)}
+        </span>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle();
+          }}
+          className="text-[10px] font-bold text-amber-600/80 hover:text-amber-700 flex items-center gap-0.5 bg-amber-100/40 hover:bg-amber-100 px-1.5 py-0.5 rounded transition-all"
+        >
+          <span>{expanded ? '收起' : '展开'}</span>
+          <span className="text-[9px]">{expanded ? '▴' : '▾'}</span>
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="mt-2 pt-2 border-t border-dashed border-amber-200 text-right flex flex-col gap-1 w-full max-w-[180px] ml-auto">
+          <div className="flex justify-between items-center text-[10px] py-1 border-b border-[#e5e7eb]">
+            <span className="text-slate-400 font-medium">60% 档</span>
+            <span className="font-mono font-bold text-amber-700">{fmtAmount(rounded60)}</span>
+          </div>
+          <div className="flex justify-between items-center text-[10px] py-1 border-b border-[#e5e7eb]">
+            <span className="text-slate-400 font-medium">80% 档</span>
+            <span className="font-mono font-bold text-amber-700">{fmtAmount(rounded80)}</span>
+          </div>
+          <div className="flex justify-between items-center text-[10px] py-1 border-b border-[#e5e7eb]">
+            <span className="text-slate-400 font-medium">100% 档</span>
+            <span className="font-mono font-bold text-amber-700">{fmtAmount(rounded100)}</span>
+          </div>
+          <div className="text-[9px] text-slate-400 font-normal italic mt-1 text-center">
+            情景参考，不代表实际发放
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
 const Distribution: React.FC<DistributionProps> = ({
@@ -124,9 +185,11 @@ const Distribution: React.FC<DistributionProps> = ({
   transactions,
   resources,
   onSubmitTransaction,
+  acceptanceRecords,
 }) => {
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
+  const [theoreticalExpanded, setTheoreticalExpanded] = useState<Record<string, boolean>>({});
   const [bonusTarget, setBonusTarget] = useState<BonusCalculation | null>(null);
   const [bonusForm, setBonusForm] = useState({
     miningId: "",
@@ -213,6 +276,7 @@ const Distribution: React.FC<DistributionProps> = ({
           await createCdtzRecord(newRecord);
           toast.success(`已成功写入承兑台账 cdtz！对 [${bonusTarget.userName}] 的 ${bonusForm.category} 发放：${fmtAmount(bonusForm.amount)}`);
           loadDistribution();
+          loadLocalCdtz();
         } catch (err) {
           showAlert("写入承兑台账 cdtz 失败，请重试");
           return;
@@ -236,6 +300,19 @@ const Distribution: React.FC<DistributionProps> = ({
   const [serverDistribution, setServerDistribution] = useState<any[] | null>(null);
   const [distributionLoading, setDistributionLoading] = useState<boolean>(false);
   const [distributionError, setDistributionError] = useState<string | null>(null);
+  const [localCdtzRecords, setLocalCdtzRecords] = useState<AcceptanceRecord[]>([]);
+
+  const loadLocalCdtz = () => {
+    fetchCdtzRecords()
+      .then(res => {
+        if (res && Array.isArray(res.records)) {
+          setLocalCdtzRecords(res.records);
+        }
+      })
+      .catch(err => {
+        console.error("加载 local cdtz 失败:", err);
+      });
+  };
 
   const loadDistribution = () => {
     if (isLocalEmbedded) {
@@ -267,6 +344,7 @@ const Distribution: React.FC<DistributionProps> = ({
 
   useEffect(() => {
     loadDistribution();
+    loadLocalCdtz();
   }, [effectiveMonth, isLocalEmbedded]);
 
   const { isCostVisible, toggleCostVisible, maskMoney, maskText } = useCostPrivacy();
@@ -765,6 +843,25 @@ const Distribution: React.FC<DistributionProps> = ({
     return totalValue > 0 ? totalGold / totalValue : 0;
   }, [distributionData]);
 
+  const cdtzList = useMemo(() => {
+    const list: AcceptanceRecord[] = [];
+    const seen = new Set<string>();
+
+    const addRecords = (arr: AcceptanceRecord[] | undefined) => {
+      if (!arr || !Array.isArray(arr)) return;
+      for (const r of arr) {
+        if (r && r.id && !seen.has(r.id)) {
+          seen.add(r.id);
+          list.push(r);
+        }
+      }
+    };
+
+    addRecords(localCdtzRecords);
+    addRecords(acceptanceRecords);
+    return list;
+  }, [localCdtzRecords, acceptanceRecords]);
+
   const filteredDistributionData = useMemo(() => {
     return distributionData.filter(d => {
       if (!searchQuery.trim()) return true;
@@ -1019,8 +1116,8 @@ const Distribution: React.FC<DistributionProps> = ({
                 </th>
                 <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[120px]">
                   <div className="flex items-center justify-center gap-1.5">
-                    <span>产兑包/收款包</span>
-                    <InfoTip title="产兑包/收款包口径" content="款专收款已确权，产专产值已确权或待确权联动确权。" />
+                    <span>收产包</span>
+                    <InfoTip title="收产包口径" content="款专收款已确权，产专产值已确权或待确权联动确权。" />
                   </div>
                 </th>
                 <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[100px]">
@@ -1028,6 +1125,12 @@ const Distribution: React.FC<DistributionProps> = ({
                     <span>总成本对冲</span>
                     <CostPrivacyToggle size="sm" showLabel={false} />
                     <InfoTip title="总成本对冲口径" content="款专工资+A类，产专工资+B1类，不含 B2/C 动态对冲。" />
+                  </div>
+                </th>
+                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[100px]">
+                  <div className="flex items-center justify-center gap-1.5">
+                    <span>历史欠产包</span>
+                    <InfoTip title="历史欠产包口径" content="当年 1~M-1 全量滚动，无流水仍计工资，不含当月，负数展示。" />
                   </div>
                 </th>
                 <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[100px]">
@@ -1050,22 +1153,19 @@ const Distribution: React.FC<DistributionProps> = ({
                 </th>
                 <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[100px]">
                   <div className="flex items-center justify-center gap-1.5">
-                    <span>历史欠产包</span>
-                     <InfoTip title="历史欠产包口径" content="当年 1~M-1 全量滚动，无流水仍计工资，不含当月，负数展示。" />
-                  </div>
-                </th>
-                <th className="border-b border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[100px]">
-                  <div className="flex items-center justify-center gap-1.5">
                     <span>年度累计</span>
                      <InfoTip title="年度累计口径" content="按选定审核状态年度全量累计计算。" />
                   </div>
+                </th>
+                <th className="border-b border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[100px]">
+                  操作控制
                 </th>
               </tr>
             </thead>
             <tbody>
               {filteredDistributionData.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">
+                  <td colSpan={9} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">
                     没有找到符合条件的专家
                   </td>
                 </tr>
@@ -1102,6 +1202,10 @@ const Distribution: React.FC<DistributionProps> = ({
 
                 const kuanTiers = getKuanTheoreticalTiers(data);
 
+                const userCdtzSum = cdtzList
+                  .filter((r) => r.userId === data.userId && r.month === effectiveMonth && r.status === "已承兑")
+                  .reduce((sum, r) => sum + r.amount, 0);
+
                 return (
                   <React.Fragment key={data.userId}>
                     <tr
@@ -1116,18 +1220,17 @@ const Distribution: React.FC<DistributionProps> = ({
                           <span className="text-[11px] font-normal text-[#64748b] bg-slate-100 px-2.5 py-0.5 rounded-full">
                             {formatCategory(data.category)}
                           </span>
-                          {(data.category === "经管员高款专" ||
-                            data.category === "经管员高产专") && (
-                            <div className="text-[10px] font-normal text-[#64748b] flex flex-col items-center mt-1.5 border-t border-slate-100 pt-1 w-full">
+                          {data.category === "经管员高款专" && (
+                            <div className="mt-2 px-2 py-1 text-[10px] text-slate-500 border border-dashed border-slate-200 rounded-lg bg-slate-50/50 flex flex-col items-center select-none">
                               <span className="text-slate-400">经营单元本级</span>
-                              <span className="font-semibold text-indigo-600">
-                                {fmtAmount(data.centerLevelBonus || 0)}
+                              <span className="font-mono font-bold text-indigo-600">
+                                {fmtAmount(out5_Sum + coll2_Sum)}
                               </span>
                             </div>
                           )}
                         </div>
                       </td>
-                      {/* Column 2: 产兑包/收款包 */}
+                      {/* Column 2: 收产包 */}
                       <td className="p-0 border border-slate-200">
                         <div className="flex flex-col divide-y divide-slate-200 h-full w-full">
                           <div className="flex items-stretch flex-1 min-h-[38px]">
@@ -1175,7 +1278,33 @@ const Distribution: React.FC<DistributionProps> = ({
                         </div>
                       </td>
 
-                      {/* Column 4: 积分额度/当月结余 */}
+                      {/* Column 4: 历史欠产包 */}
+                      <td className="p-0 border border-slate-200">
+                        <div className="flex flex-col divide-y divide-slate-200 h-full w-full">
+                          <div className="flex items-stretch flex-1 min-h-[38px]">
+                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
+                              已确权
+                            </div>
+                            <div
+                              className={`flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] whitespace-nowrap text-red-500 font-bold`}
+                            >
+                              {fmtDebt(data.historyDebtConfirmed)}
+                            </div>
+                          </div>
+                          <div className="flex items-stretch flex-1 min-h-[38px]">
+                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
+                              入库
+                            </div>
+                            <div
+                              className={`flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] whitespace-nowrap text-red-500 font-bold`}
+                            >
+                              {fmtDebt(data.historyDebtApproved)}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Column 5: 分配额度（月） */}
                       <td className="p-0 border border-slate-200">
                         <div className="flex flex-col divide-y divide-slate-200 h-full w-full">
                           <div className="flex items-stretch flex-1 min-h-[38px]">
@@ -1197,37 +1326,41 @@ const Distribution: React.FC<DistributionProps> = ({
                         </div>
                       </td>
 
-                      {/* Column: 理论（额度） */}
+                      {/* Column 6: 理论（额度） */}
                       <td className="p-0 border border-slate-200 bg-amber-50/30">
                         <div className="flex flex-col divide-y divide-amber-100/50 h-full w-full">
                           <div className="flex items-stretch flex-1 min-h-[38px]">
                             <div className="flex items-center justify-center w-[60px] flex-none border-r border-amber-100/50 text-amber-600/70 text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
                               已确权
                             </div>
-                            <div className="flex-1 px-3 py-1.5 flex flex-col items-end justify-center font-mono text-[11px] font-black text-amber-600 whitespace-nowrap leading-tight">
-                              {data.isRevenueExpert ? (
-                                <div className="text-right flex flex-col gap-0.5">
-                                  <div>{fmtAmount(data.theoreticalBonusConfirmed * 0.6)}</div>
-                                  <div>{fmtAmount(data.theoreticalBonusConfirmed * 0.8)}</div>
-                                  <div>{fmtAmount(data.theoreticalBonusConfirmed * 1.0)}</div>
-                                </div>
-                              ) : (
-                                <span>{fmtAmount(data.theoreticalBonusConfirmed)}</span>
-                              )}
-                            </div>
+                            <TheoreticalCell
+                              isRevenueExpert={data.isRevenueExpert}
+                              theoreticalBonus={data.theoreticalBonusConfirmed}
+                              expanded={!!theoreticalExpanded[`${data.userId}-confirmed`]}
+                              onToggle={() => setTheoreticalExpanded(prev => ({
+                                ...prev,
+                                [`${data.userId}-confirmed`]: !prev[`${data.userId}-confirmed`]
+                              }))}
+                            />
                           </div>
                           <div className="flex items-stretch flex-1 min-h-[38px]">
                             <div className="flex items-center justify-center w-[60px] flex-none border-r border-amber-100/50 text-amber-600/70 text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
                               入库
                             </div>
-                            <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-amber-600 whitespace-nowrap">
-                              {fmtAmount(data.theoreticalBonusApproved)}
-                            </div>
+                            <TheoreticalCell
+                              isRevenueExpert={data.isRevenueExpert}
+                              theoreticalBonus={data.theoreticalBonusApproved}
+                              expanded={!!theoreticalExpanded[`${data.userId}-approved`]}
+                              onToggle={() => setTheoreticalExpanded(prev => ({
+                                ...prev,
+                                [`${data.userId}-approved`]: !prev[`${data.userId}-approved`]
+                              }))}
+                            />
                           </div>
                         </div>
                       </td>
 
-                      {/* Column: 承兑（实发） */}
+                      {/* Column 7: 承兑（实发） */}
                       <td className="p-0 border border-slate-200 bg-emerald-50/20">
                         <div className="flex flex-col divide-y divide-emerald-100/50 h-full w-full">
                           <div className="flex items-stretch flex-1 min-h-[38px]">
@@ -1235,7 +1368,7 @@ const Distribution: React.FC<DistributionProps> = ({
                               已确权
                             </div>
                             <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-emerald-600 whitespace-nowrap">
-                              {fmtAmount(data.netBonusConfirmed)}
+                              {fmtAmount(userCdtzSum)}
                             </div>
                           </div>
                           <div className="flex items-stretch flex-1 min-h-[38px]">
@@ -1243,39 +1376,13 @@ const Distribution: React.FC<DistributionProps> = ({
                               入库
                             </div>
                             <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-emerald-600 whitespace-nowrap">
-                              {fmtAmount(data.netBonusApproved)}
+                              {fmtAmount(userCdtzSum)}
                             </div>
                           </div>
                         </div>
                       </td>
 
-                      {/* Column 5: 历史欠产包 */}
-                      <td className="p-0 border border-slate-200">
-                        <div className="flex flex-col divide-y divide-slate-200 h-full w-full">
-                          <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
-                              已确权
-                            </div>
-                            <div
-                              className={`flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] whitespace-nowrap ${(data.isChan || data.isRevenueExpert) && data.historyDebtConfirmed !== 0 ? "text-rose-600 font-bold" : "text-slate-500"}`}
-                            >
-                              {fmtDebt(data.historyDebtConfirmed)}
-                            </div>
-                          </div>
-                          <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
-                              入库
-                            </div>
-                            <div
-                              className={`flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] whitespace-nowrap ${(data.isChan || data.isRevenueExpert) && data.historyDebtApproved !== 0 ? "text-rose-600 font-bold" : "text-slate-500"}`}
-                            >
-                              {fmtDebt(data.historyDebtApproved)}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Column 6: 年度累计 */}
+                      {/* Column 8: 年度累计 */}
                       <td className="p-0 border border-slate-200">
                         <div className="flex flex-col divide-y divide-slate-200 h-full w-full">
                           <div className="flex items-stretch flex-1 min-h-[38px]">
@@ -1297,16 +1404,16 @@ const Distribution: React.FC<DistributionProps> = ({
                         </div>
                       </td>
 
-                      {/* Column 7: 操作 */}
+                      {/* Column 9: 操作控制 */}
                       <td className="p-4 border border-slate-200 text-center">
-                        <div className="flex items-center justify-center gap-2">
+                        <div className="flex flex-col items-center justify-center gap-1.5 py-2">
                           {canRegisterPayout && (
                             <button
                               onClick={() => handleOpenBonus(data)}
-                              className="px-3 py-1.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-all shadow-sm flex items-center gap-1"
+                              className="w-full max-w-[80px] px-2 py-1 bg-emerald-600 text-white rounded-lg text-[10px] font-bold hover:bg-emerald-700 transition-all shadow-sm flex items-center justify-center gap-1 select-none"
                               title="登记承兑发放"
                             >
-                              <Wallet size={14} />
+                              <Wallet size={12} />
                               <span>发放</span>
                             </button>
                           )}
@@ -1318,12 +1425,18 @@ const Distribution: React.FC<DistributionProps> = ({
                                   : data.userId,
                               )
                             }
-                            className={`p-2 rounded-xl transition-all ${selectedUser === data.userId ? "bg-blue-600 text-white shadow-lg" : "bg-slate-50 text-slate-400 hover:bg-slate-100"}`}
+                            className={`p-1 w-full max-w-[80px] rounded-lg transition-all flex items-center justify-center gap-1 text-[10px] font-bold ${selectedUser === data.userId ? "bg-blue-600 text-white shadow-md" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}
                           >
                             {selectedUser === data.userId ? (
-                              <ChevronUp size={16} />
+                              <>
+                                <ChevronUp size={12} />
+                                <span>收起</span>
+                              </>
                             ) : (
-                              <ChevronDown size={16} />
+                              <>
+                                <ChevronDown size={12} />
+                                <span>明细</span>
+                              </>
                             )}
                           </button>
                         </div>
@@ -1381,7 +1494,7 @@ const Distribution: React.FC<DistributionProps> = ({
                                       }
                                       steps.push(
                                         {
-                                          label: "总成本对冲",
+                                          label: "成本包",
                                           value: maskMoney(-kuanTiers.totalCost, fmtAmount),
                                           color: "text-rose-500",
                                           desc: maskText(`刚性工资包(${formatAmount(data.salaryPackage)}) + A类消耗(${formatAmount(data.aCostConfirmed)})`),

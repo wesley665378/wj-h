@@ -21,10 +21,10 @@ import {
 import { Card, ProgressBar, Badge, ProjectStatusBadge } from '@/components/UI';
 import StandardModal from '@/components/StandardModal';
 import { TERMINOLOGY } from '@/constants/terminology';
-import { aggregateMiningQuadrantsFromLogs } from '@/utils/purification';
+import { aggregateMiningQuadrantsFromLogs, calculateSingleResourceQuadrants } from '@/utils/purification';
 import { XLSX, exportWorkbook, buildExcelFilename, EXCEL_IMPORT_MAX_BYTES, EXCEL_IMPORT_MAX_ROWS } from '@/utils/excelIo';
 import { calculateHistoricalNetValue, calculateDualTrackCoreMatrices, calculateT1PlusValue, calculateT1PlusRevenue } from '@/utils/business';
-import { calculateHedgeCapacitiesAndWeights, normalizeRefineTier } from '@/utils/consumptionHedge';
+import { calculateHedgeCapacitiesAndWeights, normalizeRefineTier, calculateInjectedAmount, getRawInputAmount } from '@/utils/consumptionHedge';
 import { deriveProjectStatus, isProjectWritable } from '@/utils/projectStatus';
 import { isAdminOrNpc, parseCenterList } from '@/utils/accessControl';
 import { userCenterMatchesBusinessUnit, businessUnitLabelsEqual } from '@/utils/businessUnitName';
@@ -32,9 +32,70 @@ import { isCenterManagerUser, sortCenterManagers } from '@/utils/centerManager';
 import { centerMatch, isGlobalReader } from '@/utils/centerScope';
 import { labelBusinessUnit } from '@/utils/statusDisplay';
 import { formatCollectorDisplay } from '@/utils/collector';
+import { safeGetItem, safeSetItem, safeRemoveItem } from '@/utils/safeLocalStorage';
 import { toast } from 'sonner';
+
+const IMPORT_IN_PROGRESS_KEY = 'vc_import_in_progress';
 import { CityGuardianModal, useCityGuardianModal } from '@/components/CityGuardianModal';
-import { Info, AlertCircle, CheckCircle2, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Info, AlertCircle, CheckCircle2, X, ChevronLeft, ChevronRight, Download, RefreshCw } from 'lucide-react';
+
+interface FailedImportRow {
+  lineNum: number;
+  miningId: string;
+  categoryStr: string;
+  businessDateStr: string;
+  collectorStr: string;
+  rawAmountStr: string;
+  reason: string;
+}
+
+function parseBusinessDateStr(val: any): { dateObj: Date | null; formattedStr: string } {
+  if (val === undefined || val === null || String(val).trim() === '') {
+    return { dateObj: null, formattedStr: '' };
+  }
+
+  // Handle numeric Excel date serial number (e.g. 45678)
+  if (typeof val === 'number' || (!isNaN(Number(val)) && !String(val).includes('-') && !String(val).includes('/'))) {
+    const serial = Number(val);
+    if (serial > 10000 && serial < 100000) {
+      const utcDays = Math.floor(serial - 25569);
+      const utcValue = utcDays * 86400;
+      const dateInfo = new Date(utcValue * 1000);
+      const y = dateInfo.getUTCFullYear();
+      const m = String(dateInfo.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(dateInfo.getUTCDate()).padStart(2, '0');
+      const formatted = `${y}-${m}-${d}`;
+      return { dateObj: new Date(formatted), formattedStr: formatted };
+    }
+  }
+
+  // Handle string formats like "2026/1/30", "2026-01-30", "2026/01/30"
+  const rawStr = String(val).trim().replace(/\//g, '-');
+  const parts = rawStr.split('-');
+  if (parts.length === 3) {
+    const y = parts[0].trim();
+    const m = parts[1].trim().padStart(2, '0');
+    const d = parts[2].trim().padStart(2, '0');
+    if (y.length === 4 && !isNaN(Number(y)) && !isNaN(Number(m)) && !isNaN(Number(d))) {
+      const formatted = `${y}-${m}-${d}`;
+      const dateObj = new Date(formatted);
+      if (!isNaN(dateObj.getTime())) {
+        return { dateObj, formattedStr: formatted };
+      }
+    }
+  }
+
+  // General Date parsing fallback
+  const fallbackDate = new Date(rawStr);
+  if (!isNaN(fallbackDate.getTime())) {
+    const y = fallbackDate.getFullYear();
+    const m = String(fallbackDate.getMonth() + 1).padStart(2, '0');
+    const d = String(fallbackDate.getDate()).padStart(2, '0');
+    return { dateObj: fallbackDate, formattedStr: `${y}-${m}-${d}` };
+  }
+
+  return { dateObj: null, formattedStr: String(val).trim() };
+}
 import {
   getInitialRevenueCapacity,
   getInitialValueCapacity,
@@ -123,7 +184,7 @@ interface ValueCreationProps {
   users?: User[];
   resources: MiningResource[];
   logs: ValueCreationLog[];
-  onLogSubmit: (log: ValueCreationLog | ValueCreationLog[]) => void;
+  onLogSubmit: (log: ValueCreationLog | ValueCreationLog[], options?: { isImport?: boolean; skipSystemLogs?: boolean }) => void;
   onSwitchTab?: (tab: string) => void;
   transactions?: InternalTransaction[];
   onConfirmTransaction?: (id: string, status: TransactionStatus) => void;
@@ -131,7 +192,8 @@ interface ValueCreationProps {
   onAddCircuitBreaker?: (cb: CircuitBreaker) => void;
   quotaSnapshots?: Record<string, QuotaSnapshot>;
   processingLogIds?: Set<string>;
-  persistWorkspaceWithOverrides?: (overrides?: { logs?: ValueCreationLog[] }, options?: { silent?: boolean; successMessage?: string; loadingMessage?: string; toastId?: string | number }) => Promise<void>;
+  persistWorkspaceWithOverrides?: (overrides?: { logs?: ValueCreationLog[]; importBatchId?: string }, options?: { silent?: boolean; successMessage?: string; loadingMessage?: string; toastId?: string | number }) => Promise<void>;
+  onPauseAutoSync?: (paused: boolean) => void;
 }
 
 type TimePeriod = 'monthly' | 'quarterly' | 'yearly';
@@ -148,7 +210,7 @@ export const tierDisplayMap: Record<string, { name: string, desc: string }> = {
 
 const ValueCreation: React.FC<ValueCreationProps> = ({ 
   user, users = [], resources, logs, onLogSubmit, transactions = [], onConfirmTransaction, circuitBreakers = [], onAddCircuitBreaker,
-  quotaSnapshots = {}, processingLogIds = new Set(), persistWorkspaceWithOverrides
+  quotaSnapshots = {}, processingLogIds = new Set(), persistWorkspaceWithOverrides, onPauseAutoSync
 }) => {
   const miningReconciliations = useMemo(() => reconcileMiningLogs(logs, resources), [logs, resources]);
 
@@ -345,6 +407,23 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       }
     }
   }, [selectedCollectors, managedUsers]);
+
+  useEffect(() => {
+    const isRev = selectedCategory === RefineCategory.Revenue;
+    setSelectedCollectors(prev => {
+      let changed = false;
+      const next = prev.map(sc => {
+        const raw = sc.rawAmount !== undefined && sc.rawAmount !== null ? sc.rawAmount : sc.amount;
+        const expectedAmount = isRev ? Math.round(raw * 0.933) : raw;
+        if (sc.amount !== expectedAmount || sc.rawAmount !== raw) {
+          changed = true;
+          return { ...sc, rawAmount: raw, amount: expectedAmount };
+        }
+        return sc;
+      });
+      return changed ? next : prev;
+    });
+  }, [selectedCategory]);
 
   const selectedOperator = useMemo(() => managedUsers.find(u => u.id === selectedOperatorId), [managedUsers, selectedOperatorId]);
   const availableResources = useMemo(() => {
@@ -543,7 +622,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     const factor = getFactorForCollector(collectorId);
     const weights = getHedgeWeight(collectorId, amount);
     
-    // 统一公式：总预测收款包 = 注入积分 * 0.933 * [复合对冲权重] * 提炼因子
+    // 统一公式：总预测收款包 = 注入积分 * [复合对冲权重] * 提炼因子
     // 特殊逻辑：产专角色提报款项时，需通过 C 和 B2 双重对冲
     return amount * weights.combined * factor;
   }, [getFactorForCollector, getHedgeWeight]);
@@ -859,7 +938,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 type: selectedRefineType as RefineType || RefineType.Enterprise,
                 costCategory: selectedTier as any,
                 amount: c.amount,
-                rawAmount: c.amount,
+                rawAmount: c.rawAmount ?? c.amount,
                 dynamicCost: 0,
                 cClassCost: cCost,
                 cClassRatio: weights.cWeight,
@@ -881,8 +960,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           toast.error('工作区同步未就绪，请刷新后重试');
           return;
         }
-        const jzczLogs = logs.filter(l => l.confirmationType !== '手动确权');
-        const payloadLogs = isGlobalReader(user) ? [...jzczLogs, ...logsToSubmit] : logsToSubmit;
+        const payloadLogs = logsToSubmit;
         
         const executeSync = async () => {
           await persistWorkspaceWithOverrides({ logs: payloadLogs }, { loadingMessage: '提报落库中…', successMessage: '已落库' });
@@ -938,8 +1016,6 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       return list.filter(l => l.category === RefineCategory.Revenue && l.status === AuditStatus.Pending);
     } else if (recordTab === 'linkedPending') {
       return list.filter(l => l.category === RefineCategory.Value && l.status === AuditStatus.Pending && l.confirmationType === '联动确权');
-    } else if (recordTab === 'confirmed') {
-      return list.filter(l => l.status === AuditStatus.Confirmed);
     } else if (recordTab === 'history') {
       return list.filter(l => l.status === AuditStatus.Approved || l.status === AuditStatus.Rejected);
     } else {
@@ -1010,9 +1086,153 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importLoading, setImportLoading] = useState(false);
+  const [failedImportRows, setFailedImportRows] = useState<FailedImportRow[]>([]);
+  const [pendingImportLogs, setPendingImportLogs] = useState<ValueCreationLog[]>([]);
+  const [isImportResultModalOpen, setIsImportResultModalOpen] = useState(false);
+  const [isPersistingImport, setIsPersistingImport] = useState(false);
+  const [importPersistCount, setImportPersistCount] = useState(0);
+  const [persistSeconds, setPersistSeconds] = useState(0);
+  const [importBatchId, setImportBatchId] = useState<string>('');
+
+  // F9: 刷新复原检测，防止重复提交
+  useEffect(() => {
+    try {
+      const raw = safeGetItem(IMPORT_IN_PROGRESS_KEY);
+      if (raw) {
+        const data = JSON.parse(raw);
+        if (data && data.timestamp && Date.now() - data.timestamp < 10 * 60 * 1000) {
+          toast.warning('上次批量导入可能未正常完成，请刷新页面核对结果，切勿重复提交！', {
+            duration: 8000,
+            id: 'import-in-progress-warning'
+          });
+        }
+        safeRemoveItem(IMPORT_IN_PROGRESS_KEY);
+      }
+    } catch (e) {
+      safeRemoveItem(IMPORT_IN_PROGRESS_KEY);
+    }
+  }, []);
+
+  // F5: 导入落库计时器
+  useEffect(() => {
+    let timer: any = null;
+    if (isPersistingImport) {
+      setPersistSeconds(0);
+      timer = setInterval(() => {
+        setPersistSeconds(prev => prev + 1);
+      }, 1000);
+    } else {
+      setPersistSeconds(0);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [isPersistingImport]);
 
   const handleImportClick = () => {
     fileInputRef.current?.click();
+  };
+
+  const handleDownloadFailedRows = () => {
+    if (failedImportRows.length === 0) return;
+    const dataToExport = failedImportRows.map(row => ({
+      '行号': row.lineNum,
+      '矿山编号': row.miningId,
+      '类别': row.categoryStr,
+      '采集主体': row.collectorStr,
+      '业务日期': row.businessDateStr,
+      '注入金额': row.rawAmountStr,
+      '失败原因': row.reason
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "导入失败明细");
+    exportWorkbook(workbook, buildExcelFilename("价值创造批量导入失败明细"));
+  };
+
+  const handleDownloadDuplicateRows = () => {
+    const duplicateRows = failedImportRows.filter(row => row.reason === '重复记录');
+    if (duplicateRows.length === 0) return;
+    const dataToExport = duplicateRows.map(row => ({
+      '行号': row.lineNum,
+      '矿山编号': row.miningId,
+      '类别': row.categoryStr,
+      '采集主体': row.collectorStr,
+      '业务日期': row.businessDateStr,
+      '注入金额': row.rawAmountStr,
+      '失败原因': row.reason
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "重复记录清单");
+    exportWorkbook(workbook, buildExcelFilename("价值创造批量导入重复清单"));
+  };
+
+  const handleConfirmExecuteImport = async () => {
+    if (pendingImportLogs.length === 0) return;
+    setIsImportResultModalOpen(false);
+
+    const batchId = importBatchId || `import_batch_${Date.now()}_${user?.id || 'anon'}`;
+    const logsToSubmit = pendingImportLogs.map(log => ({
+      ...log,
+      batchId: log.batchId || batchId
+    }));
+
+    setIsPersistingImport(true);
+    setImportPersistCount(logsToSubmit.length);
+
+    safeSetItem(IMPORT_IN_PROGRESS_KEY, JSON.stringify({
+      batchId,
+      count: logsToSubmit.length,
+      timestamp: Date.now()
+    }));
+
+    if (onPauseAutoSync) onPauseAutoSync(true);
+    (window as any).__PAUSE_AUTO_SYNC__ = true;
+
+    const TIMEOUT_MS = 60000;
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('REQUEST_TIMEOUT_60S')), TIMEOUT_MS);
+    });
+
+    try {
+      if (typeof persistWorkspaceWithOverrides === 'function') {
+        const payloadLogs = logsToSubmit;
+        
+        await Promise.race([
+          persistWorkspaceWithOverrides(
+            { logs: payloadLogs, importBatchId: batchId },
+            { silent: true }
+          ),
+          timeoutPromise
+        ]);
+      } else {
+        throw new Error('工作区持久化服务未就绪');
+      }
+
+      // 落库成功后才合并本地 logs，只写一条汇总系统日志
+      onLogSubmit(logsToSubmit, { isImport: true });
+      setIsPersistingImport(false);
+      toast.success(`成功导入 ${logsToSubmit.length} 条确权记录`);
+      setPendingImportLogs([]);
+      setFailedImportRows([]);
+      setImportBatchId('');
+    } catch (err: any) {
+      setIsPersistingImport(false);
+      const is60sTimeout = err?.message === 'REQUEST_TIMEOUT_60S';
+      const rawMsg = err?.message || '网络或系统异常';
+      const isTimeoutOrNetwork = is60sTimeout || rawMsg.includes('超时') || rawMsg.includes('网络') || rawMsg.includes('504') || rawMsg.includes('502') || rawMsg.includes('Fetch') || rawMsg.includes('fetch');
+      
+      const friendlyMessage = isTimeoutOrNetwork
+        ? `批量导入落库超时（60秒）或网络异常。后端可能仍在后台处理或已部分写入，请稍后刷新页面核对已处理进度，切勿重复提交！`
+        : `批量导入落库失败：${rawMsg}。数据可能已部分写入，请刷新后核对是否重复。`;
+
+      toast.error(friendlyMessage, { duration: 10000, id: 'import-persist-error-toast' });
+    } finally {
+      safeRemoveItem(IMPORT_IN_PROGRESS_KEY);
+      if (onPauseAutoSync) onPauseAutoSync(false);
+      (window as any).__PAUSE_AUTO_SYNC__ = false;
+    }
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1025,6 +1245,9 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     }
 
     setImportLoading(true);
+    const newBatchId = `import_batch_${Date.now()}_${user?.id || 'anon'}`;
+    setImportBatchId(newBatchId);
+
     try {
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data, { type: 'array' });
@@ -1038,79 +1261,239 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       }
 
       const logsToSubmit: ValueCreationLog[] = [];
-      const errorLines: string[] = [];
+      const failedRows: FailedImportRow[] = [];
+      const seenImportKeys = new Set<string>();
       const miningTotalMap = new Map<string, { [RefineCategory.Value]: number, [RefineCategory.Revenue]: number }>();
+
+      const resourceOccupancyMap = new Map<string, {
+        revenueCapacity: number;
+        currentRevenueOccupancy: number;
+        accumulatedNewRevenue: number;
+        accumulatedUnroundedRevenue: number;
+        valueCapacity: number;
+        currentValueOccupancy: number;
+        accumulatedNewValue: number;
+        accumulatedUnroundedValue: number;
+      }>();
+
+      resources.forEach(r => {
+        const quads = calculateSingleResourceQuadrants(r, logs);
+        resourceOccupancyMap.set(r.id, {
+          revenueCapacity: quads.revenue.capacity,
+          currentRevenueOccupancy: quads.revenue.confirmed + quads.revenue.pending,
+          accumulatedNewRevenue: 0,
+          accumulatedUnroundedRevenue: 0,
+          valueCapacity: quads.value.capacity,
+          currentValueOccupancy: quads.value.confirmed + quads.value.pending,
+          accumulatedNewValue: 0,
+          accumulatedUnroundedValue: 0
+        });
+      });
 
       let lineNum = 1;
       for (const row of rows) {
         lineNum++;
         
-        const miningId = row['矿山编号']?.toString().trim();
-        const categoryStr = row['类别']?.toString().trim();
-        const businessDateStr = row['业务日期']?.toString().trim();
-        const collectorStr = row['采集主体']?.toString().trim();
-        const rawAmount = parseFloat(row['注入金额']);
-        const refineTypeStr = row['提炼类型']?.toString().trim();
-        const tierStr = row['成本档位']?.toString().trim() || 'T1';
-        const operatorStr = row['操作员']?.toString().trim();
+        // Clean key names: trim space and strip UTF-8 BOM (\uFEFF)
+        const cleanedRow: Record<string, any> = {};
+        if (row && typeof row === 'object') {
+          for (const k of Object.keys(row)) {
+            const cleanedKey = k.replace(/^\uFEFF/, '').trim();
+            cleanedRow[cleanedKey] = row[k];
+          }
+        }
 
-        if (!miningId || !categoryStr || !businessDateStr || !collectorStr || isNaN(rawAmount) || rawAmount <= 0) {
-          errorLines.push(`第 ${lineNum} 行: 缺少必填字段或金额格式不正确`);
+        const miningId = cleanedRow['矿山编号']?.toString().trim() || '';
+        const categoryStr = cleanedRow['类别']?.toString().trim() || '';
+        const rawBusinessDateInput = cleanedRow['业务日期'];
+        const collectorStr = cleanedRow['采集主体']?.toString().trim() || '';
+        const rawAmountVal = cleanedRow['注入金额'];
+        const rawAmount = parseFloat(rawAmountVal);
+        const refineTypeStr = cleanedRow['提炼类型']?.toString().trim();
+        const tierStr = cleanedRow['成本档位']?.toString().trim() || 'T1';
+        const operatorStr = cleanedRow['操作员']?.toString().trim();
+
+        // Check required fields
+        const missingFields: string[] = [];
+        if (!miningId) missingFields.push('矿山编号');
+        if (!categoryStr) missingFields.push('类别');
+        if (rawBusinessDateInput === undefined || rawBusinessDateInput === null || String(rawBusinessDateInput).trim() === '') {
+          missingFields.push('业务日期');
+        }
+        if (!collectorStr) missingFields.push('采集主体');
+        if (rawAmountVal === undefined || rawAmountVal === null || String(rawAmountVal).trim() === '' || isNaN(rawAmount) || rawAmount <= 0) {
+          missingFields.push('注入金额(须>0)');
+        }
+
+        const { dateObj: bDate, formattedStr: businessDateStr } = parseBusinessDateStr(rawBusinessDateInput);
+
+        if (missingFields.length > 0) {
+          failedRows.push({
+            lineNum,
+            miningId: miningId || '-',
+            categoryStr: categoryStr || '-',
+            businessDateStr: businessDateStr || '-',
+            collectorStr: collectorStr || '-',
+            rawAmountStr: isNaN(rawAmount) ? (rawAmountVal?.toString() || '-') : String(rawAmount),
+            reason: `缺少必填项: ${missingFields.join('、')}`
+          });
           continue;
         }
-        
-        const bDate = new Date(businessDateStr);
-        if (isNaN(bDate.getTime())) {
-            errorLines.push(`第 ${lineNum} 行: 业务日期格式错误`);
-            continue;
+
+        if (!bDate) {
+          failedRows.push({
+            lineNum,
+            miningId,
+            categoryStr,
+            businessDateStr: businessDateStr || String(rawBusinessDateInput),
+            collectorStr,
+            rawAmountStr: String(rawAmount),
+            reason: `业务日期格式无效`
+          });
+          continue;
         }
 
         const resource = resources.find(r => r.id === miningId);
         if (!resource) {
-          errorLines.push(`第 ${lineNum} 行: 找不到矿山 [${miningId}]`);
+          failedRows.push({
+            lineNum,
+            miningId,
+            categoryStr,
+            businessDateStr,
+            collectorStr,
+            rawAmountStr: String(rawAmount),
+            reason: `找不到矿山 [${miningId}]`
+          });
           continue;
         }
         if (!isProjectWritable(resource)) {
-          errorLines.push(`第 ${lineNum} 行: 矿山 [${miningId}] 状态不可提报`);
+          failedRows.push({
+            lineNum,
+            miningId,
+            categoryStr,
+            businessDateStr,
+            collectorStr,
+            rawAmountStr: String(rawAmount),
+            reason: `矿山 [${miningId}] 状态不可提报`
+          });
           continue;
         }
 
         const { status } = deriveProjectStatus(resource);
         if (status !== ProjectStatus.InProgress) {
-          errorLines.push(`第 ${lineNum} 行: 矿山 [${miningId}] 处于${status}状态`);
+          failedRows.push({
+            lineNum,
+            miningId,
+            categoryStr,
+            businessDateStr,
+            collectorStr,
+            rawAmountStr: String(rawAmount),
+            reason: `矿山 [${miningId}] 处于${status}状态`
+          });
           continue;
         }
 
         const category = categoryStr === '产值' ? RefineCategory.Value : (categoryStr === '收款' ? RefineCategory.Revenue : null);
         if (!category) {
-          errorLines.push(`第 ${lineNum} 行: 类别必须是 收款 或 产值`);
+          failedRows.push({
+            lineNum,
+            miningId,
+            categoryStr,
+            businessDateStr,
+            collectorStr,
+            rawAmountStr: String(rawAmount),
+            reason: `类别必须是 收款 或 产值`
+          });
           continue;
         }
         
         if (category === RefineCategory.Value && resource.valueDepleted) {
-          errorLines.push(`第 ${lineNum} 行: 矿山产出已满，无法继续提报产值`);
+          failedRows.push({
+            lineNum,
+            miningId,
+            categoryStr,
+            businessDateStr,
+            collectorStr,
+            rawAmountStr: String(rawAmount),
+            reason: `矿山产出已满，无法继续提报产值`
+          });
           continue;
         }
 
-        const collector = managedUsers.find(u => u.id === collectorStr || u.name === collectorStr);
+        // Match collector against id, userId, name, or userName
+        const targetCollector = collectorStr.toLowerCase();
+        const collector = managedUsers.find(u =>
+          u.id.toLowerCase() === targetCollector ||
+          (u.userId && u.userId.toLowerCase() === targetCollector) ||
+          u.name.toLowerCase() === targetCollector ||
+          ((u as any).userName && (u as any).userName.toLowerCase() === targetCollector)
+        );
         if (!collector) {
-          errorLines.push(`第 ${lineNum} 行: 找不到采集主体 [${collectorStr}]`);
+          failedRows.push({
+            lineNum,
+            miningId,
+            categoryStr,
+            businessDateStr,
+            collectorStr,
+            rawAmountStr: String(rawAmount),
+            reason: `找不到采集主体 [${collectorStr}]`
+          });
           continue;
         }
 
         if (category === RefineCategory.Revenue) {
            if (!centerMatch(resource.assignedToRevenue, collector.center) && !centerMatch(resource.assignedTo, collector.center)) {
-              errorLines.push(`第 ${lineNum} 行: 采集主体不具备该矿山的收款权限`);
+              failedRows.push({
+                lineNum,
+                miningId,
+                categoryStr,
+                businessDateStr,
+                collectorStr,
+                rawAmountStr: String(rawAmount),
+                reason: `采集主体不具备该矿山的收款权限`
+              });
               continue;
            }
         } else {
            if (!centerMatch(resource.assignedToValue, collector.center) && !centerMatch(resource.assignedTo, collector.center)) {
-              errorLines.push(`第 ${lineNum} 行: 采集主体不具备该矿山的产值权限`);
+              failedRows.push({
+                lineNum,
+                miningId,
+                categoryStr,
+                businessDateStr,
+                collectorStr,
+                rawAmountStr: String(rawAmount),
+                reason: `采集主体不具备该矿山的产值权限`
+              });
               continue;
            }
         }
 
-        const operatorObj = operatorStr ? managedUsers.find(u => u.id === operatorStr || u.name === operatorStr) : user;
+        const bDateObj = bDate || new Date(businessDateStr);
+        const mStr = `${bDateObj.getFullYear()}-${String(bDateObj.getMonth() + 1).padStart(2, '0')}`;
+
+        // 防重校验：同一矿山编号 + 同一采集主体 + 同一业务月份 + 同一注入积分（原始金额）
+        const dedupeKey = `${miningId}_${collector.id}_${mStr}_${rawAmount}`;
+        if (seenImportKeys.has(dedupeKey)) {
+          failedRows.push({
+            lineNum,
+            miningId,
+            categoryStr,
+            businessDateStr,
+            collectorStr,
+            rawAmountStr: String(rawAmount),
+            reason: '重复记录'
+          });
+          continue;
+        }
+        seenImportKeys.add(dedupeKey);
+
+        const operatorObj = operatorStr ? managedUsers.find(u =>
+          u.id.toLowerCase() === operatorStr.toLowerCase() ||
+          (u.userId && u.userId.toLowerCase() === operatorStr.toLowerCase()) ||
+          u.name.toLowerCase() === operatorStr.toLowerCase() ||
+          ((u as any).userName && (u as any).userName.toLowerCase() === operatorStr.toLowerCase())
+        ) : user;
         const operatorIdToUse = operatorObj?.id || user.id;
 
         let refineType = refineTypeStr as RefineType;
@@ -1156,11 +1539,12 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         const b2Weight = hedgeInfo.b2Weight;
 
         const isHighExpert = isValueExpert(collector) || isRevenueExpert(collector);
+        const finalAmount = category === RefineCategory.Revenue ? Math.round(rawAmount * 0.933) : rawAmount;
         let pPre = 0;
         if (category === RefineCategory.Value) {
-            pPre = calculateT1PlusValue(rawAmount, !!isHighExpert, tierStr as any, cWeight, b2Weight);
+            pPre = calculateT1PlusValue(finalAmount, !!isHighExpert, tierStr as any, cWeight, b2Weight);
         } else {
-            pPre = calculateT1PlusRevenue(rawAmount, !!isHighExpert, tierStr as any, cWeight);
+            pPre = calculateT1PlusRevenue(finalAmount, !!isHighExpert, tierStr as any, cWeight);
         }
         
         const currentCap = getCurrentValueCapacity(resource) || 0;
@@ -1178,8 +1562,6 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           cClassCostStr = 'C0';
         }
 
-        const mStr = `${bDate.getFullYear()}-${String(bDate.getMonth() + 1).padStart(2, '0')}`;
-
         if (!miningTotalMap.has(miningId)) {
             miningTotalMap.set(miningId, { [RefineCategory.Value]: 0, [RefineCategory.Revenue]: 0 });
         }
@@ -1188,21 +1570,86 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         if (category === RefineCategory.Value && refineType === RefineType.Outsourced && resource.monthlyQuota !== undefined) {
             const monthlyUsed = resource.monthlyUsed || 0;
             if (monthlyUsed + miningTotalMap.get(miningId)![category] > resource.monthlyQuota + 0.01) {
-                errorLines.push(`第 ${lineNum} 行: 矿山 [${miningId}] 本月外派额度不足`);
+                failedRows.push({
+                  lineNum,
+                  miningId,
+                  categoryStr,
+                  businessDateStr,
+                  collectorStr,
+                  rawAmountStr: String(rawAmount),
+                  reason: `矿山 [${miningId}] 本月外派额度不足`
+                });
                 miningTotalMap.get(miningId)![category] -= rawAmount;
                 continue;
             }
         }
 
+        const occInfo = resourceOccupancyMap.get(miningId);
+        if (occInfo) {
+          const isRev = category === RefineCategory.Revenue;
+          const currOcc = isRev ? occInfo.currentRevenueOccupancy : occInfo.currentValueOccupancy;
+          const cap = isRev ? occInfo.revenueCapacity : occInfo.valueCapacity;
+          const accumUnrounded = isRev ? occInfo.accumulatedUnroundedRevenue : occInfo.accumulatedUnroundedValue;
+          const accumRounded = isRev ? occInfo.accumulatedNewRevenue : occInfo.accumulatedNewValue;
+          
+          // 额度校验时，使用未取整净值与上限比较（收款/产值：rawAmount × 0.933 与初上限比较）
+          const rowUnrounded = rawAmount * 0.933;
+          const rowRounded = finalAmount;
+
+          if (currOcc >= cap && cap >= 0) {
+            failedRows.push({
+              lineNum,
+              miningId,
+              categoryStr,
+              businessDateStr,
+              collectorStr,
+              rawAmountStr: String(rawAmount),
+              reason: `该矿已超限，禁止导入`
+            });
+            if (miningTotalMap.has(miningId)) {
+              miningTotalMap.get(miningId)![category] -= rawAmount;
+            }
+            continue;
+          }
+
+          // 若未取整净值 ≤ 上限，则允许导入
+          if (currOcc + accumUnrounded + rowUnrounded > cap + 0.001) {
+            const postBatchUnrounded = currOcc + accumUnrounded + rowUnrounded;
+            const postBatchRounded = currOcc + accumRounded + rowRounded;
+            failedRows.push({
+              lineNum,
+              miningId,
+              categoryStr,
+              businessDateStr,
+              collectorStr,
+              rawAmountStr: String(rawAmount),
+              reason: `占用将超过初限：当前 ${formatMoney(currOcc)}，本批后未取整 ${postBatchUnrounded.toFixed(2)} (取整后 ${formatMoney(postBatchRounded)})，上限 ${formatMoney(cap)}`
+            });
+            if (miningTotalMap.has(miningId)) {
+              miningTotalMap.get(miningId)![category] -= rawAmount;
+            }
+            continue;
+          }
+
+          if (isRev) {
+            occInfo.accumulatedUnroundedRevenue += rowUnrounded;
+            occInfo.accumulatedNewRevenue += rowRounded;
+          } else {
+            occInfo.accumulatedUnroundedValue += rowUnrounded;
+            occInfo.accumulatedNewValue += rowRounded;
+          }
+        }
+
         logsToSubmit.push({
             id: `${category === RefineCategory.Revenue ? 'J' : 'M'}${(Date.now() % 100000000 + lineNum).toString().padStart(8, '0')}`,
+            batchId: newBatchId,
             miningId: miningId,
             rankId: operatorIdToUse,
             recordedCollectorId: collector.id,
             category: category,
             type: refineType,
             costCategory: tierStr as any,
-            amount: rawAmount,
+            amount: finalAmount,
             rawAmount: rawAmount,
             dynamicCost: 0,
             cClassCost: getCClassCostForCollector(collector.id),
@@ -1217,27 +1664,16 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         });
       }
 
-      if (errorLines.length > 0) {
-        const errorText = errorLines.slice(0, 5).join('\n') + (errorLines.length > 5 ? '\n...' : '');
-        if (toast) toast.error(`部分数据导入失败，共 ${errorLines.length} 条:\n${errorText}`, { duration: 5000 });
-        else alert(`部分数据导入失败，共 ${errorLines.length} 条:\n${errorText}`);
-      }
-
-      if (logsToSubmit.length > 0) {
-        onLogSubmit(logsToSubmit);
-        if (typeof persistWorkspaceWithOverrides === "function") {
-          const jzczLogs = logs.filter(l => l.confirmationType !== '手动确权');
-          const payloadLogs = isGlobalReader(user) ? [...jzczLogs, ...logsToSubmit] : logsToSubmit;
-          await persistWorkspaceWithOverrides({ logs: payloadLogs }, { loadingMessage: '批量导入落库中…', successMessage: `成功导入 ${logsToSubmit.length} 条确权记录` });
-        }
-      }
+      setFailedImportRows(failedRows);
+      setPendingImportLogs(logsToSubmit);
+      setIsImportResultModalOpen(true);
       
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
     } catch (err) {
-      if (toast) toast.error('导入失败：' + (err as Error).message);
-      else alert('导入失败：' + (err as Error).message);
+      if (toast) toast.error('解析文件失败：' + (err as Error).message);
+      else alert('解析文件失败：' + (err as Error).message);
     } finally {
       setImportLoading(false);
     }
@@ -1267,7 +1703,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           ? `${formatMoney(preHedge)} → ${formatMoney(postHedge)}`
           : `${formatMoney(postHedge)}`;
       } else if (log.category === RefineCategory.Revenue) {
-        const preHedge = rawAmount * 0.933 * factor;
+        const preHedge = calculateInjectedAmount(log) * factor;
         const postHedge = preHedge * cWeight;
         const hasHedge = cWeight < 1;
         revenuePackageDisplay = hasHedge
@@ -1275,10 +1711,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           : `${formatMoney(postHedge)}`;
       }
 
-      const isLogRev = log.category === RefineCategory.Revenue;
-      const displayInjection = isLogRev
-        ? (log.rawAmount != null ? roundMoney(log.rawAmount * 0.933) : roundMoney(log.amount || 0))
-        : (log.rawAmount != null ? roundMoney(log.rawAmount) : roundMoney(log.amount || 0));
+      const displayInjection = calculateInjectedAmount(log);
 
       return {
         '矿山编号': log.miningId,
@@ -1289,6 +1722,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         '经营单元': labelBusinessUnit(operator?.center),
         '采集主体': formatCollectorDisplay(log.recordedCollectorId, managedUsers),
         '确权类型': log.confirmationType || '手动确权',
+        '输入金额': getRawInputAmount(log),
         '注入积分': displayInjection,
         'C权': cWeight.toFixed(4),
         'B2权': log.category === RefineCategory.Revenue ? '—' : b2Weight.toFixed(4),
@@ -1780,7 +2214,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                                 content={
                                   <div className="space-y-1">
                                     <p>计算：(N − ΣC) / N</p>
-                                    <p className="text-[10px] text-slate-400">N = round(款初 × 0.933)</p>
+                                    <p className="text-[10px] text-slate-400">N = round(款初)</p>
                                   </div>
                                 }
                               />
@@ -1989,11 +2423,11 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             />
             <button 
               onClick={handleImportClick}
-              disabled={importLoading}
-              className="px-3 py-1 text-[10px] font-bold bg-blue-50 text-blue-600 border border-blue-200 rounded-sm hover:bg-blue-100 transition-colors flex items-center disabled:opacity-50"
+              disabled={importLoading || isPersistingImport}
+              className="px-3 py-1 text-[10px] font-bold bg-blue-50 text-blue-600 border border-blue-200 rounded-sm hover:bg-blue-100 transition-colors flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-              {importLoading ? '导入中...' : '导入'}
+              {importLoading ? '解析中...' : isPersistingImport ? '落库中...' : '导入'}
             </button>
             <button 
               onClick={exportToExcel}
@@ -2026,8 +2460,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
              <div className="flex bg-slate-200 p-0.5 rounded-sm">
               <button onClick={() => setRecordTab('revenue')} title="查看收款确权记录" className={`px-4 py-1 text-[10px] font-bold rounded-sm ${recordTab === 'revenue' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>收款确权</button>
               <button onClick={() => setRecordTab('linkedPending')} title="查看待联动确权记录" className={`px-4 py-1 text-[10px] font-bold rounded-sm ${recordTab === 'linkedPending' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>联动确权</button>
-              <button onClick={() => setRecordTab('confirmed')} title="查看已确权但未入库的记录" className={`px-4 py-1 text-[10px] font-bold rounded-sm ${recordTab === 'confirmed' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>已确权记录</button>
-              <button onClick={() => setRecordTab('history')} title="查看已完成确权的入库记录" className={`px-4 py-1 text-[10px] font-bold rounded-sm ${recordTab === 'history' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>已库记录</button>
+              <button onClick={() => setRecordTab('history')} title="查看已完成确权的记录" className={`px-4 py-1 text-[10px] font-bold rounded-sm ${recordTab === 'history' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>确权记录</button>
             </div>
           </div>
         }
@@ -2110,7 +2543,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
               <p className="text-[10px] text-indigo-700 font-bold uppercase tracking-wider mb-1">收产包</p>
               <p className="text-2xl font-black text-indigo-900 font-mono">{formatMoney(summaryIncomePackage)}</p>
             </div>
-            <p className="text-[9px] text-indigo-500 mt-2 font-medium">公式: 收款包 + 产兑包 (与看板「收产包」主数据精确对齐)</p>
+            <p className="text-[9px] text-indigo-500 mt-2 font-medium">公式: 收款包 + 产兑包</p>
           </div>
           <div className="bg-gradient-to-br from-amber-50 to-amber-100/50 p-4 rounded-sm border border-amber-200 shadow-sm flex flex-col justify-between">
             <div>
@@ -2128,59 +2561,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           </div>
         </div>
 
-        {/* 核心效能透视看板 (按角色、按采集主体) */}
-        {recordTab === 'history' && (
-          <div className="p-6 bg-slate-50/50 border-b border-slate-200 animate-in fade-in slide-in-from-top-4 duration-500">
-            <div className="flex items-center justify-between mb-8">
-              <div className="flex items-center space-x-4">
-                 <h4 className="text-[11px] font-bold text-slate-800 uppercase tracking-[0.2em] flex items-center">
-                    <span className="w-1.5 h-4 bg-blue-600 mr-2 rounded-full"></span>
-                    角色与个人采集效能透视
-                 </h4>
-              </div>
-              <div className="flex bg-slate-200 p-0.5 rounded-sm">
-                {(['monthly', 'quarterly', 'yearly'] as const).map(p => (
-                  <button key={p} onClick={() => setTimePeriod(p)} className={`px-4 py-1 text-[9px] font-black uppercase rounded-sm transition-all ${timePeriod === p ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}>
-                    {p === 'monthly' ? '月度' : p === 'quarterly' ? '季度' : '年度'}
-                  </button>
-                ))}
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 gap-8 max-w-2xl">
-              {/* 资产视角图表 */}
-              <div className="space-y-4">
-                 <div className="bg-white p-5 border border-slate-200 rounded-sm shadow-sm h-full flex flex-col">
-                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-4">资产类别产出分布</p>
-                    <div className="flex-1 min-h-[300px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie 
-                            data={performanceData.categoryChart} 
-                            dataKey="value" 
-                            cx="50%" 
-                            cy="50%" 
-                            innerRadius={50} 
-                            outerRadius={80} 
-                            paddingAngle={5} 
-                            stroke="none"
-                          >
-                            <Cell fill="#FBBF24" />
-                            <Cell fill="#10B981" />
-                          </Pie>
-                          <Tooltip contentStyle={{ fontSize: 10, borderRadius: 0 }} />
-                          <Legend iconType="circle" wrapperStyle={{ fontSize: '9px', fontWeight: 'bold' }} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-slate-100">
-                       <p className="text-[8px] font-bold text-slate-400 uppercase">资产结构实时统计</p>
-                    </div>
-                 </div>
-              </div>
-            </div>
-          </div>
-        )}
+
 
         {/* 移动端卡片视图 (Narrow Screen Card View) */}
         <div className="block md:hidden space-y-3 p-2">
@@ -2203,13 +2584,11 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             const valPostHedge = valPreHedge * cWeight * b2Weight;
             const valHasHedge = cWeight < 1 || b2Weight < 1;
 
-            const revPreHedge = rawAmount * 0.933 * factor;
+            const revPreHedge = calculateInjectedAmount(log) * factor;
             const revPostHedge = revPreHedge * cWeight;
             const revHasHedge = cWeight < 1;
 
-            const displayInjection = isRevenueLine
-              ? (log.rawAmount != null ? Math.round(log.rawAmount * 0.933) : Math.round(log.amount || 0))
-              : (log.rawAmount != null ? log.rawAmount : log.amount || 0);
+            const displayInjection = calculateInjectedAmount(log);
 
             return (
               <div key={log.id} className="bg-white border border-slate-200 rounded-xl p-3 shadow-2xs space-y-2 text-[11px]">
@@ -2230,10 +2609,16 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                   </Badge>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 text-slate-700">
+                <div className="grid grid-cols-3 gap-2 text-slate-700">
                   <div>
                     <span className="text-slate-400 text-[10px] block">{TERMINOLOGY.BUSINESS_UNIT} / 收集人</span>
                     <span className="font-bold">{labelBusinessUnit(operator?.center)} · {formatCollectorDisplay(log.recordedCollectorId, managedUsers)}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-slate-400 text-[10px] block">
+                      {log.category === RefineCategory.Value ? '输入产值' : '输入收款'}
+                    </span>
+                    <span className="font-mono font-bold text-slate-800">{formatMoney(getRawInputAmount(log))}</span>
                   </div>
                   <div className="text-right">
                     <span className="text-slate-400 text-[10px] block">注入积分</span>
@@ -2287,6 +2672,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 <th className="px-2 py-4">{TERMINOLOGY.BUSINESS_UNIT}</th>
                 <th className="px-2 py-4">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
                 <th className="px-2 py-4">确权类型</th>
+                <th className="px-2 py-4 text-right">输入金额</th>
                 <th className="px-2 py-4 text-right">注入积分</th>
                 <th className="px-2 py-4 text-right">C权</th>
                 <th className="px-2 py-4 text-right">B2权</th>
@@ -2317,14 +2703,12 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 const valPostHedge = valPreHedge * cWeight * b2Weight;
                 const valHasHedge = cWeight < 1 || b2Weight < 1;
 
-                // 收款对冲前: rawAmount × 0.933 × 提炼因子
-                const revPreHedge = rawAmount * 0.933 * factor;
+                // 收款对冲前: 注入积分 × 提炼因子
+                const revPreHedge = calculateInjectedAmount(log) * factor;
                 const revPostHedge = revPreHedge * cWeight;
                 const revHasHedge = cWeight < 1;
 
-                const displayInjection = isRevenueLine
-                  ? (log.rawAmount != null ? Math.round(log.rawAmount * 0.933) : Math.round(log.amount || 0))
-                  : (log.rawAmount != null ? log.rawAmount : log.amount || 0);
+                const displayInjection = calculateInjectedAmount(log);
 
                 return (
                   <tr key={log.id} className="text-[10px] hover:bg-slate-50 transition-colors">
@@ -2347,7 +2731,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                       </Badge>
                     </td>
                     <td className="px-2 py-4 font-mono text-slate-400">{log.id}</td>
-                    <td className="px-2 py-4 text-slate-500 font-bold hidden md:table-cell">{resolveLogBusinessDate(log)} ({resolveLogBusinessMonth(log)})</td>
+                    <td className="px-2 py-4 text-slate-500 font-bold hidden md:table-cell">{resolveLogBusinessDate(log)}</td>
                     <td className="px-2 py-4 text-slate-400 hidden md:table-cell">{formatSubmissionDate(log.timestamp)}</td>
                     <td className="px-2 py-4 text-slate-600">{labelBusinessUnit(operator?.center)}</td>
                     <td className="px-2 py-4">
@@ -2358,6 +2742,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                         {log.confirmationType || '手动确权'}
                       </span>
                     </td>
+                    <td className="px-2 py-4 text-right font-mono font-bold text-slate-700">{formatMoney(getRawInputAmount(log))}</td>
                     <td className="px-2 py-4 text-right font-mono font-bold text-slate-700">{formatMoney(displayInjection)}</td>
                     <td className="px-2 py-4 text-right font-mono font-black text-slate-900 bg-slate-50/50">
                       {cWeight.toFixed(4)}
@@ -2396,7 +2781,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
               })}
               {filteredLogs.length === 0 && (
                 <tr>
-                  <td colSpan={15} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
+                  <td colSpan={16} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
                 </tr>
               )}
             </tbody>
@@ -2440,6 +2825,172 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         )}
       </Card>
       <CityGuardianModal state={modalState} onClose={closeModal} />
+
+      {/* 批量导入解析结果与校验失败明细弹窗 */}
+      <StandardModal
+        isOpen={isImportResultModalOpen}
+        onClose={() => setIsImportResultModalOpen(false)}
+        title="批量导入解析结果"
+        subtitle={
+          <div className="flex items-center gap-2 mt-1 text-xs">
+            <span className="font-medium text-slate-600">总数据: {pendingImportLogs.length + failedImportRows.length} 条</span>
+            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-200">
+              校验通过 {pendingImportLogs.length} 条
+            </span>
+            {failedImportRows.length > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 font-bold border border-rose-200">
+                失败 {failedImportRows.length} 条
+              </span>
+            )}
+            {failedImportRows.some(r => r.reason === '重复记录') && (
+              <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-bold border border-amber-200">
+                重复 {failedImportRows.filter(r => r.reason === '重复记录').length} 条
+              </span>
+            )}
+          </div>
+        }
+        maxWidthClassName="max-w-3xl"
+      >
+        <StandardModal.Body className="space-y-4">
+          {failedImportRows.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-rose-50 border border-rose-200 p-3 rounded-md">
+                <div className="flex items-center gap-2 text-rose-800 text-xs font-bold">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                  <span>
+                    发现 {failedImportRows.length} 行无法通过校验的异常数据
+                    {failedImportRows.some(r => r.reason === '重复记录') && (
+                      <span className="text-amber-800 ml-1">
+                        (含 {failedImportRows.filter(r => r.reason === '重复记录').length} 条重复记录)
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {failedImportRows.some(r => r.reason === '重复记录') && (
+                    <button
+                      type="button"
+                      onClick={handleDownloadDuplicateRows}
+                      className="px-3 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold border border-amber-300 rounded shadow-sm transition-colors flex items-center gap-1.5"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      下载重复清单 (.xlsx)
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleDownloadFailedRows}
+                    className="px-3 py-1 bg-white hover:bg-rose-100 text-rose-700 text-xs font-bold border border-rose-300 rounded shadow-sm transition-colors flex items-center gap-1.5"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    下载失败明细 (.xlsx)
+                  </button>
+                </div>
+              </div>
+
+              <div className="max-h-64 overflow-y-auto border border-slate-200 rounded-md bg-white shadow-inner">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead className="bg-slate-50 sticky top-0 z-10 border-b border-slate-200">
+                    <tr>
+                      <th className="p-2 font-bold text-slate-600 w-16">行号</th>
+                      <th className="p-2 font-bold text-slate-600 w-24">矿山编号</th>
+                      <th className="p-2 font-bold text-slate-600 w-16">类别</th>
+                      <th className="p-2 font-bold text-slate-600 w-24">采集主体</th>
+                      <th className="p-2 font-bold text-slate-600 w-24">业务日期</th>
+                      <th className="p-2 font-bold text-slate-600 w-20">注入金额</th>
+                      <th className="p-2 font-bold text-slate-600">失败原因</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {failedImportRows.map((item, idx) => (
+                      <tr key={idx} className={`hover:bg-rose-50/50 transition-colors ${item.reason === '重复记录' ? 'bg-amber-50/30' : ''}`}>
+                        <td className="p-2 font-mono text-slate-500 font-bold">#{item.lineNum}</td>
+                        <td className="p-2 font-mono text-slate-700 font-bold">{item.miningId}</td>
+                        <td className="p-2 text-slate-700">{item.categoryStr}</td>
+                        <td className="p-2 text-slate-700">{item.collectorStr}</td>
+                        <td className="p-2 font-mono text-slate-600">{item.businessDateStr}</td>
+                        <td className="p-2 font-mono text-slate-700">{item.rawAmountStr}</td>
+                        <td className={`p-2 font-bold ${item.reason === '重复记录' ? 'text-amber-700' : 'text-rose-600'}`}>
+                          {item.reason === '重复记录' ? (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[11px] font-bold">
+                              重复记录
+                            </span>
+                          ) : item.reason}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {pendingImportLogs.length > 0 ? (
+            <div className="bg-emerald-50/80 border border-emerald-200 p-4 rounded-md text-xs space-y-2">
+              <div className="flex items-center gap-2 text-emerald-800 font-bold">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>有 {pendingImportLogs.length} 条数据通过校验，点击下方按钮开始导入</span>
+              </div>
+              <p className="text-slate-600">
+                点击【确认导入并落库】将执行原子落库操作。
+                {failedImportRows.length > 0 && " (校验失败的行将被忽略)"}
+              </p>
+            </div>
+          ) : (
+            <div className="bg-slate-100 p-4 rounded-md text-center text-xs text-slate-500 font-medium">
+              没有符合导入条件的有效记录，请检查 Excel 文件修改后重试。
+            </div>
+          )}
+        </StandardModal.Body>
+
+        <StandardModal.Footer className="flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={() => setIsImportResultModalOpen(false)}
+            className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded transition-colors"
+          >
+            {pendingImportLogs.length > 0 ? '取消' : '关闭'}
+          </button>
+          {pendingImportLogs.length > 0 && (
+            <button
+              type="button"
+              onClick={handleConfirmExecuteImport}
+              className="px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded shadow-md transition-colors flex items-center gap-1.5"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              确认导入并落库 ({pendingImportLogs.length} 条)
+            </button>
+          )}
+        </StandardModal.Footer>
+      </StandardModal>
+
+      {/* 批量落库等待遮罩 */}
+      {isPersistingImport && (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-2xl border border-slate-200 p-6 max-w-sm w-full text-center space-y-5">
+            <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto border border-blue-100 shadow-inner">
+              <RefreshCw className="w-6 h-6 animate-spin" />
+            </div>
+            <div className="space-y-1.5">
+              <h3 className="text-base font-bold text-slate-800 tracking-tight">正在落库，请勿关闭页面…</h3>
+              <p className="text-xs text-slate-500 font-medium">
+                准备写入 <span className="font-mono font-bold text-blue-600">{importPersistCount}</span> 条记录 {persistSeconds > 0 && `(${persistSeconds}s)`}
+              </p>
+            </div>
+            {/* Indeterminate progress bar */}
+            <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden relative">
+              <div className="absolute inset-y-0 bg-blue-600 rounded-full animate-pulse w-full"></div>
+            </div>
+            {persistSeconds >= 30 ? (
+              <div className="bg-amber-50 border border-amber-200 rounded p-2.5 text-xs text-amber-800 font-bold space-y-1">
+                <p>仍在处理中，请勿关闭页面，可稍后刷新核对结果</p>
+              </div>
+            ) : (
+              <p className="text-[10px] text-slate-400">正在与服务器进行原子化事务同步，请稍候</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

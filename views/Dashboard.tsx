@@ -16,6 +16,7 @@ import { UI_TOKENS } from '@/constants/uiTokens';
 import { RefreshCw, Info, LayoutGrid, List, AlertTriangle, Wallet, FileSpreadsheet, Sparkles, Lock, CheckCircle2 } from 'lucide-react';
 import { useCostPrivacy } from '@/hooks/useCostPrivacy';
 import { useCityGuardianModal, CityGuardianModal } from '@/components/CityGuardianModal';
+import { BusinessUnitProfitRankingTable } from '@/components/BusinessUnitProfitRankingTable';
 import { XLSX, exportWorkbook } from '@/utils/excelIo';
 import { Card, StatItem, ProgressBar } from '@/components/UI';
 import { UI_LABELS } from '@/constants/uiLabels';
@@ -193,6 +194,31 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
     if (periodType === 'half') return `${selectedYear}年${periodValue === 1 ? '上半年' : '下半年'}`;
     return `${periodValue}年度`;
   }, [periodType, periodValue, selectedYear]);
+
+  const unitRankingTable = useMemo(() => {
+    if (periodType !== 'month') return null;
+    const rankingUnits = isGlobalReaderUser 
+      ? units 
+      : (isManager && currentUser?.center ? [currentUser.center] : []);
+    
+    if (rankingUnits.length === 0) return null;
+
+    const selectedMonth = `${selectedYear}-${String(periodValue).padStart(2, '0')}`;
+
+    return (
+      <div className="mb-8">
+        <BusinessUnitProfitRankingTable 
+          units={rankingUnits}
+          selectedMonth={selectedMonth}
+          auditLogs={activeAuditLogs}
+          resources={resources}
+          users={users}
+          transactions={transactions || []}
+          defaultExpanded={true}
+        />
+      </div>
+    );
+  }, [isManager, isGlobalReaderUser, currentUser, periodType, selectedYear, periodValue, units, activeAuditLogs, resources, users, transactions]);
 
   const periodMonths = useMemo(() => {
     if (periodType === 'month') return 1;
@@ -1247,6 +1273,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
         <div className="lg:col-span-12">
           <div className={`bg-white border border-slate-200 ${UI_TOKENS.RADIUS_PANEL} shadow-sm overflow-hidden`}>
             {/* Banner was here, moved to top */}
+            {unitRankingTable}
 
             {/* Definition Drawer */}
             {showDefinition && (

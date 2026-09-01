@@ -1,9 +1,10 @@
-import { ValueCreationLog, MiningResource, AuditStatus, RefineCategory, User, InternalTransaction, TransactionStatus, Role } from '../../types';
+import { ValueCreationLog, MiningResource, AuditStatus, RefineCategory, RefineType, User, InternalTransaction, TransactionStatus, Role } from '../../types';
 import { resolveLogPackageNet } from './reconcileMiningFromLogs';
 import { getUserSalaryByMonth } from './business';
 import { resolveLogBusinessMonth, isDateInRange, resolveLogBusinessDate } from './dateUtils';
 import { roundMoney } from './formatMoney';
 import { userCenterMatchesBusinessUnit, businessUnitLabelsEqual } from './businessUnitName';
+import { isResourceAssignedToCenter } from './centerScope';
 
 export interface UnitRankingRow {
   unitName: string;
@@ -37,6 +38,7 @@ export interface SingleMonthUnitMetrics {
   b1Cost: number;
   b2Cost: number;
   cCost: number;
+  dCost: number;
   totalCost: number;
   directCost: number;
   row1ValuePackage: number;
@@ -72,6 +74,23 @@ export function getUnitManagers(unitName: string, users: User[]): string {
 }
 
 /**
+ * 查找经营单元负责人类别
+ */
+export function getUnitManagerCategory(unitName: string, users: User[]): string {
+  const unitUsers = users.filter(u => userCenterMatchesBusinessUnit(u.center, unitName) && u.userStatus !== 'inactive');
+  const managers = unitUsers.filter(u => {
+    const cat = u.category || '';
+    return cat.includes('经管员');
+  });
+
+  if (managers.length > 0) {
+    // Return the category of the first manager found, or a default
+    return managers[0].category || '其他';
+  }
+  return '其他';
+}
+
+/**
  * 计算单个经营单元在指定月份的各项基准指标
  */
 export function computeUnitSingleMonth(
@@ -88,9 +107,11 @@ export function computeUnitSingleMonth(
   const managers = getUnitManagers(unitName, users);
 
   // 1. 采集人属于该经营单元的用户 ID 集合
-  const unitUserIds = new Set(
-    users.filter(u => userCenterMatchesBusinessUnit(u.center, unitName)).map(u => u.id)
-  );
+  const unitUserIds = new Set<string>();
+  users.filter(u => userCenterMatchesBusinessUnit(u.center, unitName)).forEach(u => {
+    if (u.id) unitUserIds.add(u.id);
+    if (u.userId) unitUserIds.add(u.userId);
+  });
 
   // 2. 筛选当月日志
   const monthLogs = auditLogs.filter(l => {
@@ -100,19 +121,43 @@ export function computeUnitSingleMonth(
     return resolveLogBusinessMonth(l) === monthStr;
   });
 
+  // Helper to exclude FXDC/Manual/Consumption
+  const isLogToExclude = (l: ValueCreationLog) => {
+    return (
+      l.type === RefineType.NonEffectiveHours ||
+      l.confirmationType === '手动确权' ||
+      !!l.costCategory
+    );
+  };
+
+  const isLogBelongsToUnit = (l: ValueCreationLog) => {
+    if (l.recordedCollectorId && unitUserIds.has(l.recordedCollectorId)) return true;
+    if (l.rankId && unitUserIds.has(l.rankId)) return true;
+    if (userCenterMatchesBusinessUnit((l as any).center || (l as any).unit, unitName)) return true;
+    
+    // Fallback: 矿山归属本单元
+    if (l.miningId && resources.length > 0) {
+      const resource = resources.find(r => r.id === l.miningId);
+      if (resource && isResourceAssignedToCenter(resource, unitName)) return true;
+    }
+    return false;
+  };
+
   // 2.1 收款包：不拆待确权/已确权；类别为收款；状态为已确权或入库；按采集人所属经营单元汇总。
   const revenueLogs = monthLogs.filter(l => 
     l.category === RefineCategory.Revenue &&
+    !isLogToExclude(l) &&
     (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved) &&
-    ((l.recordedCollectorId && unitUserIds.has(l.recordedCollectorId)) || userCenterMatchesBusinessUnit((l as any).center || (l as any).unit, unitName))
+    isLogBelongsToUnit(l)
   );
   const revenuePackage = revenueLogs.reduce((sum, l) => sum + resolveLogPackageNet(l, resources, users), 0);
 
   // 2.2 已确权产兑包：类别为产值；状态为已确权。
   const confirmedValueLogs = monthLogs.filter(l => 
     l.category === RefineCategory.Value &&
+    !isLogToExclude(l) &&
     l.status === AuditStatus.Confirmed &&
-    ((l.recordedCollectorId && unitUserIds.has(l.recordedCollectorId)) || userCenterMatchesBusinessUnit((l as any).center || (l as any).unit, unitName))
+    isLogBelongsToUnit(l)
   );
   const confirmedValuePackage = confirmedValueLogs.reduce((sum, l) => sum + resolveLogPackageNet(l, resources, users), 0);
 
@@ -121,7 +166,7 @@ export function computeUnitSingleMonth(
     l.category === RefineCategory.Value &&
     l.status === AuditStatus.Pending &&
     (l.confirmationType === '联动确权' || (l as any).isLinkage === true) &&
-    ((l.recordedCollectorId && unitUserIds.has(l.recordedCollectorId)) || userCenterMatchesBusinessUnit((l as any).center || (l as any).unit, unitName))
+    isLogBelongsToUnit(l)
   );
   const pendingLinkageValuePackage = pendingLinkageValueLogs.reduce((sum, l) => sum + resolveLogPackageNet(l, resources, users), 0);
 
@@ -172,7 +217,7 @@ export function computeUnitSingleMonth(
   // 2.6 动态消耗：已确权/入库，按采集人所属经营单元归集
   const confirmedConsumptionLogs = monthLogs.filter(l => 
     (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved) &&
-    ((l.recordedCollectorId && unitUserIds.has(l.recordedCollectorId)) || userCenterMatchesBusinessUnit((l as any).center || (l as any).unit, unitName))
+    isLogBelongsToUnit(l)
   );
 
   const aCost = confirmedConsumptionLogs
@@ -191,12 +236,16 @@ export function computeUnitSingleMonth(
     .filter(l => l.costCategory === 'C')
     .reduce((sum, l) => sum + (l.dynamicCost || 0), 0);
 
+  const dCost = confirmedConsumptionLogs
+    .filter(l => l.costCategory === 'D')
+    .reduce((sum, l) => sum + (l.dynamicCost || 0), 0);
+
   // 2.7 总成本与直接费用
   // 总成本＝工资＋承兑奖金＋甲类＋乙二类
   const totalCost = salaryPackage + bonusPayout + aCost + b2Cost;
 
-  // 直接费用＝丙类＋乙一类
-  const directCost = cCost + b1Cost;
+  // 直接费用＝丙类＋乙一类＋丁类
+  const directCost = cCost + b1Cost + dCost;
 
   // 第一行「已确权」：只含已确权
   const row1ValuePackage = confirmedValuePackage;
@@ -238,6 +287,7 @@ export function computeUnitSingleMonth(
     b1Cost,
     b2Cost,
     cCost,
+    dCost,
     totalCost,
     directCost,
     row1ValuePackage,

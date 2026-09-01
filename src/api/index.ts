@@ -8,3 +8,4 @@ export * from './meetingSamples';
 export * from './resources';
 export * from './ai';
 export * from './jydy';
+export * from './centerRanking';

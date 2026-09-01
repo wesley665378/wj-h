@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { Loader2 } from 'lucide-react';
 import { User, MiningResource, RefineType, Role, ResourceStatus, ValueCreationLog, InternalTransaction } from '../types';
 import { isSystemAdmin } from '../src/utils/accessControl';
 import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
@@ -8,6 +9,7 @@ import { Card, ProgressBar, Badge, ProjectStatusBadge } from '../src/components/
 import { XLSX, exportWorkbook, buildExcelFilename, EXCEL_IMPORT_MAX_BYTES, EXCEL_IMPORT_MAX_ROWS } from '../src/utils/excelIo';
 import { deriveProjectStatus } from '../src/utils/projectStatus';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
+import { getInitialRevenueCapacity, getInitialValueCapacity } from '../src/utils/miningCapacity';
 import { roundMoney, formatMoney } from '../src/utils/formatMoney';
 import { toast } from 'sonner';
 import { deleteMiningResource, toastApiError } from '../src/api';
@@ -25,8 +27,8 @@ interface ResourceManagementProps {
   dtcbLogs?: ValueCreationLog[];
   transactions?: InternalTransaction[];
   managedUsers?: User[];
-  onAddResource: (res: MiningResource) => void;
-  onUpdateResource: (res: MiningResource) => void;
+  onAddResource: (res: MiningResource) => Promise<any> | void;
+  onUpdateResource: (res: MiningResource) => Promise<any> | void;
   onDeleteResource: (id: string) => Promise<boolean> | void;
   units: string[];
 }
@@ -44,6 +46,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
   units 
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const [newMiningId, setNewMiningId] = useState('');
   const [selectedType, setSelectedType] = useState<RefineType | null>(null);
@@ -155,9 +158,11 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
     setEditingId(res.id);
     setNewMiningId(res.id);
     setSelectedType(res.types[0] || null);
-    // 统一步骤：UI 显示为原始基准，存储为提纯后的基准
-    setRevenueCapacity(roundMoney(res.revenueCapacity / 0.933));
-    setValueCapacity(roundMoney(res.valueCapacity / 0.933));
+    // 统一步骤：UI 显示为原始基准，存储为提纯后的基准 (优先读 initial* 避免读错字段)
+    const initialRev = getInitialRevenueCapacity(res);
+    const initialVal = getInitialValueCapacity(res);
+    setRevenueCapacity(roundMoney(initialRev / 0.933));
+    setValueCapacity(roundMoney(initialVal / 0.933));
     setAssigneeRevenue(res.assignedToRevenue || res.assignedTo || '');
     setAssigneeValue(res.assignedToValue || res.assignedTo || '');
     setCustomRevenueFactor(res.customRevenueFactor);
@@ -186,9 +191,15 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       showAlert('权限不足：仅系统管理员有权执行此操作。');
       return;
     }
-    showConfirm('警告：确定要永久移除此矿山资源吗？此操作将同步导致相关未确权任务失效。', async () => {
-      await onDeleteResource(id);
-    });
+    showConfirm(
+      `删除后该矿山 [${id}] 及其关联数据将不可恢复，确定删除？`,
+      async () => {
+        await onDeleteResource(id);
+      },
+      undefined,
+      '确认删除',
+      '取消'
+    );
   };
 
   const handleAdd = async (e: React.FormEvent) => {
@@ -238,10 +249,48 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       authorizedQuota = roundMoney(Math.min(monthlyDynamicLimit, globalRemaining));
     }
 
+    // 处理配额同步 (如果已有配额，同步更新主指派单元对应的配额)
+    let updatedQuotas = existingResource?.quotas;
+    if (!updatedQuotas || updatedQuotas.length === 0) {
+      updatedQuotas = assigneeRevenue === assigneeValue 
+        ? [{ centerId: assigneeRevenue, revenueQuota: purifiedRevenueCapacity, valueQuota: purifiedValueCapacity, minedRevenue: 0, minedValue: 0 }]
+        : [
+            { centerId: assigneeRevenue, revenueQuota: purifiedRevenueCapacity, valueQuota: 0, minedRevenue: 0, minedValue: 0 },
+            { centerId: assigneeValue, revenueQuota: 0, valueQuota: purifiedValueCapacity, minedRevenue: 0, minedValue: 0 }
+          ];
+    } else if (updatedQuotas.length === 1 && (updatedQuotas[0].centerId === assigneeRevenue || updatedQuotas[0].centerId === (existingResource?.assignedToRevenue || existingResource?.assignedTo))) {
+      if (assigneeRevenue === assigneeValue) {
+        updatedQuotas = [{
+          centerId: assigneeRevenue,
+          revenueQuota: purifiedRevenueCapacity,
+          valueQuota: purifiedValueCapacity,
+          minedRevenue: updatedQuotas[0].minedRevenue || 0,
+          minedValue: updatedQuotas[0].minedValue || 0,
+        }];
+      } else {
+        updatedQuotas = [
+          { centerId: assigneeRevenue, revenueQuota: purifiedRevenueCapacity, valueQuota: 0, minedRevenue: updatedQuotas[0].minedRevenue || 0, minedValue: 0 },
+          { centerId: assigneeValue, revenueQuota: 0, valueQuota: purifiedValueCapacity, minedRevenue: 0, minedValue: updatedQuotas[0].minedValue || 0 }
+        ];
+      }
+    } else if (updatedQuotas.length === 2 && assigneeRevenue !== assigneeValue && updatedQuotas.some(q => q.centerId === (existingResource?.assignedToRevenue || existingResource?.assignedTo || assigneeRevenue)) && updatedQuotas.some(q => q.centerId === (existingResource?.assignedToValue || existingResource?.assignedTo || assigneeValue))) {
+      updatedQuotas = updatedQuotas.map(q => {
+        if (q.centerId === assigneeRevenue || q.centerId === (existingResource?.assignedToRevenue || existingResource?.assignedTo)) {
+          return { ...q, centerId: assigneeRevenue, revenueQuota: purifiedRevenueCapacity, valueQuota: 0 };
+        }
+        if (q.centerId === assigneeValue || q.centerId === (existingResource?.assignedToValue || existingResource?.assignedTo)) {
+          return { ...q, centerId: assigneeValue, revenueQuota: 0, valueQuota: purifiedValueCapacity };
+        }
+        return q;
+      });
+    }
+
     const resourceData: MiningResource = {
       id: newMiningId,
-      initialRevenueCapacity: existingResource ? (existingResource.initialRevenueCapacity ?? purifiedRevenueCapacity) : purifiedRevenueCapacity,
-      initialValueCapacity: existingResource ? (existingResource.initialValueCapacity ?? purifiedValueCapacity) : purifiedValueCapacity,
+      initialRevenueCapacity: purifiedRevenueCapacity,
+      initialValueCapacity: purifiedValueCapacity,
+      initialRevenueLimit: purifiedRevenueCapacity,
+      initialValueLimit: purifiedValueCapacity,
       types: [selectedType],
       revenueCapacity: purifiedRevenueCapacity,
       valueCapacity: purifiedValueCapacity,
@@ -263,21 +312,14 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       rhythmMonthN: monthN,
       monthlyQuota: authorizedQuota,
       monthlyUsed: 0, // 重新点击指令按钮重置当月计数
-      quotas: existingResource ? existingResource.quotas || [] : (
-        assigneeRevenue === assigneeValue 
-          ? [{ centerId: assigneeRevenue, revenueQuota: purifiedRevenueCapacity, valueQuota: purifiedValueCapacity, minedRevenue: 0, minedValue: 0 }]
-          : [
-              { centerId: assigneeRevenue, revenueQuota: purifiedRevenueCapacity, valueQuota: 0, minedRevenue: 0, minedValue: 0 },
-              { centerId: assigneeValue, revenueQuota: 0, valueQuota: purifiedValueCapacity, minedRevenue: 0, minedValue: 0 }
-            ]
-      ),
+      quotas: updatedQuotas,
       pendingValue: existingResource ? existingResource.pendingValue : 0,
       confirmedValue: existingResource ? existingResource.confirmedValue : 0,
-      unconfirmedValue: existingResource ? Math.max(0, roundMoney(purifiedValueCapacity - existingResource.confirmedValue - existingResource.pendingValue - existingResource.minedValue)) : purifiedValueCapacity,
+      unconfirmedValue: existingResource ? Math.max(0, roundMoney(purifiedValueCapacity - (existingResource.confirmedValue || 0) - (existingResource.pendingValue || 0) - (existingResource.minedValue || 0))) : purifiedValueCapacity,
       valueDepleted: existingResource ? existingResource.valueDepleted : false,
       pendingRevenue: existingResource ? existingResource.pendingRevenue : 0,
       confirmedRevenue: existingResource ? existingResource.confirmedRevenue : 0,
-      unconfirmedRevenue: existingResource ? Math.max(0, roundMoney(purifiedRevenueCapacity - existingResource.confirmedRevenue - existingResource.pendingRevenue - existingResource.minedRevenue)) : purifiedRevenueCapacity,
+      unconfirmedRevenue: existingResource ? Math.max(0, roundMoney(purifiedRevenueCapacity - (existingResource.confirmedRevenue || 0) - (existingResource.pendingRevenue || 0) - (existingResource.minedRevenue || 0))) : purifiedRevenueCapacity,
       revenueDepleted: existingResource ? existingResource.revenueDepleted : false,
     };
 
@@ -289,12 +331,19 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
     showConfirm(
       `确定${actionText}？\n\n【矿山编号】${newMiningId}\n【提炼类型】${selectedType}\n【收款指派】${assigneeRevenue}\n【产值指派】${assigneeValue}\n【款初】${formatMoney(purifiedRevenueCapacity)}\n【产初】${formatMoney(purifiedValueCapacity)}`,
       async () => {
-        if (editingId) {
-          onUpdateResource(resourceData);
-        } else {
-          onAddResource(resourceData);
+        setIsSaving(true);
+        try {
+          if (editingId) {
+            await onUpdateResource(resourceData);
+          } else {
+            await onAddResource(resourceData);
+          }
+          handleCancelEdit();
+        } catch (err: any) {
+          console.error('保存矿山指令失败:', err);
+        } finally {
+          setIsSaving(false);
         }
-        handleCancelEdit();
       }
     );
   };
@@ -303,8 +352,8 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
     const dataToExport = filteredResources.map(res => ({
       '矿山编号': res.id,
       '提炼类型': res.types.join(', '),
-      '款初': res.revenueCapacity,
-      '产初': res.valueCapacity,
+      '款初': getInitialRevenueCapacity(res),
+      '产初': getInitialValueCapacity(res),
       '已采收款': res.minedRevenue,
       '已采产值': res.minedValue,
       '收款指派': res.assignedToRevenue || res.assignedTo,
@@ -602,7 +651,14 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
             </p>
           </div>
           {editingId && (
-            <button onClick={handleCancelEdit} className="px-6 py-2 bg-slate-100 text-slate-400 font-black rounded-xl text-xs hover:bg-slate-200 self-start sm:self-auto">取消编辑</button>
+            <button 
+              type="button"
+              onClick={handleCancelEdit} 
+              disabled={isSaving}
+              className="px-6 py-2 bg-slate-100 text-slate-400 font-black rounded-xl text-xs hover:bg-slate-200 self-start sm:self-auto disabled:opacity-50"
+            >
+              取消编辑
+            </button>
           )}
         </div>
         
@@ -698,6 +754,8 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                             id: String(id),
                             initialRevenueCapacity: revCap,
                             initialValueCapacity: valCap,
+                            initialRevenueLimit: revCap,
+                            initialValueLimit: valCap,
                             types: [type as RefineType],
                             revenueCapacity: revCap,
                             valueCapacity: valCap,
@@ -735,9 +793,23 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                           importCount++;
                         });
 
-                        newResourcesList.forEach(r => onAddResource(r));
-                        toast.success(`批量导入完成：新增 ${importCount} 个矿山资源。`);
-                        e.target.value = ''; // Reset input
+                        if (newResourcesList.length === 0) {
+                          showAlert('未识别到有效的矿山资源或所有矿山编号已存在。');
+                          if (e.target) e.target.value = '';
+                          return;
+                        }
+
+                        showConfirm(
+                          `导入将批量写入 ${newResourcesList.length} 条记录，请确认数据无误，导入后需单独确权。`,
+                          () => {
+                            newResourcesList.forEach(r => onAddResource(r));
+                            toast.success(`批量导入完成：新增 ${newResourcesList.length} 个矿山资源。`);
+                          },
+                          undefined,
+                          '确认导入',
+                          '取消'
+                        );
+                        if (e.target) e.target.value = ''; // Reset input
                       };
                       reader.readAsBinaryString(file);
                     }
@@ -1018,11 +1090,20 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
 
           <button 
             type="submit" 
-            disabled={units.length === 0 || isDepleted}
-            className={`w-full py-6 rounded-3xl font-black uppercase tracking-[0.5em] transition-all shadow-2xl flex items-center justify-center space-x-3 ${(units.length === 0 || isDepleted) ? 'bg-slate-100 text-slate-300 cursor-not-allowed' : (editingId ? 'bg-blue-600' : 'bg-slate-900') + ' text-white hover:-translate-y-1 active:translate-y-0'}`}
+            disabled={units.length === 0 || isDepleted || isSaving}
+            className={`w-full py-6 rounded-3xl font-black uppercase tracking-[0.5em] transition-all shadow-2xl flex items-center justify-center space-x-3 ${(units.length === 0 || isDepleted || isSaving) ? 'bg-slate-100 text-slate-300 cursor-not-allowed' : (editingId ? 'bg-blue-600' : 'bg-slate-900') + ' text-white hover:-translate-y-1 active:translate-y-0'}`}
           >
-            <span>{units.length === 0 ? '未检测到经营单元' : (isDepleted ? '该资源已满额录入' : (editingId ? '保存资源指令变更' : '注入提炼指令'))}</span>
-            {units.length > 0 && !isDepleted && <span className="text-xl">{editingId ? '💾' : '⚡'}</span>}
+            {isSaving ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>正在保存中...</span>
+              </>
+            ) : (
+              <>
+                <span>{units.length === 0 ? '未检测到经营单元' : (isDepleted ? '该资源已满额录入' : (editingId ? '保存资源指令变更' : '注入提炼指令'))}</span>
+                {units.length > 0 && !isDepleted && <span className="text-xl">{editingId ? '💾' : '⚡'}</span>}
+              </>
+            )}
           </button>
         </form>
       </Card>

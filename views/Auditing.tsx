@@ -10,6 +10,8 @@ import {
   MiningResource,
 } from "../types";
 import { calculateConsumptionMirrorFields } from "@/utils/business";
+import { calculateInjectedAmount, getRawInputAmount } from "@/utils/consumptionHedge";
+import { aggregateMiningQuadrantsFromLogs } from "@/utils/purification";
 import {
   BarChart,
   Bar,
@@ -51,7 +53,7 @@ import {
 } from "@/utils/dateUtils";
 import { InfoTip } from "@/components/InfoTip";
 import { BusinessDateFilter } from "@/components/BusinessDateFilter";
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CheckCheck } from 'lucide-react';
 
 import { fetchWorkspaceData } from "@/api/workspace";
 import { toast } from "sonner";
@@ -82,15 +84,18 @@ const Auditing: React.FC<AuditingProps> = ({
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const { isCostVisible, toggleCostVisible, maskMoney, maskText } = useCostPrivacy();
   const [activeTab, setActiveTab] = useState<
-    "pending" | "confirmed" | "history" | "summary" | "linked" | "consumption"
+    "pending" | "confirmed" | "history" | "linked" | "consumption"
   >("pending");
   const [confirmingLog, setConfirmingLog] = useState<ValueCreationLog | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedLogIds, setSelectedLogIds] = useState<Set<string>>(new Set());
+  const [isBatchConfirming, setIsBatchConfirming] = useState(false);
   const PAGE_SIZE = 50;
 
   useEffect(() => {
     setCurrentPage(1);
+    setSelectedLogIds(new Set());
   }, [activeTab]);
 
   // Map ValueCreationLog (from audit list) to AuditApiData required by ConsumptionAudit
@@ -220,6 +225,65 @@ const Auditing: React.FC<AuditingProps> = ({
     return linkedTasks.slice(start, start + PAGE_SIZE);
   }, [linkedTasks, currentPage]);
 
+  // 可批量确权的单据列表（根据当前 Tab 区分 收款待办 与 消耗待办）
+  const pendingConfirmableTasks = useMemo(() => {
+    const sourceTasks = activeTab === "consumption" ? consumptionTasks : auditTasks;
+    return sourceTasks.filter(
+      (log) =>
+        log.status === AuditStatus.Pending &&
+        !processingLogIds.has(log.id) &&
+        (log.miningId === 'SYSTEM_DEDUCTION' ||
+          log.costCategory === 'D' ||
+          log.type === RefineType.NonEffectiveHours ||
+          isProjectWritable(resources.find((r) => r.id === log.miningId)))
+    );
+  }, [activeTab, consumptionTasks, auditTasks, processingLogIds, resources]);
+
+  // 当前待处理任务分页列表（根据当前 Tab 区分 收款待办 与 消耗待办）
+  const currentPaginatedTasks = useMemo(() => {
+    if (activeTab === "consumption") return paginatedConsumptionTasks;
+    if (activeTab === "pending") return paginatedAuditTasks;
+    return [];
+  }, [activeTab, paginatedConsumptionTasks, paginatedAuditTasks]);
+
+  // 当前分页是否已全部勾选
+  const isAllSelected = useMemo(() => {
+    if (currentPaginatedTasks.length === 0) return false;
+    return currentPaginatedTasks.every(log => selectedLogIds.has(log.id));
+  }, [currentPaginatedTasks, selectedLogIds]);
+
+  const toggleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedLogIds(prev => {
+        const next = new Set(prev);
+        currentPaginatedTasks.forEach(log => next.delete(log.id));
+        return next;
+      });
+    } else {
+      setSelectedLogIds(prev => {
+        const next = new Set(prev);
+        currentPaginatedTasks.forEach(log => {
+          if (log.status === AuditStatus.Pending) {
+            next.add(log.id);
+          }
+        });
+        return next;
+      });
+    }
+  };
+
+  const toggleSelectLog = (logId: string) => {
+    setSelectedLogIds(prev => {
+      const next = new Set(prev);
+      if (next.has(logId)) {
+        next.delete(logId);
+      } else {
+        next.add(logId);
+      }
+      return next;
+    });
+  };
+
   // 3. 汇总数据计算逻辑
   const summaryData = useMemo(() => {
     const approved = monthlyLogs.filter(
@@ -345,38 +409,34 @@ const Auditing: React.FC<AuditingProps> = ({
     };
   }, [monthlyLogs, users]);
 
-  // 4. 积分看板计算逻辑 (数据来源：价值创造的注入量)
+  // 4. 积分看板计算逻辑 (基于流水与矿山同源聚合 SSOT)
   const quadrants = useMemo(() => {
-	// 产值积分看板
-    const valueLogs = monthlyLogs.filter(l => l.category === RefineCategory.Value);
-    const pendingValue = valueLogs.filter(l => l.status === AuditStatus.Pending).reduce((sum, l) => sum + l.amount, 0);
-    const confirmedValue = valueLogs.filter(l => l.status === AuditStatus.Confirmed).reduce((sum, l) => sum + l.amount, 0);
-    const approvedValue = valueLogs.filter(l => l.status === AuditStatus.Approved).reduce((sum, l) => sum + l.amount, 0);
-    
-    // 未确权 = 初限 - 待确权 - 已确权 - 入库 (amount 维度)
-    const totalValueInitial = resources.reduce((sum, r) => sum + (r.initialValueCapacity || r.valueCapacity || 0), 0);
-    const totalValueConfirmed = resources.reduce((sum, r) => sum + (r.confirmedValue || 0), 0);
-    const totalValuePending = resources.reduce((sum, r) => sum + (r.pendingValue || 0), 0);
-    const totalValueMined = resources.reduce((sum, r) => sum + (r.minedValue || 0), 0);
-    const unconfirmedValue = Math.max(0, totalValueInitial - totalValueConfirmed - totalValuePending - totalValueMined);
-    
-    // 收款积分看板
-    const revenueLogs = monthlyLogs.filter(l => l.category === RefineCategory.Revenue);
-    const pendingRevenue = revenueLogs.filter(l => l.status === AuditStatus.Pending).reduce((sum, l) => sum + l.amount, 0);
-    const confirmedRevenue = revenueLogs.filter(l => l.status === AuditStatus.Confirmed).reduce((sum, l) => sum + l.amount, 0);
-    const approvedRevenue = revenueLogs.filter(l => l.status === AuditStatus.Approved).reduce((sum, l) => sum + l.amount, 0);
-    
-    const totalRevenueInitial = resources.reduce((sum, r) => sum + (r.initialRevenueCapacity || r.revenueCapacity || 0), 0);
-    const totalRevenueConfirmed = resources.reduce((sum, r) => sum + (r.confirmedRevenue || 0), 0);
-    const totalRevenuePending = resources.reduce((sum, r) => sum + (r.pendingRevenue || 0), 0);
-    const totalRevenueMined = resources.reduce((sum, r) => sum + (r.minedRevenue || 0), 0);
-    const unconfirmedRevenue = Math.max(0, totalRevenueInitial - totalRevenueConfirmed - totalRevenuePending - totalRevenueMined);
+    const validResources = (resources || []).filter(
+      (r) => !isVirtualDeductionMiningId(r.id)
+    );
+    const aggregated = aggregateMiningQuadrantsFromLogs(
+      monthlyLogs,
+      validResources,
+      undefined,
+      null,
+      users
+    );
 
     return {
-        value: { pending: pendingValue, confirmed: confirmedValue, unconfirmed: unconfirmedValue, approved: approvedValue },
-        revenue: { pending: pendingRevenue, confirmed: confirmedRevenue, unconfirmed: unconfirmedRevenue, approved: approvedRevenue }
+      value: {
+        pending: aggregated.value.pending,
+        confirmed: aggregated.value.confirmed,
+        unconfirmed: aggregated.value.unconfirmed,
+        approved: aggregated.value.mined,
+      },
+      revenue: {
+        pending: aggregated.revenue.pending,
+        confirmed: aggregated.revenue.confirmed,
+        unconfirmed: aggregated.revenue.unconfirmed,
+        approved: aggregated.revenue.mined,
+      },
     };
-  }, [monthlyLogs, resources]);
+  }, [monthlyLogs, resources, users]);
 
   const handleAction = (
     log: ValueCreationLog,
@@ -394,19 +454,23 @@ const Auditing: React.FC<AuditingProps> = ({
     const collectorDisplay = formatCollectorDisplay(log.recordedCollectorId, users);
     const businessDateStr = resolveLogBusinessDate(log);
     const confirmationTypeStr = log.confirmationType || "手动确权";
+    const injectedAmount = calculateInjectedAmount(log);
 
     if (action === "reject") {
       showConfirm(
-        `确定要【驳回】该笔价值提报单据吗？\n\n` +
+        `驳回后该记录将退出当前确权流程，可能需要重新提报。\n\n` +
         `• 申报编号：${log.id}\n` +
         `• 业务日期：${businessDateStr}\n` +
         `• 矿山编号：${log.miningId}\n` +
         `• 采集主体：${collectorDisplay}\n` +
-        `• 提积分额：${(log.amount || 0).toLocaleString()} 积分\n\n` +
-        `驳回后，单据状态将更新为【已驳回】。`,
+        `• 提积分额：${injectedAmount.toLocaleString()} 积分\n\n` +
+        `确定驳回该笔价值提报单据？`,
         () => {
           onAudit(log.id, nextStatus);
-        }
+        },
+        undefined,
+        '确认驳回',
+        '取消'
       );
     } else {
       showConfirm(
@@ -416,14 +480,87 @@ const Auditing: React.FC<AuditingProps> = ({
         `• 矿山编号：${log.miningId}\n` +
         `• 采集主体：${collectorDisplay}\n` +
         `• 确权类型：${confirmationTypeStr}\n` +
-        `• 提积分额：${(log.amount || 0).toLocaleString()} 积分\n` +
+        `• 提积分额：${injectedAmount.toLocaleString()} 积分\n` +
         `• 净包金额：￥${Math.round(log.netValue || 0).toLocaleString()}\n\n` +
         `确认后，该笔待确权资产将正式转为【已确权】。`,
         () => {
           onAudit(log.id, nextStatus);
-        }
+        },
+        undefined,
+        isConsumption ? '确认审核' : '确认确权',
+        '取消'
       );
     }
+  };
+
+  const handleBatchConfirm = () => {
+    if (isBatchConfirming) return;
+    
+    const isConsumptionTab = activeTab === "consumption";
+    const typeLabel = isConsumptionTab ? "消耗确权" : "收款确权";
+    const amountLabel = isConsumptionTab ? "提总额合计" : "提积分额合计";
+
+    // 如果勾选了特定行，则对勾选的有效待确权行进行确权；若未勾选，则对当前筛选下的全部待确权行进行批量确权
+    const targetTasks = selectedLogIds.size > 0
+      ? pendingConfirmableTasks.filter(l => selectedLogIds.has(l.id))
+      : pendingConfirmableTasks;
+
+    if (targetTasks.length === 0) {
+      showAlert(`当前无可确权的${typeLabel}记录，或所选单据已在处理中。`);
+      return;
+    }
+
+    const totalAmount = targetTasks.reduce((sum, l) => {
+      if (isConsumptionTab) {
+        return sum + (l.dynamicCost || calculateInjectedAmount(l) || l.amount || 0);
+      }
+      return sum + calculateInjectedAmount(l);
+    }, 0);
+    const totalNet = targetTasks.reduce((sum, l) => sum + (l.netValue || 0), 0);
+
+    showConfirm(
+      `确定要对当前 ${targetTasks.length} 笔【${typeLabel}】记录进行批量确权吗？\n\n` +
+      `• 待确权笔数：${targetTasks.length} 笔\n` +
+      `• ${amountLabel}：${totalAmount.toLocaleString()} 积分\n` +
+      `• 净包金额合计：￥${Math.round(totalNet).toLocaleString()}\n\n` +
+      `确认后，系统将依次执行确权，将单据转为【已确权】状态并自动同步联动产值确权与工作区。`,
+      async () => {
+        setIsBatchConfirming(true);
+        const toastId = toast.loading(`正在批量确权 (0/${targetTasks.length})...`);
+        let successCount = 0;
+        let failCount = 0;
+
+        try {
+          for (let i = 0; i < targetTasks.length; i++) {
+            const task = targetTasks[i];
+            toast.loading(`正在批量确权 (${i + 1}/${targetTasks.length})...`, { id: toastId });
+            try {
+              await onAudit(task.id, AuditStatus.Confirmed);
+              successCount++;
+            } catch (err) {
+              console.error(`Batch audit failed for log ${task.id}:`, err);
+              failCount++;
+            }
+          }
+
+          toast.dismiss(toastId);
+          if (failCount === 0) {
+            toast.success(`批量确权成功！共完成 ${successCount} 笔${typeLabel}。`);
+          } else {
+            toast.warning(`批量确权完成：成功 ${successCount} 笔，失败 ${failCount} 笔。`);
+          }
+          setSelectedLogIds(new Set());
+        } catch (e: any) {
+          toast.dismiss(toastId);
+          toast.error(`批量确权发生异常：${e?.message || '未知错误'}`);
+        } finally {
+          setIsBatchConfirming(false);
+        }
+      },
+      undefined,
+      '确认批量确权',
+      '取消'
+    );
   };
 
   const handleRefresh = async () => {
@@ -476,7 +613,6 @@ const Auditing: React.FC<AuditingProps> = ({
           'C积分': log.costCategory === 'C' ? log.dynamicCost : '-',
           'C权': cWeightValue,
           '款初/款当': revLimitStr,
-          '产初/产当': valLimitCStr,
           'B1': (log.costCategory === 'B' && log.valueConsumptionMode === 'B1') ? log.dynamicCost : '-',
           'B2积分': (log.costCategory === 'B' && log.valueConsumptionMode === 'B2') ? log.dynamicCost : '-',
           'B2权': b2WeightValue,
@@ -495,7 +631,8 @@ const Auditing: React.FC<AuditingProps> = ({
           确权类型: log.confirmationType || "收款确权",
           申请角色: log.rankId,
           采集主体: formatCollectorDisplay(log.recordedCollectorId, users),
-          注入积分: log.amount,
+          [activeTab === "linked" ? "输入产值" : (activeTab === "pending" ? "输入收款" : "输入金额")]: getRawInputAmount(log),
+          注入积分: calculateInjectedAmount(log),
           A: log.costCategory === "A" ? log.dynamicCost : 0,
           B1:
             log.costCategory === "B" && log.valueConsumptionMode === "B1"
@@ -637,25 +774,6 @@ const Auditing: React.FC<AuditingProps> = ({
               </span>
             </button>
             <button
-              onClick={() => setActiveTab("confirmed")}
-              title="查看所有已确权记录"
-              className={`px-4 md:px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all flex items-center space-x-2 ${activeTab === "confirmed" ? "bg-white text-slate-900 shadow-xl scale-105" : "text-slate-400 hover:text-slate-600"}`}
-            >
-              <span>已确权记录</span>
-              <span
-                className={`px-2 py-0.5 rounded-full text-[8px] ${activeTab === "confirmed" ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-500"}`}
-              >
-                {confirmedTasks.length}
-              </span>
-            </button>
-            <button
-              onClick={() => setActiveTab("summary")}
-              title="分析本周期的经营数据汇总"
-              className={`px-4 md:px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all flex items-center space-x-2 ${activeTab === "summary" ? "bg-white text-slate-900 shadow-xl scale-105" : "text-slate-400 hover:text-slate-600"}`}
-            >
-              <span>周期分析</span>
-            </button>
-            <button
               onClick={() => setActiveTab("history")}
               title="成本审计记录回溯"
               className={`px-4 md:px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all flex items-center space-x-2 ${activeTab === "history" ? "bg-white text-slate-900 shadow-xl scale-105" : "text-slate-400 hover:text-slate-600"}`}
@@ -665,229 +783,6 @@ const Auditing: React.FC<AuditingProps> = ({
             <CostPrivacyToggle size="sm" />
           </div>
         </div>
-
-      {activeTab === "summary" && (
-        <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
-          {/* 价值动态流 */}
-          <div className={`p-6 bg-slate-50/50 border border-slate-200 ${UI_TOKENS.RADIUS_PANEL}`}>
-            {/* 价值分配 - 重新分配双行显示 */}
-            <div className="grid grid-cols-1 gap-6 mb-8">
-              {/* 第一行：产值 */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {['产值分配', '产值对冲进度', '历史滚动产值欠产', '产值年度累计'].map((title, i) => (
-                  <div key={i} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                    <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">{title}</h3>
-                    <div className="flex justify-between text-[11px]">
-                       <span>入库: <span className="font-mono font-bold text-slate-700">$0</span></span>
-                       <span>已确权: <span className="font-mono font-bold text-slate-700">$0</span></span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              
-              {/* 第二行：收款 */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {['收款分配', '收款对冲进度', '历史滚动收款欠产', '收款年度累计'].map((title, i) => (
-                  <div key={i} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                    <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">{title}</h3>
-                    <div className="flex justify-between text-[11px]">
-                       <span>入库: <span className="font-mono font-bold text-slate-700">$0</span></span>
-                       <span>已确权: <span className="font-mono font-bold text-slate-700">$0</span></span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* 产值 */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-black text-rose-700 uppercase tracking-widest flex items-center">
-                    <span className="w-1.5 h-3.5 bg-rose-500 mr-2 rounded-full"></span>
-                    {UI_LABELS.VALUE}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
-                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.PENDING}</p>
-                    <p className="text-xs font-black text-amber-600 font-mono">{formatMoney(quadrants.value.pending)}</p>
-                  </div>
-                  <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
-                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.CONFIRMED}</p>
-                    <p className="text-xs font-black text-emerald-600 font-mono">{formatMoney(quadrants.value.confirmed)}</p>
-                  </div>
-                  <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
-                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.UNCONFIRMED}</p>
-                    <p className="text-xs font-black text-rose-600 font-mono">{formatMoney(quadrants.value.unconfirmed)}</p>
-                  </div>
-                  <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
-                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.MINED}</p>
-                    <p className="text-xs font-black text-blue-600 font-mono">{formatMoney(quadrants.value.approved)}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* 收款 */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-black text-yellow-700 uppercase tracking-widest flex items-center">
-                    <span className="w-1.5 h-3.5 bg-yellow-500 mr-2 rounded-full"></span>
-                    {UI_LABELS.REVENUE}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
-                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.PENDING}</p>
-                    <p className="text-xs font-black text-amber-600 font-mono">{formatMoney(quadrants.revenue.pending)}</p>
-                  </div>
-                  <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
-                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.CONFIRMED}</p>
-                    <p className="text-xs font-black text-emerald-600 font-mono">{formatMoney(quadrants.revenue.confirmed)}</p>
-                  </div>
-                  <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
-                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.UNCONFIRMED}</p>
-                    <p className="text-xs font-black text-rose-600 font-mono">{formatMoney(quadrants.revenue.unconfirmed)}</p>
-                  </div>
-                  <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
-                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.MINED}</p>
-                    <p className="text-xs font-black text-blue-600 font-mono">{formatMoney(quadrants.revenue.approved)}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          {/* KPI 对冲看板 */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <Card className={`p-8 ${UI_TOKENS.RADIUS_CARD} group`}>
-              <div className="absolute top-0 right-0 p-6 opacity-10 text-4xl group-hover:scale-110 transition-transform">
-                📈
-              </div>
-              <StatItem
-                label="周期毛产出总值"
-                value={`${formatMoney(summaryData.grossValue)}`}
-                subValue="基于 A/B/C 系数前置计算"
-              />
-            </Card>
-            <Card className={`p-8 ${UI_TOKENS.RADIUS_CARD} group`}>
-              <div className="absolute top-0 right-0 p-6 opacity-10 text-4xl group-hover:scale-110 transition-transform text-rose-500">
-                📉
-              </div>
-              <StatItem
-                label="周期动态消耗总额"
-                value={`-${maskMoney(summaryData.totalConsumption)}`}
-                className="text-rose-600"
-              />
-              <div className="mt-4 flex space-x-2">
-                {summaryData.costStats.map((s) => (
-                  <Badge key={s.name}>
-                    {s.name}: {maskMoney(Math.round(s.value))}
-                  </Badge>
-                ))}
-              </div>
-            </Card>
-            <Card className={`p-8 ${UI_TOKENS.RADIUS_CARD} border-rose-200 bg-rose-50/30 group`}>
-              <div className="absolute top-0 right-0 p-6 opacity-10 text-4xl group-hover:scale-110 transition-transform text-rose-600">
-                ✂️
-              </div>
-              <StatItem
-                label="周期刚性工资对冲"
-                value={`${maskMoney(summaryData.rigidDeduction)}`}
-                className="text-rose-700"
-              />
-              <p className="text-[9px] font-bold text-rose-400 uppercase tracking-widest mt-2">
-                冲抵采集主体刚性工资包
-              </p>
-            </Card>
-            <Card className={`p-8 ${UI_TOKENS.RADIUS_CARD} bg-slate-900 text-white shadow-2xl group`}>
-              <div className="absolute top-0 right-0 p-6 opacity-20 text-4xl group-hover:scale-110 transition-transform text-emerald-400">
-                ✨
-              </div>
-              <p className="text-emerald-400 text-[10px] font-black uppercase tracking-widest mb-3">
-                周期确权净入库
-              </p>
-              <h4 className="text-4xl font-black font-mono tracking-tighter">
-                {formatMoney(summaryData.netValue)}
-              </h4>
-              <div className="mt-4 flex items-center space-x-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest">
-                  已完成周期对冲核算
-                </span>
-              </div>
-            </Card>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <PieChartCard
-              title="确权资产结构 (毛值)"
-              icon=""
-              iconBgColor="bg-blue-50"
-              iconTextColor="text-blue-600"
-              data={summaryData.categoryStats}
-            />
-            <PieChartCard
-              title="角色确权贡献分布 (收产包)"
-              icon="👥"
-              iconBgColor="bg-purple-50"
-              iconTextColor="text-purple-600"
-              data={summaryData.roleStats}
-              paddingAngle={5}
-            />
-            <div className={`bg-white p-10 ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-xl`}>
-              <h4 className="text-xs font-black text-slate-900 uppercase tracking-[0.2em] mb-10 flex items-center">
-                <span className="w-8 h-8 bg-rose-50 rounded-lg flex items-center justify-center text-rose-600 mr-3">
-                  📉
-                </span>
-                动态消耗分摊结构
-              </h4>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={summaryData.costStats}>
-                    <CartesianGrid
-                      strokeDasharray="3 3"
-                      vertical={false}
-                      stroke="#f1f5f9"
-                    />
-                    <XAxis
-                      dataKey="name"
-                      axisLine={false}
-                      tickLine={false}
-                      tick={{
-                        fontSize: 10,
-                        fontWeight: "bold",
-                        fill: "#94a3b8",
-                      }}
-                    />
-                    <YAxis
-                      axisLine={false}
-                      tickLine={false}
-                      tick={{
-                        fontSize: 10,
-                        fontWeight: "bold",
-                        fill: "#94a3b8",
-                      }}
-                    />
-                    <Tooltip
-                      cursor={{ fill: "#f8fafc" }}
-                      contentStyle={{
-                        borderRadius: "15px",
-                        border: "none",
-                        boxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.1)",
-                      }}
-                    />
-                    <Bar dataKey="value" radius={[10, 10, 0, 0]} barSize={40}>
-                      {summaryData.costStats.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
         <Card
           title={
@@ -947,6 +842,25 @@ const Auditing: React.FC<AuditingProps> = ({
                 </svg>
                 {isRefreshing ? "刷新中..." : "刷新"}
               </button>
+              {(activeTab === "pending" || activeTab === "consumption") && (
+                <button
+                  onClick={handleBatchConfirm}
+                  disabled={isBatchConfirming || pendingConfirmableTasks.length === 0}
+                  className={`px-3 py-1.5 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 shadow-sm transition-all flex items-center space-x-1.5 active:scale-95 cursor-pointer ${isBatchConfirming || pendingConfirmableTasks.length === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
+                  title={
+                    pendingConfirmableTasks.length === 0
+                      ? `当前无可确权的${activeTab === "consumption" ? "消耗" : "收款"}记录`
+                      : selectedLogIds.size > 0
+                        ? `批量确权已勾选的 ${selectedLogIds.size} 笔记录`
+                        : `批量确权当前筛选的全部 ${pendingConfirmableTasks.length} 笔待处理${activeTab === "consumption" ? "消耗" : "收款"}`
+                  }
+                >
+                  <CheckCheck className="w-3.5 h-3.5" />
+                  <span>
+                    批量确权{selectedLogIds.size > 0 ? ` (${selectedLogIds.size})` : ` (${pendingConfirmableTasks.length})`}
+                  </span>
+                </button>
+              )}
               {activeTab !== "history" && (
                 <button
                   onClick={handleCheckInventory}
@@ -1011,25 +925,56 @@ const Auditing: React.FC<AuditingProps> = ({
               <table className="w-full text-left min-w-[1600px] border-collapse">
                 <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 whitespace-nowrap">
                   <tr>
+                    {activeTab === "consumption" && (
+                      <th className="w-10 px-3 py-6 text-center whitespace-nowrap">
+                        <input
+                          type="checkbox"
+                          checked={isAllSelected}
+                          onChange={toggleSelectAll}
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          title={isAllSelected ? "取消全选" : "全选当前页"}
+                        />
+                      </th>
+                    )}
                     <th className="px-4 py-6 whitespace-nowrap min-w-[120px]">申报编号</th>
                     <th className="px-4 py-6 whitespace-nowrap min-w-[100px]">业务日期</th>
                     <th className="px-4 py-6 whitespace-nowrap min-w-[100px]">提报日期</th>
                     <th className="px-4 py-6 whitespace-nowrap min-w-[80px]">提炼类型</th>
                     <th className="px-4 py-6 text-center whitespace-nowrap min-w-[100px]">{TERMINOLOGY.BUSINESS_UNIT}</th>
-                    <th className="px-4 py-6 font-bold text-slate-800 whitespace-nowrap min-w-[100px]">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
+                    <th className="px-4 py-6 font-bold text-slate-800 whitespace-nowrap min-w-[130px]">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
                     <th className="px-3 py-6 text-right text-indigo-600 whitespace-nowrap min-w-[90px]">非效对冲</th>
                     <th className="px-3 py-6 text-right text-blue-600 whitespace-nowrap min-w-[50px]">A</th>
                     <th className="px-3 py-6 text-right text-amber-600 whitespace-nowrap min-w-[80px]">C积分</th>
                     <th className="px-4 py-6 text-right text-amber-700 font-extrabold bg-amber-50/20 whitespace-nowrap min-w-[60px]">C权</th>
                     <th className="px-4 py-6 text-right text-amber-800 font-extrabold bg-amber-50/10 whitespace-nowrap min-w-[120px]">款初/款当</th>
-                    <th className="px-4 py-6 text-right text-amber-900 font-extrabold bg-amber-50/15 whitespace-nowrap min-w-[120px]">产初/产当</th>
                     <th className="px-3 py-6 text-right text-rose-600 whitespace-nowrap min-w-[50px]">B1</th>
                     <th className="px-3 py-6 text-right text-emerald-600 whitespace-nowrap min-w-[80px]">B2积分</th>
                     <th className="px-4 py-6 text-right text-emerald-700 font-extrabold bg-emerald-50/20 whitespace-nowrap min-w-[60px]">B2权</th>
                     <th className="px-4 py-6 text-right text-emerald-800 font-extrabold bg-emerald-50/10 whitespace-nowrap min-w-[120px]">产初/产当</th>
                     <th className="px-6 py-6 text-center whitespace-nowrap min-w-[100px]">确权日期</th>
-                    <th className="px-6 py-6 text-right whitespace-nowrap min-w-[80px]">确权状态</th>
-                    {activeTab === "consumption" && <th className="px-4 py-6 text-right whitespace-nowrap min-w-[100px]">操作控制</th>}
+                    <th className="px-6 py-6 text-right whitespace-nowrap min-w-[90px]">确权状态</th>
+                    {activeTab === "consumption" && (
+                      <th className="px-4 py-6 text-right whitespace-nowrap min-w-[120px]">
+                        <div className="flex items-center justify-end space-x-2">
+                          <span>操作控制</span>
+                          <button
+                            onClick={handleBatchConfirm}
+                            disabled={isBatchConfirming || pendingConfirmableTasks.length === 0}
+                            title={
+                              pendingConfirmableTasks.length === 0
+                                ? "当前无可确权的消耗记录"
+                                : selectedLogIds.size > 0
+                                  ? `批量确权已勾选的 ${selectedLogIds.size} 笔记录`
+                                  : `批量确权当前筛选的全部 ${pendingConfirmableTasks.length} 笔待处理消耗`
+                            }
+                            className="inline-flex items-center space-x-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-[9px] font-black uppercase rounded-lg shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                          >
+                            <CheckCheck className="w-3 h-3" />
+                            <span>批量确权{selectedLogIds.size > 0 ? ` (${selectedLogIds.size})` : ''}</span>
+                          </button>
+                        </div>
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -1041,6 +986,16 @@ const Auditing: React.FC<AuditingProps> = ({
 
                     return (
                       <tr key={log.id} className="hover:bg-rose-50/30 transition-colors group">
+                        {activeTab === "consumption" && (
+                          <td className="w-10 px-3 py-6 text-center">
+                            <input
+                              type="checkbox"
+                              checked={selectedLogIds.has(log.id)}
+                              onChange={() => toggleSelectLog(log.id)}
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                            />
+                          </td>
+                        )}
                         <td className="px-4 py-6">
                           <span className="font-mono text-[11px] font-black text-slate-900 group-hover:text-rose-600">{log.id.includes('#') ? log.id.substring(log.id.lastIndexOf('#')) : '#' + log.id}</span>
                         </td>
@@ -1067,9 +1022,6 @@ const Auditing: React.FC<AuditingProps> = ({
                         </td>
                         <td className="px-4 py-6 text-right font-mono font-bold text-amber-800 bg-amber-50/10">
                           {revLimitStr}
-                        </td>
-                        <td className="px-4 py-6 text-right font-mono font-bold text-amber-900 bg-amber-50/15">
-                          {valLimitCStr}
                         </td>
                         <td className="px-3 py-6 text-right font-mono font-bold text-rose-600">
                           {(log.costCategory === 'B' && log.valueConsumptionMode === 'B1') ? maskMoney(Math.round(log.dynamicCost)) : '-'}
@@ -1121,7 +1073,7 @@ const Auditing: React.FC<AuditingProps> = ({
                   })}
                   {(activeTab === "history" ? historyTasks.length : consumptionTasks.length) === 0 && (
                     <tr>
-                      <td colSpan={activeTab === "consumption" ? 18 : 17} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
+                      <td colSpan={activeTab === "consumption" ? 19 : 17} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
                     </tr>
                   )}
                 </tbody>
@@ -1130,11 +1082,25 @@ const Auditing: React.FC<AuditingProps> = ({
               <table className="w-full text-left min-w-[1000px]">
                 <thead>
                   <tr className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] border-b border-slate-100">
+                    {activeTab === "pending" && (
+                      <th className="w-10 px-3 py-6 text-center whitespace-nowrap">
+                        <input
+                          type="checkbox"
+                          checked={isAllSelected}
+                          onChange={toggleSelectAll}
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          title={isAllSelected ? "取消全选" : "全选当前页"}
+                        />
+                      </th>
+                    )}
                     <th className="px-4 py-6 whitespace-nowrap min-w-[100px]">申报编号</th>
                     <th className="px-4 py-6 whitespace-nowrap min-w-[100px]">业务日期</th>
                     <th className="px-4 md:px-6 py-6 whitespace-nowrap min-w-[80px]">{TERMINOLOGY.BUSINESS_UNIT}</th>
                     <th className="px-4 md:px-6 py-6 whitespace-nowrap min-w-[80px]">矿山编号</th>
                     <th className="hidden md:table-cell px-6 py-6 whitespace-nowrap min-w-[100px]">采集主体</th>
+                    <th className="px-4 md:px-6 py-6 text-right whitespace-nowrap min-w-[90px]">
+                      {activeTab === "linked" ? "输入产值" : (activeTab === "pending" ? "输入收款" : "输入金额")}
+                    </th>
                     <th className="px-4 md:px-6 py-6 text-right whitespace-nowrap min-w-[80px]">注入积分</th>
                     {(activeTab === "linked" ||
                       activeTab === "confirmed") && (
@@ -1150,7 +1116,28 @@ const Auditing: React.FC<AuditingProps> = ({
                     <th className="px-4 md:px-6 py-6 text-right whitespace-nowrap min-w-[90px]">
                       {activeTab === "pending" ? "收款包" : (activeTab === "linked" ? "产兑包" : "收款包/产兑包")}
                     </th>
-                    <th className="px-4 md:px-10 py-6 text-right whitespace-nowrap min-w-[80px]">操作控制</th>
+                    <th className="px-4 md:px-10 py-6 text-right whitespace-nowrap min-w-[120px]">
+                      <div className="flex items-center justify-end space-x-2">
+                        <span>操作控制</span>
+                        {activeTab === "pending" && (
+                          <button
+                            onClick={handleBatchConfirm}
+                            disabled={isBatchConfirming || pendingConfirmableTasks.length === 0}
+                            title={
+                              pendingConfirmableTasks.length === 0
+                                ? "当前无可确权的收款记录"
+                                : selectedLogIds.size > 0
+                                  ? `批量确权已勾选的 ${selectedLogIds.size} 笔记录`
+                                  : `批量确权当前筛选的全部 ${pendingConfirmableTasks.length} 笔待处理收款`
+                            }
+                            className="inline-flex items-center space-x-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-[9px] font-black uppercase rounded-lg shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                          >
+                            <CheckCheck className="w-3 h-3" />
+                            <span>批量确权{selectedLogIds.size > 0 ? ` (${selectedLogIds.size})` : ''}</span>
+                          </button>
+                        )}
+                      </div>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -1181,233 +1168,175 @@ const Auditing: React.FC<AuditingProps> = ({
                         estimatedEntryDate.getMonth() + 3,
                       );
 
-                    let stats: any = null;
-                    const resource = resources.find(
-                        (r) => r.id === log.miningId,
-                      );
-                        if (resource) {
-                          stats = {
-                            minedValue: resource.minedValue,
-                            approvedValue: resource.confirmedValue,
-                            pendingValue: resource.pendingValue,
-                            unconfirmedValue: Math.max(0, (resource.initialValueCapacity || resource.valueCapacity) - resource.minedValue - resource.confirmedValue - resource.pendingValue),
-                            minedRevenue: resource.minedRevenue,
-                            approvedRevenue: resource.confirmedRevenue,
-                            pendingRevenue: resource.pendingRevenue,
-                            unconfirmedRevenue: Math.max(0, (resource.initialRevenueCapacity || resource.revenueCapacity) - resource.minedRevenue - resource.confirmedRevenue - resource.pendingRevenue),
-                          };
-                        }
-
                     return (
-                      <React.Fragment key={log.id}>
-                        <tr
-                          className={`hover:bg-slate-50/80 transition-all group ${isConsumption ? "bg-rose-50/20" : ""} ${isDeduction ? "bg-rose-100/30" : ""}`}
-                        >
-                          <td className="px-4 py-6">
-                            <span className="font-mono text-[10px] font-black text-slate-900 group-hover:text-blue-500 block mb-1">
-                              #{log.id}
-                            </span>
-                            <span className="text-[9px] font-bold text-slate-500 block">
-                              {resolveLogBusinessDate(log)}
-                            </span>
+                      <tr
+                        key={log.id}
+                        className={`hover:bg-slate-50/80 transition-all group ${isConsumption ? "bg-rose-50/20" : ""} ${isDeduction ? "bg-rose-100/30" : ""}`}
+                      >
+                        {activeTab === "pending" && (
+                          <td className="w-10 px-3 py-6 text-center">
+                            <input
+                              type="checkbox"
+                              checked={selectedLogIds.has(log.id)}
+                              onChange={() => toggleSelectLog(log.id)}
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                            />
                           </td>
-                          <td className="px-4 py-6">
-                            <span className="text-xs font-black text-slate-900 block">
-                              {users.find((u) => u.id === log.rankId)?.center || "未分配"}
-                            </span>
-                          </td>
-                          <td className="px-4 py-6">
-                            <span className="text-[10px] font-black text-slate-500 uppercase">
-                              {log.miningId}
-                            </span>
-                          </td>
-                          <td className="hidden md:table-cell px-6 py-6">
-                            <span className="text-[10px] font-black text-slate-700">
-                              {formatCollectorDisplay(log.recordedCollectorId, users)}
-                            </span>
-                          </td>
-                          <td className="px-4 md:px-6 py-6 text-right">
-                            <span
-                              className={`font-mono font-black text-sm ${isConsumption ? "text-slate-400 line-through" : "text-slate-900"}`}
-                            >
-                              {formatMoney(log.amount)}
-                            </span>
-                          </td>
-                          {(activeTab === "linked" ||
-                            activeTab === "confirmed") && (
-                            <>
-                              <td className="hidden xl:table-cell px-6 py-6 text-center">
-                                <span className="text-[10px] font-mono text-slate-500">
-                                  {confirmedDate?.toLocaleDateString() || "-"}
-                                </span>
-                              </td>
-                              <td className="hidden xl:table-cell px-6 py-6 text-center">
-                                <span className="text-[10px] font-mono text-blue-600 font-bold">
-                                  {estimatedEntryDate?.toLocaleDateString() ||
-                                    "-"}
-                                </span>
-                              </td>
-                            </>
-                          )}
-                          <td className="px-4 md:px-6 py-6 text-right">
-                            <span
-                              className={`font-mono font-black text-sm ${log.netValue < 0 ? "text-rose-500" : "text-blue-600"}`}
-                            >
-                              {log.netValue > 0 ? "+" : ""}
-                              {formatMoney(log.netValue)}
-                            </span>
-                          </td>
-                          <td className="px-4 md:px-10 py-6 text-right">
-                            {activeTab === "pending" || (activeTab === "linked" && log.status === AuditStatus.Pending) ? (
-                              <div className="flex items-center justify-end space-x-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                                {log.category === RefineCategory.Value &&
-                                log.confirmationType === "联动确权" ? (
-                                  <div className="flex flex-col items-end">
-                                    <span className="text-[9px] font-black text-amber-600 uppercase tracking-widest mb-1">
-                                      等待收款确权联动
-                                    </span>
-                                    <div className="flex space-x-2">
-                                      <button
-                                        onClick={() =>
-                                          handleAction(log, "reject")
-                                        }
-                                        disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
-                                        title="驳回该笔申请"
-                                        className="px-4 py-1.5 border border-rose-100 text-rose-500 text-[9px] font-black uppercase rounded-lg hover:bg-rose-500 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                      >
-                                        驳回
-                                      </button>
-                                      <button
-                                        disabled
-                                        className="px-4 py-1.5 bg-slate-100 text-slate-400 text-[9px] font-black uppercase rounded-lg cursor-not-allowed"
-                                        title="产值确权由收款联动自动执行"
-                                      >
-                                        联动中
-                                      </button>
-                                    </div>
-                                  </div>
-                                  ) : (
-                                    <div className="flex flex-col items-end gap-1.5 w-24">
-                                      {isNpcxie && log.dynamicCost > 0 ? (
-                                        <button
-                                          onClick={() => setConfirmingLog(log)}
-                                          disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
-                                          className="w-full px-2 py-1.5 bg-rose-600 text-white text-[9px] font-black uppercase rounded-lg hover:bg-rose-700 shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                          消耗确权
-                                        </button>
-                                      ) : (
-                                        <button
-                                          onClick={() => handleAction(log, "approve")}
-                                          disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
-                                          title={
-                                            log.dynamicCost > 0
-                                              ? "确认审核该笔消耗申报"
-                                              : "确认确权，待确权资产将转为已确权"
-                                          }
-                                          className="w-full px-2 py-1.5 bg-slate-900 text-white text-[9px] font-black uppercase rounded-lg hover:bg-blue-600 shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                          {log.dynamicCost > 0 ? "确认审核" : "确认确权"}
-                                        </button>
-                                      )}
-                                      <button
-                                        onClick={() => handleAction(log, "reject")}
-                                        disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
-                                        title="驳回该笔申请，记录将标记为已驳回"
-                                        className="w-full px-2 py-1.5 border border-rose-100 text-rose-500 text-[9px] font-black uppercase rounded-lg hover:bg-rose-500 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                      >
-                                        驳回
-                                      </button>
-                                    </div>
-                                  )}
-                              </div>
-                            ) : (
-                              <div className="flex flex-col items-end">
-                                <Badge
-                                  variant={
-                                    log.status === AuditStatus.Approved
-                                      ? "success"
-                                      : log.status === AuditStatus.Confirmed
-                                        ? "warning"
-                                        : "error"
-                                  }
-                                >
-                                  {log.status === AuditStatus.Approved ? '入库' : log.status}
-                                </Badge>
-                                {log.status === AuditStatus.Confirmed && (
-                                  <span className="text-[8px] font-black text-slate-400 uppercase mt-1 tracking-tighter">
-                                    {log.confirmationType || "收款确权"}
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                        {stats && (
-                          <tr className="bg-slate-50/30 border-b border-slate-100">
-                            <td colSpan={8} className="px-10 py-3">
-                              <div className="flex flex-col space-y-2">
-                                <div className="flex items-center space-x-6 text-[10px] font-bold text-slate-500">
-                                  <span className="text-slate-400 bg-slate-100 px-2 py-1 rounded">
-                                    矿山 {log.miningId}  收款状态
-                                  </span>
-                                  <div className="flex space-x-6">
-                                    <span className="text-blue-600 flex items-center">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 mr-1.5"></span>
-                                      入库收款:{" "}
-                                      {formatMoney(stats.minedRevenue)}
-                                    </span>
-                                    <span className="text-emerald-600 flex items-center">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>
-                                      已确权收款:{" "}
-                                      {formatMoney(stats.approvedRevenue)}
-                                    </span>
-                                    <span className="text-amber-500 flex items-center">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5"></span>
-                                      待确权收款:{" "}
-                                      {formatMoney(stats.pendingRevenue)}
-                                    </span>
-                                    <span className="text-slate-400 flex items-center">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400 mr-1.5"></span>
-                                      未确权收款:{" "}
-                                      {formatMoney(stats.unconfirmedRevenue)}
-                                    </span>
-                                  </div>
-                                </div>
-                                <div className="flex items-center space-x-6 text-[10px] font-bold text-slate-500">
-                                  <span className="text-slate-400 bg-slate-100 px-2 py-1 rounded">
-                                    矿山 {log.miningId}  产值状态
-                                  </span>
-                                  <div className="flex space-x-6">
-                                    <span className="text-blue-600 flex items-center">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 mr-1.5"></span>
-                                      入库产值:{" "}
-                                      {formatMoney(stats.minedValue)}
-                                    </span>
-                                    <span className="text-emerald-600 flex items-center">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>
-                                      已确权产值:{" "}
-                                      {formatMoney(stats.approvedValue)}
-                                    </span>
-                                    <span className="text-amber-500 flex items-center">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5"></span>
-                                      待确权产值:{" "}
-                                      {formatMoney(stats.pendingValue)}
-                                    </span>
-                                    <span className="text-slate-400 flex items-center">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400 mr-1.5"></span>
-                                      未确权产值:{" "}
-                                      {formatMoney(stats.unconfirmedValue)}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
                         )}
-                      </React.Fragment>
+                        <td className="px-4 py-6">
+                          <span className="font-mono text-[10px] font-black text-slate-900 group-hover:text-blue-500 block">
+                            #{log.id}
+                          </span>
+                        </td>
+                        <td className="px-4 py-6">
+                          <span className="text-[10px] font-mono font-bold text-slate-600 whitespace-nowrap block">
+                            {resolveLogBusinessDate(log).split(' ')[0]}
+                          </span>
+                        </td>
+                        <td className="px-4 md:px-6 py-6">
+                          <span className="text-xs font-black text-slate-900 block">
+                            {users.find((u) => u.id === log.rankId)?.center || "未分配"}
+                          </span>
+                        </td>
+                        <td className="px-4 md:px-6 py-6">
+                          <span className="text-[10px] font-black text-slate-500 uppercase">
+                            {log.miningId}
+                          </span>
+                        </td>
+                        <td className="hidden md:table-cell px-6 py-6">
+                          <span className="text-[10px] font-black text-slate-700">
+                            {formatCollectorDisplay(log.recordedCollectorId, users)}
+                          </span>
+                        </td>
+                        <td className="px-4 md:px-6 py-6 text-right">
+                          <span className="font-mono font-bold text-xs text-slate-700 block">
+                            {formatMoney(getRawInputAmount(log))}
+                          </span>
+                        </td>
+                        <td className="px-4 md:px-6 py-6 text-right">
+                          <span
+                            className={`font-mono font-black text-sm ${isConsumption ? "text-slate-400 line-through" : "text-slate-900"}`}
+                          >
+                            {formatMoney(calculateInjectedAmount(log))}
+                          </span>
+                        </td>
+                        {(activeTab === "linked" ||
+                          activeTab === "confirmed") && (
+                          <>
+                            <td className="hidden xl:table-cell px-6 py-6 text-center">
+                              <span className="text-[10px] font-mono text-slate-500">
+                                {confirmedDate?.toLocaleDateString() || "-"}
+                              </span>
+                            </td>
+                            <td className="hidden xl:table-cell px-6 py-6 text-center">
+                              <span className="text-[10px] font-mono text-blue-600 font-bold">
+                                {estimatedEntryDate?.toLocaleDateString() ||
+                                  "-"}
+                              </span>
+                            </td>
+                          </>
+                        )}
+                        <td className="px-4 md:px-6 py-6 text-right">
+                          <span
+                            className={`font-mono font-black text-sm ${log.netValue < 0 ? "text-rose-500" : "text-blue-600"}`}
+                          >
+                            {log.netValue > 0 ? "+" : ""}
+                            {formatMoney(log.netValue)}
+                          </span>
+                        </td>
+                        <td className="px-4 md:px-10 py-6 text-right">
+                          {activeTab === "pending" || (activeTab === "linked" && log.status === AuditStatus.Pending) ? (
+                            <div className="flex items-center justify-end space-x-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                              {log.category === RefineCategory.Value &&
+                              log.confirmationType === "联动确权" ? (
+                                <div className="flex flex-col items-end">
+                                  <span className="text-[9px] font-black text-amber-600 uppercase tracking-widest mb-1">
+                                    等待收款确权联动
+                                  </span>
+                                  <div className="flex space-x-2">
+                                    <button
+                                      onClick={() =>
+                                        handleAction(log, "reject")
+                                      }
+                                      disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
+                                      title="驳回该笔申请"
+                                      className="px-4 py-1.5 border border-rose-100 text-rose-500 text-[9px] font-black uppercase rounded-lg hover:bg-rose-500 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      驳回
+                                    </button>
+                                    <button
+                                      disabled
+                                      className="px-4 py-1.5 bg-slate-100 text-slate-400 text-[9px] font-black uppercase rounded-lg cursor-not-allowed"
+                                      title="产值确权由收款联动自动执行"
+                                    >
+                                      联动中
+                                    </button>
+                                  </div>
+                                </div>
+                                ) : (
+                                  <div className="flex flex-col items-end gap-1.5 w-24">
+                                    {isNpcxie && log.dynamicCost > 0 ? (
+                                      <button
+                                        onClick={() => setConfirmingLog(log)}
+                                        disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
+                                        className="w-full px-2 py-1.5 bg-rose-600 text-white text-[9px] font-black uppercase rounded-lg hover:bg-rose-700 shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        消耗确权
+                                      </button>
+                                    ) : (
+                                      <button
+                                        onClick={() => handleAction(log, "approve")}
+                                        disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
+                                        title={
+                                          log.dynamicCost > 0
+                                            ? "确认审核该笔消耗申报"
+                                            : "确认确权，待确权资产将转为已确权"
+                                        }
+                                        className="w-full px-2 py-1.5 bg-slate-900 text-white text-[9px] font-black uppercase rounded-lg hover:bg-blue-600 shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        {log.dynamicCost > 0 ? "确认审核" : "确认确权"}
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => handleAction(log, "reject")}
+                                      disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
+                                      title="驳回该笔申请，记录将标记为已驳回"
+                                      className="w-full px-2 py-1.5 border border-rose-100 text-rose-500 text-[9px] font-black uppercase rounded-lg hover:bg-rose-500 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      驳回
+                                    </button>
+                                  </div>
+                                )}
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-end">
+                              <Badge
+                                variant={
+                                  log.status === AuditStatus.Approved
+                                    ? "success"
+                                    : log.status === AuditStatus.Confirmed
+                                      ? "warning"
+                                      : "error"
+                                }
+                              >
+                                {log.status === AuditStatus.Approved ? '入库' : log.status}
+                              </Badge>
+                              {log.status === AuditStatus.Confirmed && (
+                                <span className="text-[8px] font-black text-slate-400 uppercase mt-1 tracking-tighter">
+                                  {log.confirmationType || "收款确权"}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
                     );
                   })}
+                  {(activeTab === "pending" ? auditTasks.length : activeTab === "linked" ? linkedTasks.length : confirmedTasks.length) === 0 && (
+                    <tr>
+                      <td colSpan={activeTab === "pending" ? 10 : 11} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             )}

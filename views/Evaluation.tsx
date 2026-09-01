@@ -113,7 +113,7 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
       </div>
 
       {/* 全员评价明细表：朴素财务表 */}
-      <div className="bg-white border border-[#e8e8e8] rounded-sm shadow-xs overflow-hidden">
+      <div className="bg-white border border-[#E5E7EB] rounded-sm shadow-xs overflow-hidden">
         <div className="bg-slate-50 px-4 sm:px-6 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center space-x-2">
             <span className="text-[11px] font-bold text-slate-900 uppercase tracking-widest">全量价值贡献审计记录</span>
@@ -211,8 +211,8 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
           <table className="w-full table-auto border-collapse">
             <thead>
 
-              <tr className="bg-slate-50/80 border-b-2 border-[#e0e0e0]">
-                <th className="py-2.5 px-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-left whitespace-nowrap border-r border-[#f0f0f0]">
+              <tr className="bg-slate-50/80 border-b-2 border-[#D0D5DD]">
+                <th className="py-2.5 px-3.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-left whitespace-nowrap border-r border-[#F1F5F9]">
                   采集主体
                 </th>
                 <th className="py-2.5 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right whitespace-nowrap">
@@ -224,7 +224,7 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                     />
                   </span>
                 </th>
-                <th className="py-2.5 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right whitespace-nowrap border-x border-[#f0f0f0]">
+                <th className="py-2.5 px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right whitespace-nowrap border-x border-[#F1F5F9]">
                   <div className="flex items-center justify-end space-x-1">
                     <span>成本包</span>
                     <InfoTip 
@@ -290,25 +290,25 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                         {/* 上行 (已确权+待确权产兑包) */}
                         <tr className="hover:bg-slate-50/70 transition-colors">
                           {/* 1. 采集主体 (上下合并为一格) */}
-                          <td rowSpan={2} className="py-2.5 px-3.5 text-left whitespace-nowrap align-middle border-b border-[#f0f0f0] border-r border-[#f0f0f0] bg-white">
+                          <td rowSpan={2} className="py-2.5 px-3.5 text-left whitespace-nowrap align-middle border-b border-[#F1F5F9] border-r border-[#F1F5F9] bg-white">
                             <div className="font-bold text-xs text-slate-900">{e.userName}</div>
                             <div className="text-[10px] text-slate-400 font-mono tracking-tight mt-0.5">{e.category} · {e.userId}</div>
                           </td>
                           {/* 2. 收产包 (上行) */}
-                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs text-slate-800 border-b border-[#f0f0f0] font-medium">
+                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs text-slate-800 border-b border-[#F1F5F9] font-medium">
                             {formatAmount(incomeUpper)}
                           </td>
                           {/* 3. 成本包 (上下合并为一格) */}
-                          <td rowSpan={2} className="py-2.5 px-3 text-right whitespace-nowrap align-middle border-b border-[#f0f0f0] border-x border-[#f0f0f0] bg-white">
+                          <td rowSpan={2} className="py-2.5 px-3 text-right whitespace-nowrap align-middle border-b border-[#F1F5F9] border-x border-[#F1F5F9] bg-white">
                             <div className="flex flex-col items-end w-full min-w-[120px]">
                               <div className="flex items-center justify-end space-x-2 w-full">
                                 <span className="font-mono text-xs font-semibold text-slate-800">{maskMoney(e.monthlyCost)}</span>
-                                <button onClick={() => toggleCost(e.userId)} className="text-slate-400 hover:text-slate-600 transition-colors flex items-center text-[9px] bg-slate-50 px-1 py-0.5 rounded border border-[#f0f0f0]">
+                                <button onClick={() => toggleCost(e.userId)} className="text-slate-400 hover:text-slate-600 transition-colors flex items-center text-[9px] bg-slate-50 px-1 py-0.5 rounded border border-[#F1F5F9]">
                                   明细 {expandedCosts.has(e.userId) ? <ChevronUp className="w-3 h-3 ml-0.5" /> : <ChevronDown className="w-3 h-3 ml-0.5" />}
                                 </button>
                               </div>
                               {expandedCosts.has(e.userId) && (
-                                <div className="mt-2 w-full bg-slate-50/80 border border-[#f0f0f0] rounded p-1.5 space-y-1 text-[10px] text-slate-500 font-mono text-right">
+                                <div className="mt-2 w-full bg-slate-50/80 border border-[#F1F5F9] rounded p-1.5 space-y-1 text-[10px] text-slate-500 font-mono text-right">
                                   <div className="flex justify-between items-center">
                                     <span>工资</span>
                                     <span className="text-slate-700">{maskMoney(e.baseSalary || 0)}</span>
@@ -344,25 +344,25 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                             </div>
                           </td>
                           {/* 4. 月度贡献 (上行) */}
-                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-semibold border-b border-[#f0f0f0]">
+                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-semibold border-b border-[#F1F5F9]">
                             <span className={contribUpper > 0 ? 'text-emerald-600' : contribUpper < 0 ? 'text-rose-500' : 'text-slate-500'}>
                               {contribUpper > 0 ? `+${formatAmount(contribUpper)}` : formatAmount(contribUpper)}
                             </span>
                           </td>
                           {/* 5. 月度效率 (上行) */}
-                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-bold border-b border-[#f0f0f0]">
+                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-bold border-b border-[#F1F5F9]">
                             <span className={effUpper >= 1.5 ? 'text-blue-600' : effUpper >= 1.2 ? 'text-emerald-600' : 'text-rose-500'}>
                               {formatRatio(effUpper)}
                             </span>
                           </td>
                           {/* 6. 年度效率 (上行) */}
-                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-bold border-b border-[#f0f0f0]">
+                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-bold border-b border-[#F1F5F9]">
                             <span className={yrEffUpper >= 1.5 ? 'text-blue-600' : yrEffUpper >= 1.2 ? 'text-emerald-600' : 'text-slate-500'}>
                               {formatRatio(yrEffUpper)}
                             </span>
                           </td>
                           {/* 7. 管理决策路由 (上行) */}
-                          <td className="py-2 px-3.5 text-left whitespace-nowrap border-b border-[#f0f0f0]">
+                          <td className="py-2 px-3.5 text-left whitespace-nowrap border-b border-[#F1F5F9]">
                             <span className={`inline-block px-1.5 py-0.5 text-[9px] font-bold rounded-xs border ${getTierBadgeClass(tierUpper)}`}>
                               {getTierBadgeText(tierUpper)}
                             </span>
@@ -371,29 +371,29 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                         {/* 下行 (仅已确权产兑包) */}
                         <tr className="hover:bg-slate-50/70 transition-colors">
                           {/* 2. 收产包 (下行) */}
-                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs text-slate-800 border-b border-[#f0f0f0] font-medium">
+                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs text-slate-800 border-b border-[#F1F5F9] font-medium">
                             {formatAmount(incomeLower)}
                           </td>
                           {/* 4. 月度贡献 (下行) */}
-                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-semibold border-b border-[#f0f0f0]">
+                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-semibold border-b border-[#F1F5F9]">
                             <span className={contribLower > 0 ? 'text-emerald-600' : contribLower < 0 ? 'text-rose-500' : 'text-slate-500'}>
                               {contribLower > 0 ? `+${formatAmount(contribLower)}` : formatAmount(contribLower)}
                             </span>
                           </td>
                           {/* 5. 月度效率 (下行) */}
-                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-bold border-b border-[#f0f0f0]">
+                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-bold border-b border-[#F1F5F9]">
                             <span className={effLower >= 1.5 ? 'text-blue-600' : effLower >= 1.2 ? 'text-emerald-600' : 'text-rose-500'}>
                               {formatRatio(effLower)}
                             </span>
                           </td>
                           {/* 6. 年度效率 (下行) */}
-                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-bold border-b border-[#f0f0f0]">
+                          <td className="py-2 px-3 text-right whitespace-nowrap font-mono text-xs font-bold border-b border-[#F1F5F9]">
                             <span className={yrEffLower >= 1.5 ? 'text-blue-600' : yrEffLower >= 1.2 ? 'text-emerald-600' : 'text-slate-500'}>
                               {formatRatio(yrEffLower)}
                             </span>
                           </td>
                           {/* 7. 管理决策路由 (下行) */}
-                          <td className="py-2 px-3.5 text-left whitespace-nowrap border-b border-[#f0f0f0]">
+                          <td className="py-2 px-3.5 text-left whitespace-nowrap border-b border-[#F1F5F9]">
                             <span className={`inline-block px-1.5 py-0.5 text-[9px] font-bold rounded-xs border ${getTierBadgeClass(tierLower)}`}>
                               {getTierBadgeText(tierLower)}
                             </span>
@@ -405,9 +405,9 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
 
                   // 款专 (单行)
                   return (
-                    <tr key={e.userId} className="hover:bg-slate-50/70 transition-colors border-b border-[#f0f0f0] last:border-b-0">
+                    <tr key={e.userId} className="hover:bg-slate-50/70 transition-colors border-b border-[#F1F5F9] last:border-b-0">
                       {/* 1. 采集主体 */}
-                      <td className="py-2.5 px-3.5 text-left whitespace-nowrap align-middle border-r border-[#f0f0f0]">
+                      <td className="py-2.5 px-3.5 text-left whitespace-nowrap align-middle border-r border-[#F1F5F9]">
                         <div className="font-bold text-xs text-slate-900">{e.userName}</div>
                         <div className="text-[10px] text-slate-400 font-mono tracking-tight mt-0.5">{e.category} · {e.userId}</div>
                       </td>
@@ -416,16 +416,16 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                         {formatAmount(e.monthlyIncome)}
                       </td>
                       {/* 3. 成本包 */}
-                      <td className="py-2.5 px-3 text-right whitespace-nowrap align-middle border-x border-[#f0f0f0]">
+                      <td className="py-2.5 px-3 text-right whitespace-nowrap align-middle border-x border-[#F1F5F9]">
                         <div className="flex flex-col items-end w-full min-w-[120px]">
                           <div className="flex items-center justify-end space-x-2 w-full">
                             <span className="font-mono text-xs font-semibold text-slate-800">{maskMoney(e.monthlyCost)}</span>
-                            <button onClick={() => toggleCost(e.userId)} className="text-slate-400 hover:text-slate-600 transition-colors flex items-center text-[9px] bg-slate-50 px-1 py-0.5 rounded border border-[#f0f0f0]">
+                            <button onClick={() => toggleCost(e.userId)} className="text-slate-400 hover:text-slate-600 transition-colors flex items-center text-[9px] bg-slate-50 px-1 py-0.5 rounded border border-[#F1F5F9]">
                               明细 {expandedCosts.has(e.userId) ? <ChevronUp className="w-3 h-3 ml-0.5" /> : <ChevronDown className="w-3 h-3 ml-0.5" />}
                             </button>
                           </div>
                           {expandedCosts.has(e.userId) && (
-                            <div className="mt-2 w-full bg-slate-50/80 border border-[#f0f0f0] rounded p-1.5 space-y-1 text-[10px] text-slate-500 font-mono text-right">
+                            <div className="mt-2 w-full bg-slate-50/80 border border-[#F1F5F9] rounded p-1.5 space-y-1 text-[10px] text-slate-500 font-mono text-right">
                               <div className="flex justify-between items-center">
                                 <span>工资</span>
                                 <span className="text-slate-700">{maskMoney(e.baseSalary || 0)}</span>

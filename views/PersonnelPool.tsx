@@ -653,48 +653,54 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
       }).filter(u => u.id && u.name);
 
       if (newUsers.length > 0) {
-        showConfirm(`识别到 ${newUsers.length} 个实体，是否合并入矩阵？（重复 ID 将被覆盖）`, async () => {
-          if (!isSystemAdmin(user)) return showAlert('权限不足：仅系统管理员有权执行批量导入。');
-          if (isSyncing.current) return;
-          isSyncing.current = true;
+        showConfirm(
+          `导入将批量写入 ${newUsers.length} 条记录，请确认数据无误。（重复 ID 将被覆盖）`,
+          async () => {
+            if (!isSystemAdmin(user)) return showAlert('权限不足：仅系统管理员有权执行批量导入。');
+            if (isSyncing.current) return;
+            isSyncing.current = true;
 
-          const newUsersMap = new Map(newUsers.map(u => [u.id, u]));
-          const mergedUsers = users.map(u => newUsersMap.has(u.id) ? newUsersMap.get(u.id)! : u);
-          const existingIds = new Set(users.map(u => u.id));
-          const uniqueNewUsers = newUsers.filter(u => !existingIds.has(u.id));
-          const finalUsers = [...mergedUsers, ...uniqueNewUsers].map(u => ({
-            ...u,
-            center: resolveBusinessUnitName(u.center, effectiveBusinessUnits),
-          }));
+            const newUsersMap = new Map(newUsers.map(u => [u.id, u]));
+            const mergedUsers = users.map(u => newUsersMap.has(u.id) ? newUsersMap.get(u.id)! : u);
+            const existingIds = new Set(users.map(u => u.id));
+            const uniqueNewUsers = newUsers.filter(u => !existingIds.has(u.id));
+            const finalUsers = [...mergedUsers, ...uniqueNewUsers].map(u => ({
+              ...u,
+              center: resolveBusinessUnitName(u.center, effectiveBusinessUnits),
+            }));
 
-          const unitsToAdd = finalUsers
-            .map(u => u.center)
-            .filter(c => c && !businessUnitListHas(effectiveBusinessUnits, c));
-          
-          const newJydyUnitsFromImport = unitsToAdd.map(name => ({
-            id: name,
-            name: name,
-            status: 'active' as const
-          }));
-          const finalJydyUnits = [...jydyUnits, ...newJydyUnitsFromImport];
+            const unitsToAdd = finalUsers
+              .map(u => u.center)
+              .filter(c => c && !businessUnitListHas(effectiveBusinessUnits, c));
+            
+            const newJydyUnitsFromImport = unitsToAdd.map(name => ({
+              id: name,
+              name: name,
+              status: 'active' as const
+            }));
+            const finalJydyUnits = [...jydyUnits, ...newJydyUnitsFromImport];
 
-          try {
-            const ok = await persistOrAlert({ 
-              users: finalUsers, 
-              jydyUnits: finalJydyUnits 
-            });
-            if (!ok) return;
-            onUpdateUsers(stripUsersPasswords(finalUsers));
-            if (unitsToAdd.length > 0) {
-              onUpdateJydyUnits(finalJydyUnits);
+            try {
+              const ok = await persistOrAlert({ 
+                users: finalUsers, 
+                jydyUnits: finalJydyUnits 
+              });
+              if (!ok) return;
+              onUpdateUsers(stripUsersPasswords(finalUsers));
+              if (unitsToAdd.length > 0) {
+                onUpdateJydyUnits(finalJydyUnits);
+              }
+              toast.success('批量导入成功。');
+            } catch (err) {
+              showAlert('批量导入同步失败');
+            } finally {
+              isSyncing.current = false;
             }
-            toast.success('批量导入成功。');
-          } catch (err) {
-            showAlert('批量导入同步失败');
-          } finally {
-            isSyncing.current = false;
-          }
-        });
+          },
+          undefined,
+          '确认导入',
+          '取消'
+        );
       }
     };
     reader.readAsBinaryString(file);

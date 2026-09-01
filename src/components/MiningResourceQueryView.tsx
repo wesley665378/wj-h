@@ -12,7 +12,7 @@ import { Card, ProjectStatusBadge } from './UI';
 import { deriveProjectStatus } from '../utils/projectStatus';
 import { calculateSingleResourceQuadrants } from '../utils/purification';
 import { calculateHistoricalNetValue } from '../utils/business';
-import { calculateHedgeCapacitiesAndWeights } from '../utils/consumptionHedge';
+import { calculateHedgeCapacitiesAndWeights, calculateInjectedAmount, getRawInputAmount } from '../utils/consumptionHedge';
 import { InfoTip } from './InfoTip';
 import { exportWorkbook, buildExcelFilename, XLSX } from '../utils/excelIo';
 import { BusinessDateFilter } from './BusinessDateFilter';
@@ -21,6 +21,8 @@ import { formatMoney } from '../utils/formatMoney';
 import { isVirtualDeductionMiningId } from '../utils/virtualDeduction';
 import { UI_LABELS } from '../constants/uiLabels';
 import { formatCollectorDisplay } from '../utils/collector';
+import { shouldPersistLogToJzcz } from '../utils/jzczLogs';
+import { shouldPersistLogToDtcb } from '../utils/dtcbLogs';
 
 export const normalizeMiningId = (id: string | undefined | null): string => {
   return (id || '').trim().toLowerCase();
@@ -93,13 +95,13 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
   }, [resource, logs]);
 
   // 【2 价值创造 jzcz】
-  // 过滤 miningId 精确命中本矿，且排除消耗单
+  // 过滤 miningId 精确命中本矿，且属于价值创造流水 (shouldPersistLogToJzcz)
   // 收款行：仅 status 已确权；待确权收款不进列表、不进收款包汇总
   // 产值行：已确权，或（待确权且 confirmationType==='联动确权'）；普通待确权产值不进列表、不进产兑包
   const jzczRows = useMemo(() => {
     let list = logs.filter(l => {
       if (normalizeMiningId(l.miningId) !== normQueryId) return false;
-      if (l.costCategory || (l as any).consumptionType || l.confirmationType === '手动确权') return false;
+      if (!shouldPersistLogToJzcz(l)) return false;
 
       const isRev = l.category === RefineCategory.Revenue || (l.category as any) === '收款';
       const isVal = l.category === RefineCategory.Value || (l.category as any) === '产值';
@@ -139,12 +141,12 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
   }, [jzczRows, resources, managedUsers]);
 
   // 【3 动态消耗 dtcb】
-  // miningId 精确命中本矿，各状态；排除 miningId==='SYSTEM_DEDUCTION'
+  // miningId 精确命中本矿，且属于动态消耗流水 (shouldPersistLogToDtcb)；排除虚拟对冲矿
   const dtcbRows = useMemo(() => {
     const combined = [...dtcbLogs, ...logs];
     const map = new Map<string, ValueCreationLog>();
     combined.forEach(l => {
-      if (normalizeMiningId(l.miningId) === normQueryId && (l.confirmationType === '手动确权' || !!l.costCategory || !!(l as any).consumptionType)) {
+      if (normalizeMiningId(l.miningId) === normQueryId && shouldPersistLogToDtcb(l)) {
         if (!isVirtualDeductionMiningId(l.miningId)) {
           map.set(l.id, l);
         }
@@ -199,10 +201,8 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
     // Sheet 2: 价值创造 jzcz
     const jzczExportData = jzczRows.map(l => {
       const isRev = l.category === RefineCategory.Revenue || (l.category as any) === '收款';
-      const rawInj = isRev 
-        ? (l.rawAmount != null ? Math.round(l.rawAmount * 0.933) : Math.round(l.amount || 0))
-        : Math.round(l.rawAmount != null ? l.rawAmount : l.amount || 0);
-      const pkgNet = Math.round(calculateHistoricalNetValue(l, resources, managedUsers));
+      const rawInj = calculateInjectedAmount(l);
+      const pkgNet = Math.round(l.netValue !== undefined && l.netValue !== null ? l.netValue : calculateHistoricalNetValue(l, resources, managedUsers));
 
       return {
         '类别': isRev ? '收款' : '产值',
@@ -447,7 +447,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
                 title="权指标说明"
                 content={
                   <div className="space-y-2">
-                    <p><b>N (基数)</b> = round(款初 × 0.933)</p>
+                    <p><b>N (基数)</b> = round(款初)</p>
                     <p><b>C权</b> = (N − ΣC) / N <span className="text-slate-400 font-normal">(N=0时为1)</span></p>
                     <p><b>B2权</b> = (N − ΣC − ΣB2) / (N − ΣC) <span className="text-slate-400 font-normal">(分母=0时为1)</span></p>
                     <p className="border-t border-slate-700 pt-1 mt-1 text-amber-400">收款套 C权；产值套 C权 × B2权。</p>
@@ -566,6 +566,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
                 <th className="py-2.5 px-3">确权类型</th>
                 <th className="py-2.5 px-3">业务日期</th>
                 <th className="py-2.5 px-3">采集主体</th>
+                <th className="py-2.5 px-3 text-right">输入金额</th>
                 <th className="py-2.5 px-3 text-right">注入积分</th>
                 <th className="py-2.5 px-3 text-right">收款包</th>
                 <th className="py-2.5 px-3 text-right">产兑包</th>
@@ -576,15 +577,13 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {jzczRows.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_LIST}</td>
+                  <td colSpan={11} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_LIST}</td>
                 </tr>
               ) : (
                 jzczRows.map(l => {
                   const isRev = l.category === RefineCategory.Revenue || (l.category as any) === '收款';
-                  const rawInj = isRev 
-                    ? (l.rawAmount != null ? Math.round(l.rawAmount * 0.933) : Math.round(l.amount || 0))
-                    : Math.round(l.rawAmount != null ? l.rawAmount : l.amount || 0);
-                  const pkgNet = Math.round(calculateHistoricalNetValue(l, resources, managedUsers));
+                  const rawInj = calculateInjectedAmount(l);
+                  const pkgNet = Math.round(l.netValue !== undefined && l.netValue !== null ? l.netValue : calculateHistoricalNetValue(l, resources, managedUsers));
 
                   return (
                     <tr key={l.id} className="hover:bg-slate-50/80 transition-colors">
@@ -610,6 +609,9 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
                       </td>
                       <td className="py-2 px-3 font-medium text-slate-800 max-w-[200px] truncate" title={formatExpertCategoryDisplay(l.recordedCollectorId || l.rankId, managedUsers)}>
                         {formatExpertCategoryDisplay(l.recordedCollectorId || l.rankId, managedUsers)}
+                      </td>
+                      <td className="py-2 px-3 text-right font-mono font-bold text-slate-700">
+                        {formatMoney(getRawInputAmount(l))}
                       </td>
                       <td className="py-2 px-3 text-right font-mono font-bold text-slate-800">
                         {formatMoney(rawInj)}

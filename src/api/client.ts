@@ -92,16 +92,59 @@ export function unwrapApiEnvelope<T = any>(response: any): T {
   return current as T;
 }
 
+export function sanitizeErrorMessage(rawMessage?: string): string {
+  if (!rawMessage || typeof rawMessage !== 'string') {
+    return '服务器繁忙，请稍后重试';
+  }
+
+  const lower = rawMessage.toLowerCase();
+  
+  if (
+    lower.includes('internal server error') ||
+    lower.includes('500') ||
+    lower.includes('502') ||
+    lower.includes('503') ||
+    lower.includes('bad gateway') ||
+    lower.includes('service unavailable')
+  ) {
+    return '服务器繁忙，请稍后重试';
+  }
+  if (
+    lower.includes('failed to fetch') ||
+    lower.includes('networkerror') ||
+    lower.includes('network request failed')
+  ) {
+    return '网络连接异常，请检查网络状态';
+  }
+  if (
+    lower.includes('abort') ||
+    lower.includes('timeout') ||
+    lower.includes('超时') ||
+    lower.includes('504')
+  ) {
+    return '服务器响应超时，请稍后重试';
+  }
+
+  return rawMessage;
+}
+
 export const toastApiError = (err: unknown, defaultMsg: string = '请求操作失败'): void => {
   console.error('API Request Error:', err);
+  let rawMsg = defaultMsg;
   if (err instanceof ApiError) {
-    toast.error(err.message || defaultMsg);
+    rawMsg = err.message || defaultMsg;
   } else if (err instanceof Error) {
-    toast.error(err.message || defaultMsg);
+    rawMsg = err.message || defaultMsg;
   } else if (typeof err === 'string') {
-    toast.error(err);
+    rawMsg = err;
+  }
+
+  const friendlyMsg = sanitizeErrorMessage(rawMsg);
+  
+  if (import.meta.env.DEV && rawMsg !== friendlyMsg) {
+    toast.error(`${friendlyMsg} (${rawMsg})`);
   } else {
-    toast.error(defaultMsg);
+    toast.error(friendlyMsg);
   }
 };
 
@@ -109,7 +152,7 @@ const getBaseUrl = (): string => {
   return import.meta.env.VITE_API_BASE || '';
 };
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(endpoint: string, options: RequestInit = {}, timeoutMs: number = 60000): Promise<T> {
   const url = `${getBaseUrl()}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
   
   const headers: Record<string, string> = {
@@ -121,16 +164,27 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers['Authorization'] = `Bearer ${currentAuthToken}`;
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
   const config: RequestInit = {
     ...options,
     headers,
+    signal: options.signal || controller.signal,
   };
 
   let response: Response;
   try {
     response = await fetch(url, config);
   } catch (networkErr: any) {
-    throw new ApiError(networkErr?.message || '网络连接异常，请检查网络状态', 0);
+    if (networkErr?.name === 'AbortError' || controller.signal.aborted) {
+      throw new ApiError('服务器响应超时，请稍后重试', 504);
+    }
+    throw new ApiError(sanitizeErrorMessage(networkErr?.message || '网络连接异常，请检查网络状态'), 0);
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   let responseData: any = null;
@@ -160,7 +214,11 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       extractedMsg = responseData.trim();
     }
 
-    const errorMsg = extractedMsg || `请求失败 (状态码: ${response.status})`;
+    if (response.status >= 500 || (extractedMsg && extractedMsg.toLowerCase().includes('internal server error'))) {
+      extractedMsg = '服务器繁忙，请稍后重试';
+    }
+
+    const errorMsg = extractedMsg ? sanitizeErrorMessage(extractedMsg) : `请求失败 (状态码: ${response.status})`;
     throw new ApiError(errorMsg, response.status, responseData);
   }
 

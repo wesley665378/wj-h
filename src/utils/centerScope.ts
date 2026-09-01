@@ -121,11 +121,16 @@ export function filterAuditLogsByCenter(
   if (isGlobalReader(currentUser)) return logs;
   if (!currentUser.center) return [];
 
-  const centerUserIds = new Set(users.filter(u => {
+  const centerUserIds = new Set<string>();
+  users.filter(u => {
     if (!u) return false;
     return centerMatch(u.center, currentUser.center);
-  }).map(u => u.id));
-  centerUserIds.add(currentUser.id);
+  }).forEach(u => {
+    if (u.id) centerUserIds.add(u.id);
+    if (u.userId) centerUserIds.add(u.userId);
+  });
+  if (currentUser.id) centerUserIds.add(currentUser.id);
+  if (currentUser.userId) centerUserIds.add(currentUser.userId);
 
   return (logs || []).filter(l => isLogLinkedToCenterUser(l, centerUserIds, resources, currentUser.center));
 }

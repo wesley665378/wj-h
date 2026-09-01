@@ -51,6 +51,36 @@ import { getExecutionType, getExecutionTypeBadgeColor, EXECUTION_TYPE_EXPLANATIO
 import { persistDtcbLogs } from '../src/api';
 import { toastApiError } from '../src/api/client';
 
+// Helper component for the expandable 3-tier theoretical value
+const TieredValueDisplay: React.FC<{ value: number }> = ({ value }) => {
+  const [expanded, setExpanded] = useState(false);
+  const v100 = Math.round(value);
+  const v80 = Math.round(value * 0.8);
+  const v60 = Math.round(value * 0.6);
+
+  return (
+    <div className="flex flex-col items-end">
+      <div className="flex items-center gap-1">
+        <span className="font-bold text-slate-800 tabular-nums">{v100.toLocaleString()}</span>
+        <button 
+          onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+          className="text-slate-400 hover:text-blue-600 p-0.5"
+        >
+          {expanded ? '▴' : '▾'}
+        </button>
+      </div>
+      {expanded && (
+        <div className="mt-1 pt-1 border-t border-slate-100 w-full space-y-0.5 text-[9px] animate-in slide-in-from-top-1">
+          <div className="flex justify-between text-slate-400"><span className="text-slate-300">60%</span><span className="tabular-nums font-mono">{v60.toLocaleString()}</span></div>
+          <div className="flex justify-between text-slate-400"><span className="text-slate-300">80%</span><span className="tabular-nums font-mono">{v80.toLocaleString()}</span></div>
+          <div className="flex justify-between text-slate-500 font-medium"><span className="text-slate-400">100%</span><span className="tabular-nums font-mono">{v100.toLocaleString()}</span></div>
+          <div className="text-[8px] text-slate-300 mt-1 truncate">情景参考，不代表实际发放</div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 interface DynamicConsumptionProps {
   user: User;
   users: User[];
@@ -216,12 +246,13 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
   const [filterStartDate, setFilterStartDate] = useState<string>('');
   const [filterEndDate, setFilterEndDate] = useState<string>('');
   const [filterMonth, setFilterMonth] = useState<string>(() => getLocalMonthString());
+  const [activeTab, setActiveTab] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 50;
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedOperatorId, filterStartDate, filterEndDate, filterMonth]);
+  }, [selectedOperatorId, filterStartDate, filterEndDate, filterMonth, activeTab]);
   const [showDeductionChannel, setShowDeductionChannel] = useState<boolean>(false);
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
 
@@ -519,20 +550,27 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
   const consumptionLogs = useMemo(() => {
     let list = dtcbLogsToUse.filter(l => (l.dynamicCost > 0 || l.type === RefineType.NonEffectiveHours));
+    
+    // Status Filter
+    if (activeTab === 'pending') list = list.filter(l => l.status === AuditStatus.Pending);
+    else if (activeTab === 'approved') list = list.filter(l => l.status === AuditStatus.Approved);
+    else if (activeTab === 'rejected') list = list.filter(l => l.status === AuditStatus.Rejected);
+
+    // Existing Center/Operator filter
     const isAdmin = isGlobalReader(user);
     if (!isAdmin) {
       list = filterAuditLogsByCenter(list, resources, user, users);
-
       if (selectedOperatorId) {
         list = list.filter(l => l.rankId === selectedOperatorId || l.recordedCollectorId === selectedOperatorId);
       }
     } else if (selectedOperatorId) {
       list = list.filter(l => l.rankId === selectedOperatorId || l.recordedCollectorId === selectedOperatorId);
     }
+    
     list = list.slice().reverse();
     list = list.filter(l => isLogInFilter(l, filterMonth, filterStartDate, filterEndDate));
     return list;
-  }, [dtcbLogsToUse, resources, user, users, selectedOperatorId, filterStartDate, filterEndDate, filterMonth]);
+  }, [dtcbLogsToUse, resources, user, users, activeTab, selectedOperatorId, filterStartDate, filterEndDate, filterMonth]);
 
   const paginatedConsumptionLogs = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
@@ -776,11 +814,17 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
               {/* 4. C */}
               <div
                 onClick={() => {
+                  if (selectedResource && selectedOperator && 
+                      selectedResource.assignedToRevenue !== selectedOperator.center) {
+                    return; // 禁用
+                  }
                   setCostCategory('C');
                 }}
                 className={`p-3 rounded-sm cursor-pointer transition-all flex flex-col items-center justify-between text-center space-y-1.5 border ${
                   costCategory === 'C'
                     ? 'bg-blue-50/60 border-[#1a56db] ring-1 ring-[#1a56db] shadow-xs'
+                    : selectedResource && selectedOperator && selectedResource.assignedToRevenue !== selectedOperator.center
+                    ? 'bg-slate-50 border-slate-200 cursor-not-allowed opacity-50'
                     : 'bg-white border-[#b8d0f7] hover:bg-slate-50'
                 }`}
               >
@@ -858,179 +902,86 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
         </form>
       </Card>
 
-      {/* 非有效工时对冲卡片 */}
-      <Card title="非有效工时对冲" noPadding>
-        <form onSubmit={handleDeductionSubmit} className="p-4 md:p-6 space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">经营单元</label>
-              <div className="flex items-center bg-slate-50 border border-[#b8d0f7] rounded-[4px] px-3 py-2 h-10 text-[13px] font-bold text-slate-800">
-                {users.find(u => u.id === deductionOperatorId)?.center || '未知'}
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">采集主体</label>
-              <select 
-                value={deductionCollectorId} 
-                onChange={(e) => setDeductionCollectorId(e.target.value)} 
-                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all cursor-pointer h-10 placeholder:text-[#94a3b8]"
-                required
-              >
-                <option value="">选择采集主体...</option>
-                {collectorPool.map(u => <option key={u.id} value={u.id}>{formatCollectorDisplay(u)}</option>)}
-              </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">业务日期</label>
-              <input
-                type="date"
-                value={businessDate}
-                onChange={(e) => {
-                  setBusinessDate(e.target.value);
-                  setBusinessMonth(e.target.value.slice(0, 7));
-                }}
-                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-mono font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all cursor-pointer h-10 placeholder:text-[#94a3b8]"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">对冲额</label>
-              <input 
-                type="number" 
-                value={deductionAmount || ''} 
-                onChange={(e) => setDeductionAmount(Number(e.target.value))} 
-                className="w-full text-right bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-mono font-bold text-[#1a56db] focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all placeholder:text-[#94a3b8] h-10" 
-                placeholder="0" 
-                required
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between pt-2">
-            <span className="text-xs text-slate-500 font-medium">
-              💡 刚性工资包冲抵对冲扣除
-            </span>
+      {/* 统一审计记录表格 */}
+      <Card title="成本审计记录" noPadding headerAction={
+        <div className="flex items-center gap-2">
+          {([
+            { id: 'all', label: '全部' },
+            { id: 'pending', label: '待确权' },
+            { id: 'approved', label: '已确权' },
+            { id: 'rejected', label: '已驳回' }
+          ] as const).map(tab => (
             <button
-              type="submit"
-              className="px-6 py-2 bg-slate-900 hover:bg-blue-600 text-white rounded-[4px] text-xs font-black uppercase tracking-wider transition-all shadow-sm cursor-pointer"
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-3 py-1.5 text-[10px] font-black rounded-[4px] transition-all ${
+                activeTab === tab.id 
+                  ? 'bg-blue-600 text-white shadow-sm' 
+                  : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-50'
+              }`}
             >
-              提交非有效工时对冲
+              {tab.label}
             </button>
-          </div>
-        </form>
+          ))}
+        </div>
+      }>
+        <div className="overflow-x-auto">
+          <table id="cost-audit-records-table" className="w-full text-left min-w-[1500px] border-collapse">
+            <thead className="bg-slate-50/90 text-slate-400 text-[9px] font-bold uppercase tracking-wider border-b border-slate-200">
+              <tr>
+                <th className="px-3 py-3 border-r border-slate-200/60">申报编号</th>
+                <th className="px-2.5 py-3 text-center border-r border-slate-200/60">业务日期</th>
+                <th className="px-2.5 py-3 text-center border-r border-slate-200/60">{TERMINOLOGY.BUSINESS_UNIT}</th>
+                <th className="px-2.5 py-3 text-center border-r border-slate-200/60">{TERMINOLOGY.MINING_RESOURCE_ID}</th>
+                <th className="px-3 py-3 border-r border-slate-200/60 whitespace-nowrap min-w-[130px]">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">FXDC</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">A</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">C积分</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">C权</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">款初/款当</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">产初/产当</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">B1</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">B2积分</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">B2权</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">D积分</th>
+                <th className="px-2.5 py-3 text-center border-r border-slate-200/60 whitespace-nowrap">确权日期</th>
+                <th className="px-3 py-3 text-center whitespace-nowrap min-w-[90px]">确权状态</th>
+                <th className="px-3 py-3 text-center whitespace-nowrap min-w-[80px]">操作控制</th>
+              </tr>
+            </thead>
+          </table>
+        </div>
       </Card>
-
-      {/* 资产对冲指标卡片 */}
-      {selectedResource && selectedResourceQuadrants && (
-        <Card title="资产对冲指标" noPadding>
-          <div className="p-4 md:p-6 space-y-6">
-            {/* 产值子区块 */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <span className="px-2 py-0.5 bg-blue-50 text-[#1a56db] text-[10px] font-black rounded-sm border border-blue-200 uppercase tracking-wider">
-                    产值
-                  </span>
-                </div>
-                <div className="text-[11px] text-slate-500 font-mono [font-variant-numeric:tabular-nums]">
-                  产初：<span className="font-bold text-slate-800">{getInitialValueCapacity(selectedResource).toLocaleString()}</span>
-                  <span className="mx-2 text-slate-300">|</span>
-                  产当：<span className="font-bold text-slate-800">{Math.round(getHedgedValueCapacity(selectedResource, logs)).toLocaleString()}</span>
-                </div>
-              </div>
-
-              {/* 四格统计 */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 border border-slate-200 rounded-sm divide-x divide-y sm:divide-y-0 divide-slate-100 overflow-hidden bg-slate-50/50">
-                <div className="p-3 text-center space-y-1">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{UI_LABELS.PENDING}</div>
-                  <div className="text-sm font-bold font-mono [font-variant-numeric:tabular-nums] text-slate-800">
-                    {selectedResourceQuadrants.value.pending.toLocaleString()}
-                  </div>
-                </div>
-                <div className="p-3 text-center space-y-1">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{UI_LABELS.CONFIRMED}</div>
-                  <div className="text-sm font-bold font-mono [font-variant-numeric:tabular-nums] text-slate-800">
-                    {selectedResourceQuadrants.value.confirmed.toLocaleString()}
-                  </div>
-                </div>
-                <div className="p-3 text-center space-y-1">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{UI_LABELS.UNCONFIRMED}</div>
-                  <div className="text-sm font-bold font-mono [font-variant-numeric:tabular-nums] text-[#1a56db]">
-                    {selectedResourceQuadrants.value.unconfirmed.toLocaleString()}
-                  </div>
-                </div>
-                <div className="p-3 text-center space-y-1">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{UI_LABELS.MINED}</div>
-                  <div className="text-sm font-bold font-mono [font-variant-numeric:tabular-nums] text-slate-800">
-                    {selectedResourceQuadrants.value.mined.toLocaleString()}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 收款子区块 */}
-            <div className="border-t border-slate-100 pt-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-black rounded-sm border border-emerald-200 uppercase tracking-wider">
-                    收款
-                  </span>
-                </div>
-                <div className="text-[11px] text-slate-500 font-mono [font-variant-numeric:tabular-nums]">
-                  款初：<span className="font-bold text-slate-800">{getInitialRevenueCapacity(selectedResource).toLocaleString()}</span>
-                  <span className="mx-2 text-slate-300">|</span>
-                  款当：<span className="font-bold text-slate-800">{Math.round(getHedgedRevenueCapacity(selectedResource, logs)).toLocaleString()}</span>
-                </div>
-              </div>
-
-              {/* 四格统计 */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 border border-slate-200 rounded-sm divide-x divide-y sm:divide-y-0 divide-slate-100 overflow-hidden bg-slate-50/50">
-                <div className="p-3 text-center space-y-1">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{UI_LABELS.PENDING}</div>
-                  <div className="text-sm font-bold font-mono [font-variant-numeric:tabular-nums] text-slate-800">
-                    {selectedResourceQuadrants.revenue.pending.toLocaleString()}
-                  </div>
-                </div>
-                <div className="p-3 text-center space-y-1">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{UI_LABELS.CONFIRMED}</div>
-                  <div className="text-sm font-bold font-mono [font-variant-numeric:tabular-nums] text-slate-800">
-                    {selectedResourceQuadrants.revenue.confirmed.toLocaleString()}
-                  </div>
-                </div>
-                <div className="p-3 text-center space-y-1">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{UI_LABELS.UNCONFIRMED}</div>
-                  <div className="text-sm font-bold font-mono [font-variant-numeric:tabular-nums] text-[#1a56db]">
-                    {selectedResourceQuadrants.revenue.unconfirmed.toLocaleString()}
-                  </div>
-                </div>
-                <div className="p-3 text-center space-y-1">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{UI_LABELS.MINED}</div>
-                  <div className="text-sm font-bold font-mono [font-variant-numeric:tabular-nums] text-slate-800">
-                    {selectedResourceQuadrants.revenue.mined.toLocaleString()}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </Card>
-      )}
 
       {/* 成本审计记录表格卡片 */}
       <Card
         title="成本审计记录"
         headerAction={
           <div className="flex flex-wrap items-center gap-2">
+            {([
+              { id: 'all', label: '全部' },
+              { id: 'pending', label: '待确权' },
+              { id: 'approved', label: '已确权' },
+              { id: 'rejected', label: '已驳回' }
+            ] as const).map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-3 py-1.5 text-[10px] font-black rounded-[4px] transition-all ${
+                  activeTab === tab.id 
+                    ? 'bg-blue-600 text-white shadow-sm' 
+                    : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
             <CostPrivacyToggle size="sm" />
             <button 
               id="export-excel-btn"
               onClick={exportToExcel}
               className="px-3 py-1 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-sm text-[10px] font-bold hover:bg-emerald-100 transition-colors flex items-center shadow-xs cursor-pointer"
             >
-              <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
               导出 EXCEL
             </button>
             <BusinessDateFilter
@@ -1065,20 +1016,20 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                 <th className="px-2.5 py-3 text-center border-r border-slate-200/60">业务日期</th>
                 <th className="px-2.5 py-3 text-center border-r border-slate-200/60">{TERMINOLOGY.BUSINESS_UNIT}</th>
                 <th className="px-2.5 py-3 text-center border-r border-slate-200/60">{TERMINOLOGY.MINING_RESOURCE_ID}</th>
-                <th className="px-2.5 py-3 border-r border-slate-200/60">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60">非效对冲</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60">A</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60">C积分</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60">C权</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60">款初/款当</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60">产初/产当</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60">B1</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60">B2积分</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60">B2权</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60">产初/产当</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60">D积分</th>
-                <th className="px-2.5 py-3 text-center border-r border-slate-200/60">确权日期</th>
-                <th className="px-2.5 py-3 text-right">确权状态</th>
+                <th className="px-3 py-3 border-r border-slate-200/60 whitespace-nowrap min-w-[130px]">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">FXDC</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">A</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">C积分</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">C权</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">款初/款当</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">产初/产当</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">B1</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">B2积分</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">B2权</th>
+                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">D积分</th>
+                <th className="px-2.5 py-3 text-center border-r border-slate-200/60 whitespace-nowrap">确权日期</th>
+                <th className="px-3 py-3 text-center whitespace-nowrap min-w-[90px]">确权状态</th>
+                <th className="px-3 py-3 text-center whitespace-nowrap min-w-[80px]">操作控制</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white text-[10px]">
@@ -1092,69 +1043,74 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                       <span className="text-[9px] text-slate-400">{formatSubmissionTime(log.timestamp)}</span>
                     </td>
                     <td className="px-2.5 py-3 text-center font-mono text-slate-700 border-r border-slate-100">
-                      {resolveLogBusinessDate(log)} ({resolveLogBusinessMonth(log)})
+                      {resolveLogBusinessDate(log)}
                     </td>
                     <td className="px-2.5 py-3 text-center font-bold text-slate-700 border-r border-slate-100">
                       {users.find(u => u.id === log.rankId)?.center || '-'}
                     </td>
                     <td className="px-2.5 py-3 text-center border-r border-slate-100">
                       {log.miningId ? (
-                        <span className="font-mono font-bold text-slate-800">
-                          {log.miningId}
-                        </span>
+                        <span className="font-mono font-bold text-slate-800">{log.miningId}</span>
                       ) : (
                         <span className="text-[#1a56db] font-bold">经营单元公摊</span>
                       )}
                     </td>
-                    <td className="px-2.5 py-3 border-r border-slate-100">
-                      <div className="font-bold text-slate-700">{formatCollectorDisplay(log.recordedCollectorId, users)}</div>
-                      <div className="text-[9px] text-slate-400 font-normal">{log.type}</div>
-                    </td>
-                    <td className="px-2.5 py-3 text-right font-mono [font-variant-numeric:tabular-nums] font-bold text-slate-700 border-r border-slate-100">
-                      {(log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? maskMoney(Math.round(getNonEffectiveHoursDeduction(log))) : '—'}
-                    </td>
-                    <td className="px-2.5 py-3 text-right font-mono [font-variant-numeric:tabular-nums] font-bold text-slate-700 border-r border-slate-100">
-                      {log.costCategory === 'A' ? maskMoney(Math.round(log.dynamicCost)) : '—'}
-                    </td>
-                    <td className="px-2.5 py-3 text-right font-mono [font-variant-numeric:tabular-nums] font-bold text-slate-700 border-r border-slate-100">
-                      {log.costCategory === 'C' ? maskMoney(Math.round(log.dynamicCost)) : '—'}
-                    </td>
-                    <td className="px-2.5 py-3 text-right font-mono [font-variant-numeric:tabular-nums] font-bold text-slate-600 border-r border-slate-100">
-                      {cWeightValue || '—'}
-                    </td>
-                    <td className="px-2.5 py-3 text-right font-mono [font-variant-numeric:tabular-nums] text-slate-600 border-r border-slate-100">
-                      {revLimitStr || '—'}
-                    </td>
-                    <td className="px-2.5 py-3 text-right font-mono [font-variant-numeric:tabular-nums] text-slate-600 border-r border-slate-100">
-                      {valLimitCStr || '—'}
-                    </td>
-                    <td className="px-2.5 py-3 text-right font-mono [font-variant-numeric:tabular-nums] font-bold text-slate-700 border-r border-slate-100">
-                      {(log.costCategory === 'B' && log.valueConsumptionMode === 'B1') ? maskMoney(Math.round(log.dynamicCost)) : '—'}
-                    </td>
-                    <td className="px-2.5 py-3 text-right font-mono [font-variant-numeric:tabular-nums] font-bold text-slate-700 border-r border-slate-100">
-                      {(log.costCategory === 'B' && log.valueConsumptionMode === 'B2') ? maskMoney(Math.round(log.dynamicCost)) : '—'}
-                    </td>
-                    <td className="px-2.5 py-3 text-right font-mono [font-variant-numeric:tabular-nums] font-bold text-slate-600 border-r border-slate-100">
-                      {b2WeightValue || '—'}
-                    </td>
-                    <td className="px-2.5 py-3 text-right font-mono [font-variant-numeric:tabular-nums] text-slate-600 border-r border-slate-100">
-                      {valLimitB2Str || '—'}
-                    </td>
-                    <td className="px-2.5 py-3 text-right font-mono [font-variant-numeric:tabular-nums] font-bold text-slate-700 border-r border-slate-100">
-                      {log.costCategory === 'D' ? maskMoney(Math.round(log.dynamicCost)) : '—'}
-                    </td>
-                    <td className="px-2.5 py-3 text-center font-mono text-slate-500 border-r border-slate-100 text-[9px]">
-                      {log.confirmedAt ? new Date(log.confirmedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
-                    </td>
-                    <td className="px-2.5 py-3 text-right">
-                      <Badge
-                        variant={
-                          log.status === AuditStatus.Approved ? 'success' : 
-                          log.status === AuditStatus.Rejected ? 'error' : 'info'
+                    <td className="px-3 py-3 border-r border-slate-100 whitespace-nowrap min-w-[130px]">
+                      <div className="font-bold text-slate-700 whitespace-nowrap">{formatCollectorDisplay(log.recordedCollectorId, users)}</div>
+                      <div className="text-[9px] text-slate-400 font-normal whitespace-nowrap">{log.type}</div>
+                      {(() => {
+                        const collector = users.find(u => u.id === log.recordedCollectorId);
+                        if (collector?.category === '高款专') {
+                          const unitAmount = Math.round(logs
+                            .filter(l => l.rankId === log.rankId && l.miningId === log.miningId)
+                            .reduce((sum, l) => sum + (l.amount || 0) + (l.rawAmount || 0), 0));
+                          return (
+                            <div className="mt-1 px-1 py-0.5 border border-slate-200 border-dashed rounded-[2px] text-[8px] text-slate-400 text-center">
+                              经营单元本级：{unitAmount.toLocaleString()}
+                            </div>
+                          );
                         }
-                      >
+                        return null;
+                      })()}
+                    </td>
+                    
+                    {/* 数值列：如果是FXDC则特殊处理 */}
+                    {log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log) ? (
+                      <>
+                        <td className="px-2.5 py-3 text-right font-mono font-bold text-rose-600 border-r border-slate-100 whitespace-nowrap">{maskMoney(Math.round(getNonEffectiveHoursDeduction(log)))}</td>
+                        <td colSpan={10} className="px-2.5 py-3 text-center text-[#bbb] italic border-r border-slate-100">—</td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="px-2.5 py-3 text-right font-mono text-slate-300 border-r border-slate-100">—</td>
+                        {/* A: 理论（额度）列 */}
+                        <td className="px-2.5 py-3 text-right border-r border-slate-100">
+                          {log.costCategory === 'A' ? <TieredValueDisplay value={log.dynamicCost} /> : '—'}
+                        </td>
+                        <td className="px-2.5 py-3 text-right font-mono font-bold text-slate-700 border-r border-slate-100 whitespace-nowrap">{log.costCategory === 'C' ? maskMoney(Math.round(log.dynamicCost)) : '—'}</td>
+                        <td className="px-2.5 py-3 text-right font-mono text-slate-600 border-r border-slate-100 whitespace-nowrap">{cWeightValue || '—'}</td>
+                        <td className="px-2.5 py-3 text-right font-mono text-slate-600 border-r border-slate-100 whitespace-nowrap">{revLimitStr || '—'}</td>
+                        <td className="px-2.5 py-3 text-right font-mono text-slate-600 border-r border-slate-100 whitespace-nowrap">{valLimitCStr || '—'}</td>
+                        <td className="px-2.5 py-3 text-right font-mono font-bold text-slate-700 border-r border-slate-100 whitespace-nowrap">{(log.costCategory === 'B' && log.valueConsumptionMode === 'B1') ? maskMoney(Math.round(log.dynamicCost)) : '—'}</td>
+                        <td className="px-2.5 py-3 text-right font-mono font-bold text-slate-700 border-r border-slate-100 whitespace-nowrap">{(log.costCategory === 'B' && log.valueConsumptionMode === 'B2') ? maskMoney(Math.round(log.dynamicCost)) : '—'}</td>
+                        <td className="px-2.5 py-3 text-right font-mono text-slate-600 border-r border-slate-100 whitespace-nowrap">{b2WeightValue || '—'}</td>
+                        <td className="px-2.5 py-3 text-right font-mono font-bold text-slate-700 border-r border-slate-100 whitespace-nowrap">{log.costCategory === 'D' ? maskMoney(Math.round(log.dynamicCost)) : '—'}</td>
+                      </>
+                    )}
+
+                    <td className="px-2.5 py-3 text-center font-mono text-slate-500 border-r border-slate-100 text-[9px] whitespace-nowrap">
+                      {log.confirmedAt ? new Date(log.confirmedAt).toLocaleDateString('zh-CN') : '-'}
+                    </td>
+                    <td className="px-3 py-3 text-center whitespace-nowrap min-w-[90px]">
+                      <Badge variant={log.status === AuditStatus.Approved ? 'success' : log.status === AuditStatus.Rejected ? 'error' : 'info'}>
                         {formatAuditStatusLabel(log.status)}
                       </Badge>
+                    </td>
+                    <td className="px-2 py-2 text-center border-l border-slate-100">
+                      <div className="flex flex-col gap-1">
+                        <button className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-bold rounded-sm border border-emerald-200">确权</button>
+                        <button className="px-2 py-0.5 bg-rose-50 text-rose-600 text-[10px] font-bold rounded-sm border border-rose-200">驳回</button>
+                      </div>
                     </td>
                   </tr>
                 );

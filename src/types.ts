@@ -333,6 +333,7 @@ export interface ValueCreationLog {
   status: AuditStatus;
   confirmationType?: '自动确权' | '手动确权' | '联动确权';
   confirmedAt?: number; // 确权时间，用于3个月倒计时
+  batchId?: string; // 导入批次ID
   deleted?: boolean;
   deletedAt?: string; // 删除时间
 }

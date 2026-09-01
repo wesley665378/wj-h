@@ -351,10 +351,175 @@ async function startServer() {
     }
   });
 
+const PROCESSED_IMPORT_BATCH_IDS = new Set<string>();
+
+function validateLogQuotasServer(
+  incomingLogs: any[],
+  existingLogs: any[],
+  resourcesList: any[]
+): { validLogs: any[]; failedRows: any[] } {
+  const failedRows: any[] = [];
+  const validLogs: any[] = [];
+  const incomingLogIds = new Set((incomingLogs || []).map((l: any) => l.id));
+
+  const tracker = new Map<string, {
+    revCap: number;
+    revOcc: number;
+    revAccum: number;
+    valCap: number;
+    valOcc: number;
+    valAccum: number;
+  }>();
+
+  (resourcesList || []).forEach((r: any) => {
+    if (!r || !r.id) return;
+    const rLogs = (existingLogs || []).filter(
+      (l: any) => l && l.miningId === r.id && !l.deleted && l.status !== '已作废' && l.status !== '已撤回' && !incomingLogIds.has(l.id)
+    );
+    
+    const cCost = rLogs
+      .filter((l: any) => l.costCategory === 'C' && (l.status === '已确权' || l.status === 'Confirmed' || l.status === 'Approved' || l.status === '入库'))
+      .reduce((sum: number, l: any) => sum + (Number(l.dynamicCost || l.amount) || 0), 0);
+    
+    const b2Cost = rLogs
+      .filter((l: any) => l.costCategory === 'B' && l.valueConsumptionMode === 'B2' && (l.status === '已确权' || l.status === 'Confirmed' || l.status === 'Approved' || l.status === '入库'))
+      .reduce((sum: number, l: any) => sum + (Number(l.dynamicCost || l.amount) || 0), 0);
+
+    const initRev = Number(r.initialRevenueCapacity !== undefined ? r.initialRevenueCapacity : (r.revenueCapacity || 0));
+    const initVal = Number(r.initialValueCapacity !== undefined ? r.initialValueCapacity : (r.valueCapacity || 0));
+
+    const revCap = Math.max(0, initRev - cCost);
+    const valCap = Math.max(0, initVal - cCost - b2Cost);
+
+    const normLogs = rLogs.filter((l: any) => l.costCategory !== 'C' && !(l.costCategory === 'B' && l.valueConsumptionMode === 'B2'));
+
+    const revOcc = normLogs
+      .filter((l: any) => (l.category === 'Revenue' || l.category === '收款') && (l.status === '已确权' || l.status === '待确权' || l.status === 'Confirmed' || l.status === 'Pending' || l.status === 'Approved' || l.status === '入库'))
+      .reduce((sum: number, l: any) => sum + (Number(l.amount) || 0), 0);
+
+    const valOcc = normLogs
+      .filter((l: any) => (l.category === 'Value' || l.category === '产值') && (l.status === '已确权' || l.status === '待确权' || l.status === 'Confirmed' || l.status === 'Pending' || l.status === 'Approved' || l.status === '入库'))
+      .reduce((sum: number, l: any) => sum + (Number(l.amount) || 0), 0);
+
+    tracker.set(r.id, {
+      revCap,
+      revOcc,
+      revAccum: 0,
+      valCap,
+      valOcc,
+      valAccum: 0
+    });
+  });
+
+  let lineNum = 0;
+  for (const log of (incomingLogs || [])) {
+    lineNum++;
+    if (!log) continue;
+    
+    if (log.deleted || log.status === '已作废' || log.status === '已撤回') {
+      validLogs.push(log);
+      continue;
+    }
+    if (log.costCategory === 'C' || (log.costCategory === 'B' && log.valueConsumptionMode === 'B2')) {
+      validLogs.push(log);
+      continue;
+    }
+
+    const isRevenue = log.category === 'Revenue' || log.category === '收款';
+    const isValue = log.category === 'Value' || log.category === '产值';
+
+    if (!isRevenue && !isValue) {
+      validLogs.push(log);
+      continue;
+    }
+
+    const miningId = log.miningId;
+    if (!miningId) {
+      validLogs.push(log);
+      continue;
+    }
+
+    const info = tracker.get(miningId);
+    if (!info) {
+      validLogs.push(log);
+      continue;
+    }
+
+    const currOcc = isRevenue ? info.revOcc : info.valOcc;
+    const cap = isRevenue ? info.revCap : info.valCap;
+    const accum = isRevenue ? info.revAccum : info.valAccum;
+    const amount = Number(log.amount) || 0;
+
+    if (currOcc >= cap && cap >= 0) {
+      failedRows.push({
+        lineNum,
+        logId: log.id,
+        miningId,
+        category: log.category,
+        amount,
+        errorCode: 'LIMIT_EXCEEDED',
+        reason: '该矿已超限，禁止导入',
+        current: currOcc,
+        post: currOcc + accum + amount,
+        limit: cap
+      });
+      continue;
+    }
+
+    if (currOcc + accum + amount > cap + 0.001) {
+      const postBatch = currOcc + accum + amount;
+      failedRows.push({
+        lineNum,
+        logId: log.id,
+        miningId,
+        category: log.category,
+        amount,
+        errorCode: 'LIMIT_EXCEEDED',
+        reason: `占用将超过初限：当前 ${Math.round(currOcc).toLocaleString('zh-CN')}，本批后 ${Math.round(postBatch).toLocaleString('zh-CN')}，上限 ${Math.round(cap).toLocaleString('zh-CN')}`,
+        current: currOcc,
+        post: postBatch,
+        limit: cap
+      });
+      continue;
+    }
+
+    if (isRevenue) {
+      info.revAccum += amount;
+    } else {
+      info.valAccum += amount;
+    }
+    validLogs.push(log);
+  }
+
+  return { validLogs, failedRows };
+}
+
   app.post("/api/workspace/sync", async (req, res) => {
     try {
-      const { users, logs, dtcb, transactions, miningResources, valueEfficiencySnapshots, acceptanceRecords } = req.body;
+      const { users, logs, dtcb, transactions, miningResources, valueEfficiencySnapshots, acceptanceRecords, importBatchId, import_batch_id } = req.body;
+      const batchId = importBatchId || import_batch_id;
+
+      if (batchId && typeof batchId === 'string') {
+        if (PROCESSED_IMPORT_BATCH_IDS.has(batchId)) {
+          console.log(`[Backend Deduplication] Batch ${batchId} already processed. Skipping duplicate batch.`);
+          return res.json({ success: true, message: '批次已处理，防重复提交拦截成功', duplicate: true });
+        }
+        PROCESSED_IMPORT_BATCH_IDS.add(batchId);
+        if (PROCESSED_IMPORT_BATCH_IDS.size > 2000) {
+          const firstKey = PROCESSED_IMPORT_BATCH_IDS.values().next().value;
+          if (firstKey) PROCESSED_IMPORT_BATCH_IDS.delete(firstKey);
+        }
+      }
+
       const combinedLogs = [...(logs || []), ...(dtcb || [])];
+      
+      const currentResources = (miningResources && miningResources.length > 0) ? miningResources : MOCK_RESOURCES_DB;
+      const { validLogs: logsToSync, failedRows } = validateLogQuotasServer(combinedLogs, MOCK_LOGS_DB, currentResources);
+
+      if (failedRows.length > 0) {
+        console.warn(`[Backend Quota Block] Blocked ${failedRows.length} over-quota log entries.`);
+      }
+
       const db = await getPool();
       
       if (db) {
@@ -386,9 +551,9 @@ async function startServer() {
             }
           }
           
-          // Sync Logs
-          if (combinedLogs && combinedLogs.length > 0) {
-            for (const log of combinedLogs) {
+          // Sync Logs (Only valid logs that passed quota check)
+          if (logsToSync && logsToSync.length > 0) {
+            for (const log of logsToSync) {
               await connection.execute(
                 'INSERT INTO logs (id, miningId, rankId, recordedCollectorId, category, type, costCategory, amount, dynamicCost, cClassCost, cClassRatio, netValue, timestamp, status, confirmationType, month, businessDate, deleted, deletedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE status=?, amount=?, netValue=?, month=?, businessDate=?, deleted=?, deletedAt=?',
                 [
@@ -515,8 +680,9 @@ async function startServer() {
       
       // Always update mock storage as a fallback/mirror
       if (users) MOCK_USERS_DB = users;
-      if (combinedLogs && combinedLogs.length > 0) MOCK_LOGS_DB = combinedLogs;
-      else if (logs) MOCK_LOGS_DB = logs;
+      if (combinedLogs && combinedLogs.length > 0) {
+        MOCK_LOGS_DB = logsToSync;
+      }
       if (transactions) MOCK_TRANSACTIONS_DB = transactions;
       if (miningResources) MOCK_RESOURCES_DB = miningResources;
       if (valueEfficiencySnapshots) MOCK_SNAPSHOTS_DB = valueEfficiencySnapshots;
@@ -534,6 +700,16 @@ async function startServer() {
         }
       }
       
+      if (failedRows.length > 0) {
+        return res.status(422).json({
+          success: false,
+          code: 'LIMIT_EXCEEDED',
+          error: failedRows[0].reason || `包含 ${failedRows.length} 条数据额度超限，已拒绝落库`,
+          failedRows,
+          syncedCount: logsToSync.length
+        });
+      }
+
       res.json({ success: true });
     } catch (error) {
       console.error('Sync process error:', error);

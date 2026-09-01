@@ -1,6 +1,55 @@
-import { MiningResource, ValueCreationLog, AuditStatus, RefineCategory, User } from '../../types';
+import { MiningResource, ValueCreationLog, AuditStatus, RefineCategory, RefineType, User } from '../../types';
 import { getInitialRevenueCapacity, getInitialValueCapacity } from './miningCapacity';
 import { TIER_COEFFICIENTS } from '../constants/coefficients';
+
+/**
+ * 获取单笔提报记录的真实注入积分 (SSOT)
+ * - 产值端：为原始注入基数 rawAmount（回退为 amount）；
+ * - 收款端：为原始输入金额提纯值 rawAmount * 0.933（回退为已提纯 amount）。
+ */
+export function calculateInjectedAmount(log?: ValueCreationLog | null): number {
+  if (!log) return 0;
+  const categoryStr = log.category as string;
+  const typeStr = log.type as string;
+  const isRevenue =
+    categoryStr === RefineCategory.Revenue ||
+    categoryStr === 'Revenue' ||
+    categoryStr === '收款' ||
+    typeStr === 'Revenue' ||
+    typeStr === '收款';
+
+  if (isRevenue) {
+    return log.rawAmount !== undefined && log.rawAmount !== null
+      ? Math.round(Number(log.rawAmount) * 0.933)
+      : Math.round(Number(log.amount) || 0);
+  }
+  return log.rawAmount !== undefined && log.rawAmount !== null
+    ? Math.round(Number(log.rawAmount))
+    : Math.round(Number(log.amount) || 0);
+}
+
+/**
+ * 获取单笔提报记录的原始输入金额（输入收款/输入产值）
+ */
+export function getRawInputAmount(log?: ValueCreationLog | null): number {
+  if (!log) return 0;
+  if (log.rawAmount !== undefined && log.rawAmount !== null && Number(log.rawAmount) > 0) {
+    return Math.round(Number(log.rawAmount));
+  }
+  const categoryStr = log.category as string;
+  const typeStr = log.type as string;
+  const isRevenue =
+    categoryStr === RefineCategory.Revenue ||
+    categoryStr === 'Revenue' ||
+    categoryStr === '收款' ||
+    typeStr === 'Revenue' ||
+    typeStr === '收款';
+
+  if (isRevenue && log.amount) {
+    return Math.round(Number(log.amount) / 0.933);
+  }
+  return Math.round(Number(log.amount) || 0);
+}
 
 export function calculateAccruedCosts(miningId: string, allLogs: ValueCreationLog[]) {
   const resourceLogs = (allLogs || []).filter(l => 
@@ -40,8 +89,8 @@ export function calculateHedgeCapacitiesAndWeights(resource?: MiningResource | n
   const revInitial = getInitialRevenueCapacity(resource);
   const valInitial = getInitialValueCapacity(resource);
 
-  // N = round(款初 × 0.933)
-  const N = Math.round(revInitial * 0.933);
+  // N = round(款初) (款初已是净值)
+  const N = Math.round(revInitial);
 
   // C权 = (N − ΣC) / N (N=0 时 C权=1)
   const cWeight = N > 0 ? Math.max(0, (N - C) / N) : 1;

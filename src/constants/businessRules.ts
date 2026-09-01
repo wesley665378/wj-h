@@ -64,7 +64,7 @@ export const C_HEDGE_RULES = {
   title: "C 动态对冲规则 (收款端/产值端)",
   definition: "C权代表项目实施中的通用运营扣除比例，按基数 N 动态计算。",
   formula: "C权 = (N − ΣC) / N",
-  baseFormula: "N = round(款初 × 0.933)"
+  baseFormula: "N = round(款初)"
 };
 
 export const FORMULA_FACTOR_RULES = {
