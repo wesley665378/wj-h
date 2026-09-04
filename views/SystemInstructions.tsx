@@ -216,7 +216,7 @@ const SystemInstructions: React.FC = () => {
             </div>
             <div>
               <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">
-                经营单元盈利排名榜双口径对账基准
+                经营单元排名双口径对账基准
               </h3>
               <p className="text-slate-500 text-xs font-bold mt-1">
                 「已确权」与「已确权+待确权」口径拆解
@@ -265,7 +265,7 @@ const SystemInstructions: React.FC = () => {
                 </li>
                 <li className="flex items-start">
                   <span className="mr-1.5 mt-0.5 text-amber-600">▪</span>
-                  <span>各列都出数：收产、总成本、月度/年度盈亏第二行均全部填出，不要任何横杠。</span>
+                  <span>各列都出数：收产、成本包、月度/年度盈亏第二行均全部填出，不要任何横杠。</span>
                 </li>
               </ul>
             </div>

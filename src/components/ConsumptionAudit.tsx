@@ -16,7 +16,7 @@ export interface AuditApiData {
   miningName?: string;      // 矿山/选区名称
   type: 'A' | 'B1' | 'B2' | 'C' | 'D' | 'FXDC'; // 确权类型
   basePoints: number;       // 申报积分 (系统核算动态基准)
-  calculatedValue: number;  // 系统核算确权金额
+  calculatedValue: number;  // 系统核算确权数值
   notes?: string;           // 备注
 }
 
@@ -411,7 +411,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                       setFormData(prev => prev ? { ...prev, verifiedAmount: val } : null);
                     }}
                     className="w-full px-4 py-3 bg-white border border-[#b8d0f7] rounded-[4px] font-mono tabular-nums text-sm font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all min-w-48"
-                    placeholder="输入实际核定金额 (整数)"
+                    placeholder="输入实际核定数值 (整数)"
                   />
                 </div>
               </div>
@@ -460,7 +460,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                             setFormData(prev => prev ? { ...prev, adjustmentValue: val } : null);
                           }}
                           className="w-full px-4 py-2.5 bg-amber-50/20 border border-[#b8d0f7] rounded-[4px] font-mono tabular-nums text-sm font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all min-w-48"
-                          placeholder="核销增减算金额 (整数，例如：-50)"
+                          placeholder="核销增减算数值 (整数，例如：-50)"
                         />
                       </div>
                       <p className="text-[10px] text-amber-600 font-medium leading-relaxed bg-amber-50/40 p-2 rounded-[4px] border border-amber-100 flex items-start gap-1">

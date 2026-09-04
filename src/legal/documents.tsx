@@ -17,7 +17,7 @@ export interface LegalDocument {
 
 /**
  * 隐私政策章节：范围/收集/存储/共享/权利/未成年人/更新/联系
- * 金额禁 ¥/元；联系章节严格仅写版权所有单位
+ * 数值禁 ¥/元；联系章节严格仅写版权所有单位
  */
 export const PRIVACY_POLICY: LegalDocument = {
   title: "隐私政策",
@@ -70,7 +70,7 @@ export const PRIVACY_POLICY: LegalDocument = {
 /**
  * 用户协议章节：同意/服务/账号/规范/保密/知产/免责/变更/争议/联系
  * 对外协议标题统一「用户协议」
- * 金额禁 ¥/元；联系章节严格仅写版权所有单位
+ * 数值禁 ¥/元；联系章节严格仅写版权所有单位
  */
 export const USER_AGREEMENT: LegalDocument = {
   title: "用户协议",

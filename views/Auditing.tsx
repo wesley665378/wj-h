@@ -33,7 +33,8 @@ import { XLSX, exportWorkbook, buildExcelFilename } from "@/utils/excelIo";
 import { formatMoney } from "@/utils/formatMoney";
 import { TERMINOLOGY } from "@/constants/terminology";
 import { UI_LABELS } from "@/constants/uiLabels";
-import { isSystemAdmin } from "@/utils/accessControl";
+import { isSystemAdmin, canExportExcel, getExportButtonTitle, EXPORT_DISABLED_TOOLTIP } from "@/utils/accessControl";
+import { SystemConfig } from "@/types";
 import { isVirtualDeductionMiningId } from "@/utils/virtualDeduction";
 import { ConsumptionAudit, AuditApiData } from "@/components/ConsumptionAudit";
 import { isProjectWritable } from "@/utils/projectStatus";
@@ -68,6 +69,7 @@ interface AuditingProps {
   processingLogIds?: Set<string>;
   onRefreshWorkspace?: () => Promise<void>;
   onDeleteLog?: (logId: string) => void;
+  systemConfig?: SystemConfig;
 }
 
 const Auditing: React.FC<AuditingProps> = ({
@@ -79,7 +81,9 @@ const Auditing: React.FC<AuditingProps> = ({
   processingLogIds = new Set(),
   onRefreshWorkspace,
   onDeleteLog,
+  systemConfig,
 }) => {
+  const canExport = useMemo(() => canExportExcel(user, systemConfig), [user, systemConfig]);
   const { isLocked } = useDedupe(500);
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const { isCostVisible, toggleCostVisible, maskMoney, maskText } = useCostPrivacy();
@@ -175,11 +179,13 @@ const Auditing: React.FC<AuditingProps> = ({
     [monthlyLogs],
   );
 
-  // 1.6. 已确权任务过滤逻辑 (全部已确权，包含收款类与产值类最终结果)
+  // 1.6. 已确权任务过滤逻辑 (只包含 jzcz 确权记录：已确权与入库，不混入 dtcb 消耗/成本审计记录)
   const confirmedTasks = useMemo(
     () =>
       monthlyLogs.filter((log) => {
-        return log.status === AuditStatus.Confirmed;
+        const isJzcz = (!log.dynamicCost || log.dynamicCost === 0) && log.confirmationType !== '手动确权';
+        const isConfirmedOrApproved = log.status === AuditStatus.Confirmed || log.status === AuditStatus.Approved;
+        return isJzcz && isConfirmedOrApproved;
       }),
     [monthlyLogs],
   );
@@ -481,7 +487,7 @@ const Auditing: React.FC<AuditingProps> = ({
         `• 采集主体：${collectorDisplay}\n` +
         `• 确权类型：${confirmationTypeStr}\n` +
         `• 提积分额：${injectedAmount.toLocaleString()} 积分\n` +
-        `• 净包金额：￥${Math.round(log.netValue || 0).toLocaleString()}\n\n` +
+        `• 净包数值：￥${Math.round(log.netValue || 0).toLocaleString()}\n\n` +
         `确认后，该笔待确权资产将正式转为【已确权】。`,
         () => {
           onAudit(log.id, nextStatus);
@@ -522,7 +528,7 @@ const Auditing: React.FC<AuditingProps> = ({
       `确定要对当前 ${targetTasks.length} 笔【${typeLabel}】记录进行批量确权吗？\n\n` +
       `• 待确权笔数：${targetTasks.length} 笔\n` +
       `• ${amountLabel}：${totalAmount.toLocaleString()} 积分\n` +
-      `• 净包金额合计：￥${Math.round(totalNet).toLocaleString()}\n\n` +
+      `• 净包数值合计：￥${Math.round(totalNet).toLocaleString()}\n\n` +
       `确认后，系统将依次执行确权，将单据转为【已确权】状态并自动同步联动产值确权与工作区。`,
       async () => {
         setIsBatchConfirming(true);
@@ -584,6 +590,10 @@ const Auditing: React.FC<AuditingProps> = ({
   };
 
   const exportToExcel = () => {
+    if (!canExport) {
+      toast.error(EXPORT_DISABLED_TOOLTIP);
+      return;
+    }
     const dataToExport = (() => {
       switch (activeTab) {
         case "pending":
@@ -611,7 +621,7 @@ const Auditing: React.FC<AuditingProps> = ({
           '非效对冲': (log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? getNonEffectiveHoursDeduction(log) : '-',
           'A': log.costCategory === 'A' ? log.dynamicCost : '-',
           'C积分': log.costCategory === 'C' ? log.dynamicCost : '-',
-          'C权': cWeightValue,
+          'C权': Number(cWeightValue) < 0.8 ? `${cWeightValue} (低)` : cWeightValue,
           '款初/款当': revLimitStr,
           'B1': (log.costCategory === 'B' && log.valueConsumptionMode === 'B1') ? log.dynamicCost : '-',
           'B2积分': (log.costCategory === 'B' && log.valueConsumptionMode === 'B2') ? log.dynamicCost : '-',
@@ -631,7 +641,7 @@ const Auditing: React.FC<AuditingProps> = ({
           确权类型: log.confirmationType || "收款确权",
           申请角色: log.rankId,
           采集主体: formatCollectorDisplay(log.recordedCollectorId, users),
-          [activeTab === "linked" ? "输入产值" : (activeTab === "pending" ? "输入收款" : "输入金额")]: getRawInputAmount(log),
+          [activeTab === "linked" ? "输入产值" : (activeTab === "pending" ? "输入收款" : "输入数值")]: getRawInputAmount(log),
           注入积分: calculateInjectedAmount(log),
           A: log.costCategory === "A" ? log.dynamicCost : 0,
           B1:
@@ -762,6 +772,18 @@ const Auditing: React.FC<AuditingProps> = ({
               </span>
             </button>
             <button
+              onClick={() => setActiveTab("confirmed")}
+              title="查看已完成确权的记录"
+              className={`px-4 md:px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all flex items-center space-x-2 ${activeTab === "confirmed" ? "bg-white text-slate-900 shadow-xl scale-105" : "text-slate-400 hover:text-slate-600"}`}
+            >
+              <span>确权记录</span>
+              <span
+                className={`px-2 py-0.5 rounded-full text-[8px] ${activeTab === "confirmed" ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-500"}`}
+              >
+                {confirmedTasks.length}
+              </span>
+            </button>
+            <button
               onClick={() => setActiveTab("consumption")}
               title="查看待处理消耗确权任务"
               className={`px-4 md:px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all flex items-center space-x-2 ${activeTab === "consumption" ? "bg-white text-slate-900 shadow-xl scale-105" : "text-slate-400 hover:text-slate-600"}`}
@@ -793,7 +815,7 @@ const Auditing: React.FC<AuditingProps> = ({
                 : activeTab === "linked"
                   ? "联动确权记录"
                   : activeTab === "confirmed"
-                    ? "已确权记录"
+                    ? `确权记录 (${confirmedTasks.length})`
                     : "成本审计记录"
           }
           noPadding
@@ -885,7 +907,13 @@ const Auditing: React.FC<AuditingProps> = ({
               )}
               <button
                 onClick={exportToExcel}
-                className="px-3 py-1.5 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all flex items-center"
+                disabled={!canExport}
+                title={getExportButtonTitle(canExport, '导出 Excel')}
+                className={`px-3 py-1.5 border rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center ${
+                  !canExport
+                    ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+                    : 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100 cursor-pointer'
+                }`}
               >
                 <svg
                   className="w-3 h-3 mr-1.5"
@@ -1017,8 +1045,15 @@ const Auditing: React.FC<AuditingProps> = ({
                         <td className="px-3 py-6 text-right font-mono font-bold text-amber-600 font-extrabold">
                           {log.costCategory === 'C' ? maskMoney(Math.round(log.dynamicCost)) : '-'}
                         </td>
-                        <td className="px-4 py-6 text-right font-mono font-black text-amber-700 bg-amber-50/20">
-                          {cWeightValue}
+                        <td className={`px-4 py-6 text-right font-mono font-black ${Number(cWeightValue) < 0.8 ? 'bg-amber-100/70 text-amber-900' : 'text-amber-700 bg-amber-50/20'}`} title={Number(cWeightValue) < 0.8 ? "当前 C 权低于 0.8，请确认风险。" : undefined}>
+                          <span className="inline-flex items-center justify-end gap-1">
+                            {cWeightValue}
+                            {Number(cWeightValue) < 0.8 && (
+                              <span className="px-1 py-0.2 text-[9px] bg-amber-500 text-white rounded font-black shadow-sm" title="当前 C 权低于 0.8，请确认风险。">
+                                ⚠️ 低
+                              </span>
+                            )}
+                          </span>
                         </td>
                         <td className="px-4 py-6 text-right font-mono font-bold text-amber-800 bg-amber-50/10">
                           {revLimitStr}
@@ -1099,7 +1134,7 @@ const Auditing: React.FC<AuditingProps> = ({
                     <th className="px-4 md:px-6 py-6 whitespace-nowrap min-w-[80px]">矿山编号</th>
                     <th className="hidden md:table-cell px-6 py-6 whitespace-nowrap min-w-[100px]">采集主体</th>
                     <th className="px-4 md:px-6 py-6 text-right whitespace-nowrap min-w-[90px]">
-                      {activeTab === "linked" ? "输入产值" : (activeTab === "pending" ? "输入收款" : "输入金额")}
+                      {activeTab === "linked" ? "输入产值" : (activeTab === "pending" ? "输入收款" : "输入数值")}
                     </th>
                     <th className="px-4 md:px-6 py-6 text-right whitespace-nowrap min-w-[80px]">注入积分</th>
                     {(activeTab === "linked" ||

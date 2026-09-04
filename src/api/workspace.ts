@@ -7,7 +7,8 @@ import {
   AcceptanceRecord,
   CircuitBreaker,
   MeetingSample,
-  QuotaSnapshot
+  QuotaSnapshot,
+  SystemConfig
 } from '../../types';
 
 export interface WorkspaceDataResponse {
@@ -22,6 +23,8 @@ export interface WorkspaceDataResponse {
   meetingSamples?: MeetingSample[];
   valueEfficiencySnapshots?: any[];
   jzfp?: any[];
+  systemConfig?: SystemConfig;
+  exportEnabled?: boolean;
 }
 
 export interface SyncWorkspacePayload {
@@ -36,6 +39,8 @@ export interface SyncWorkspacePayload {
   circuitBreakers?: CircuitBreaker[];
   rdq?: CircuitBreaker[];
   meetingSamples?: MeetingSample[];
+  systemConfig?: SystemConfig;
+  exportEnabled?: boolean;
 }
 
 export const fetchWorkspaceData = async (): Promise<WorkspaceDataResponse> => {

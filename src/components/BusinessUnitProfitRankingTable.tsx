@@ -5,14 +5,14 @@ import { useCostPrivacy } from '../hooks/useCostPrivacy';
 import { CostPrivacyToggle } from './CostPrivacyToggle';
 import { formatMoney } from '../utils/formatMoney';
 import { Card } from './UI';
-import { Trophy, ChevronDown, ChevronUp, Info } from 'lucide-react';
-import { UI_LABELS } from '../constants/uiLabels';
+import { Trophy, ChevronDown, ChevronUp, Layers, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 
 export interface BusinessUnitProfitRankingTableProps {
   units: string[];
   selectedMonth: string; // YYYY-MM
   users: User[];
   auditLogs: ValueCreationLog[];
+  logs?: ValueCreationLog[];
   resources: MiningResource[];
   transactions: InternalTransaction[];
   currentUser?: User;
@@ -21,61 +21,185 @@ export interface BusinessUnitProfitRankingTableProps {
   defaultExpanded?: boolean;
 }
 
+export type RankingSortField = 
+  | 'rank'
+  | 'unitName'
+  | 'managers'
+  | 'revenuePackage'
+  | 'confirmedValuePackage'
+  | 'incomeValuePackage'
+  | 'costPackage'
+  | 'totalCostOffset'
+  | 'monthlyProfit'
+  | 'yearlyProfit'
+  | 'inTransitValuePackage'
+  | 'inTransitIncomePackage'
+  | 'inTransitMonthlyProfit';
+
 export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingTableProps> = ({
   units,
   selectedMonth,
   users,
   auditLogs,
+  logs,
   resources,
   transactions,
   startDate,
   endDate,
   defaultExpanded = false,
 }) => {
-  // 默认折叠，领导/用户点击展开才可见
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const [filterManagerType, setFilterManagerType] = useState('全部');
-  const { isCostVisible, toggleCostVisible, maskMoney } = useCostPrivacy();
+  const [showInTransitDetails, setShowInTransitDetails] = useState(false);
+  const [sortField, setSortField] = useState<RankingSortField | null>(null);
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | null>(null);
+  const { maskMoney } = useCostPrivacy();
 
-  // 计算榜单数据
+  // 流水注入：若 auditLogs 为空数组，必须回退到 logs（jzcz）
+  const effectiveAuditLogs = useMemo(() => {
+    return (auditLogs?.length ? auditLogs : logs) || [];
+  }, [auditLogs, logs]);
+
+  // 计算榜单数据 (CFO 主表口径)
   const rankingRows = useMemo(() => {
     return computeBusinessUnitProfitRanking(
       units,
       selectedMonth,
       users,
-      auditLogs,
+      effectiveAuditLogs,
       resources,
       transactions,
       startDate,
       endDate
     );
-  }, [units, selectedMonth, users, auditLogs, resources, transactions, startDate, endDate]);
+  }, [units, selectedMonth, users, effectiveAuditLogs, resources, transactions, startDate, endDate]);
 
-  // 将扁平数组按经营单元聚合成对（便于渲染 rowSpan）
-  const pairedRows = useMemo(() => {
-    const pairs: { unitName: string; managers: string; row1: UnitRankingRow; row2: UnitRankingRow }[] = [];
-    for (let i = 0; i < rankingRows.length; i += 2) {
-      const row1 = rankingRows[i];
-      const row2 = rankingRows[i + 1];
-      if (row1 && row2) {
-        pairs.push({
-          unitName: row1.unitName,
-          managers: row1.managers,
-          row1,
-          row2,
-        });
-      }
-    }
-    return pairs;
-  }, [rankingRows]);
-
-  const filteredPairedRows = useMemo(() => {
-    if (filterManagerType === '全部') return pairedRows;
-    return pairedRows.filter(pair => {
-        const category = getUnitManagerCategory(pair.unitName, users);
-        return category === filterManagerType;
+  const filteredRows = useMemo(() => {
+    if (filterManagerType === '全部') return rankingRows;
+    return rankingRows.filter(row => {
+      const category = getUnitManagerCategory(row.unitName, users);
+      return category === filterManagerType;
     });
-  }, [pairedRows, filterManagerType, users]);
+  }, [rankingRows, filterManagerType, users]);
+
+  const sortedRows = useMemo(() => {
+    const list = [...filteredRows];
+    if (!sortField || !sortOrder) return list;
+
+    list.sort((a, b) => {
+      let valA: any = 0;
+      let valB: any = 0;
+
+      switch (sortField) {
+        case 'rank':
+          valA = typeof a.rank === 'number' ? a.rank : 999999;
+          valB = typeof b.rank === 'number' ? b.rank : 999999;
+          break;
+        case 'unitName':
+          valA = a.unitName || '';
+          valB = b.unitName || '';
+          break;
+        case 'managers':
+          valA = a.managers || '';
+          valB = b.managers || '';
+          break;
+        case 'revenuePackage':
+          valA = a.revenuePackage ?? 0;
+          valB = b.revenuePackage ?? 0;
+          break;
+        case 'confirmedValuePackage':
+          valA = a.confirmedValuePackage ?? 0;
+          valB = b.confirmedValuePackage ?? 0;
+          break;
+        case 'incomeValuePackage':
+          valA = a.incomeValuePackage ?? 0;
+          valB = b.incomeValuePackage ?? 0;
+          break;
+        case 'costPackage':
+        case 'totalCostOffset':
+          valA = a.costPackage ?? a.totalCostOffset ?? 0;
+          valB = b.costPackage ?? b.totalCostOffset ?? 0;
+          break;
+        case 'monthlyProfit':
+          valA = a.monthlyProfit ?? 0;
+          valB = b.monthlyProfit ?? 0;
+          break;
+        case 'yearlyProfit':
+          valA = a.yearlyProfit ?? 0;
+          valB = b.yearlyProfit ?? 0;
+          break;
+        case 'inTransitValuePackage':
+          valA = a.inTransitValuePackage ?? 0;
+          valB = b.inTransitValuePackage ?? 0;
+          break;
+        case 'inTransitIncomePackage':
+          valA = a.inTransitIncomePackage ?? 0;
+          valB = b.inTransitIncomePackage ?? 0;
+          break;
+        case 'inTransitMonthlyProfit':
+          valA = a.inTransitMonthlyProfit ?? 0;
+          valB = b.inTransitMonthlyProfit ?? 0;
+          break;
+      }
+
+      if (typeof valA === 'string' && typeof valB === 'string') {
+        const res = valA.localeCompare(valB, 'zh-CN');
+        return sortOrder === 'asc' ? res : -res;
+      } else {
+        const numA = Number(valA) || 0;
+        const numB = Number(valB) || 0;
+        if (numA === numB) return 0;
+        return sortOrder === 'asc' ? numA - numB : numB - numA;
+      }
+    });
+
+    return list;
+  }, [filteredRows, sortField, sortOrder]);
+
+  const handleSort = (field: RankingSortField) => {
+    if (sortField === field) {
+      if (sortOrder === 'desc') {
+        setSortOrder('asc');
+      } else if (sortOrder === 'asc') {
+        setSortField(null);
+        setSortOrder(null);
+      } else {
+        setSortOrder('desc');
+      }
+    } else {
+      setSortField(field);
+      setSortOrder(field === 'rank' || field === 'unitName' || field === 'managers' ? 'asc' : 'desc');
+    }
+  };
+
+  const renderSortIcon = (field: RankingSortField) => {
+    const isActive = sortField === field;
+    if (!isActive) {
+      return <ArrowUpDown className="w-3 h-3 ml-1 text-slate-300 opacity-60 group-hover:opacity-100 group-hover:text-slate-500 transition-opacity shrink-0" />;
+    }
+    if (sortOrder === 'asc') {
+      return <ArrowUp className="w-3 h-3 ml-1 text-blue-600 font-bold shrink-0" />;
+    }
+    return <ArrowDown className="w-3 h-3 ml-1 text-blue-600 font-bold shrink-0" />;
+  };
+
+  const getSortFieldLabel = (field: RankingSortField) => {
+    switch (field) {
+      case 'rank': return '排名';
+      case 'unitName': return '经营单元名称';
+      case 'managers': return '负责人';
+      case 'revenuePackage': return '收款包';
+      case 'confirmedValuePackage': return '产兑包 (已确权)';
+      case 'incomeValuePackage': return '收产包 (已确权)';
+      case 'costPackage':
+      case 'totalCostOffset': return '成本包';
+      case 'monthlyProfit': return '月度盈亏 (已确权)';
+      case 'yearlyProfit': return '年度盈亏 (已确权)';
+      case 'inTransitValuePackage': return '在途产兑';
+      case 'inTransitIncomePackage': return '含在途收产包';
+      case 'inTransitMonthlyProfit': return '含在途月度盈亏';
+    }
+  };
 
   const formatAmount = (val: number | null, isCostField = false) => {
     if (val === null || val === undefined) return '—';
@@ -99,14 +223,30 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
           <div>
             <div className="flex items-center space-x-3">
               <h3 className="text-xl font-black text-slate-900 tracking-tighter uppercase">
-                经营单元盈利排名榜
+                经营单元排名
               </h3>
               <span className="px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200/60 rounded-full text-[10px] font-black uppercase tracking-wider">
                 筛选: {startDate && endDate ? `${startDate} 至 ${endDate}` : selectedMonth}
               </span>
+              {sortField && (
+                <span className="px-2.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-full text-[10px] font-bold flex items-center gap-1">
+                  按 [{getSortFieldLabel(sortField)}] {sortOrder === 'asc' ? '升序' : '降序'}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSortField(null);
+                      setSortOrder(null);
+                    }}
+                    className="ml-1 text-blue-400 hover:text-blue-800 font-bold"
+                    title="重置排序"
+                  >
+                    ×
+                  </button>
+                </span>
+              )}
             </div>
             <p className="text-slate-400 text-xs font-bold mt-1">
-              按月度盈亏精确排序 · 双口径产兑拆解 · 动态关联全站成本隐私
+              CFO主表审阅视角 · 点击各表头可升/降序排序
             </p>
           </div>
         </div>
@@ -117,11 +257,24 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
             onChange={e => setFilterManagerType(e.target.value)}
             className="px-3 py-2 text-[12px] bg-white border border-[#b8d0f7] rounded-[4px] font-bold text-slate-700 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 cursor-pointer h-9"
           >
-            <option value="全部">全部</option>
+            <option value="全部">全部经管分类</option>
             <option value="经管员高款专">经管员高款专</option>
             <option value="经管员高产专">经管员高产专</option>
             <option value="经管员NPC">经管员NPC</option>
           </select>
+
+          <button
+            onClick={() => setShowInTransitDetails(prev => !prev)}
+            className={`px-3 py-2 text-xs font-bold rounded-xl transition-all flex items-center space-x-1.5 border ${
+              showInTransitDetails 
+                ? 'bg-indigo-50 text-indigo-700 border-indigo-200 shadow-xs' 
+                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+            }`}
+            title="切换查看在途产兑、工资与承兑实发等辅列"
+          >
+            <Layers size={14} />
+            <span>{showInTransitDetails ? '隐藏辅列/在途' : '展开辅列/在途'}</span>
+          </button>
 
           <CostPrivacyToggle size="sm" />
 
@@ -135,196 +288,221 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
         </div>
       </div>
 
-      {/* 展开后的表格内容 */}
+      {/* 展开后的主表内容 */}
       {isExpanded && (
         <div className="border-t border-slate-100 p-6 md:p-8 space-y-6 animate-fadeIn">
           <div className="overflow-x-auto custom-scrollbar">
             <table className="w-full text-left border-collapse min-w-[1100px]">
               <thead>
                 <tr className="border-b border-slate-200/80 bg-slate-50/80 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                  <th className="py-4 px-4 text-center rounded-tl-xl">排名</th>
-                  <th className="py-4 px-4 text-left">经营单元名称</th>
-                  <th className="py-4 px-4 text-left">负责人</th>
-                  <th className="py-4 px-3 text-center">产值口径</th>
-                  <th className="py-4 px-3 text-right">收款</th>
-                  <th className="py-4 px-3 text-right">产值</th>
-                  <th className="py-4 px-3 text-right">收款包</th>
-                  <th className="py-4 px-3 text-right">产兑包</th>
-                  <th className="py-4 px-3 text-right">收产包</th>
-                  <th className="py-4 px-3 text-right text-rose-600">总成本</th>
-                  <th className="py-4 px-3 text-right text-blue-600">月度盈亏</th>
-                  <th className="py-4 px-3 text-right text-indigo-600 rounded-tr-xl">年度盈亏</th>
+                  <th 
+                    onClick={() => handleSort('rank')}
+                    className="group py-4 px-4 text-center rounded-tl-xl w-16 whitespace-nowrap cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                    title="点击排序"
+                  >
+                    <span className="inline-flex items-center justify-center">
+                      排名 {renderSortIcon('rank')}
+                    </span>
+                  </th>
+                  <th 
+                    onClick={() => handleSort('unitName')}
+                    className="group py-4 px-4 text-left min-w-[140px] whitespace-nowrap cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                    title="点击排序"
+                  >
+                    <span className="inline-flex items-center">
+                      经营单元名称 {renderSortIcon('unitName')}
+                    </span>
+                  </th>
+                  <th 
+                    onClick={() => handleSort('managers')}
+                    className="group py-4 px-4 text-left min-w-[100px] whitespace-nowrap cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                    title="点击排序"
+                  >
+                    <span className="inline-flex items-center">
+                      负责人 {renderSortIcon('managers')}
+                    </span>
+                  </th>
+                  <th 
+                    onClick={() => handleSort('revenuePackage')}
+                    className="group py-4 px-3 text-right min-w-[100px] whitespace-nowrap cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                    title="点击排序"
+                  >
+                    <span className="inline-flex items-center justify-end w-full">
+                      收款包 {renderSortIcon('revenuePackage')}
+                    </span>
+                  </th>
+                  <th 
+                    onClick={() => handleSort('confirmedValuePackage')}
+                    className="group py-4 px-3 text-right min-w-[100px] whitespace-nowrap cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                    title="点击排序"
+                  >
+                    <span className="inline-flex items-center justify-end w-full">
+                      产兑包 (已确权) {renderSortIcon('confirmedValuePackage')}
+                    </span>
+                  </th>
+                  <th 
+                    onClick={() => handleSort('incomeValuePackage')}
+                    className="group py-4 px-3 text-right min-w-[110px] whitespace-nowrap cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                    title="点击排序"
+                  >
+                    <span className="inline-flex items-center justify-end w-full">
+                      收产包 (已确权) {renderSortIcon('incomeValuePackage')}
+                    </span>
+                  </th>
+                  <th 
+                    onClick={() => handleSort('costPackage')}
+                    className="group py-4 px-3 text-right min-w-[110px] text-rose-600 whitespace-nowrap cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                    title="点击排序"
+                  >
+                    <span className="inline-flex items-center justify-end w-full">
+                      成本包 {renderSortIcon('costPackage')}
+                    </span>
+                  </th>
+                  <th 
+                    onClick={() => handleSort('monthlyProfit')}
+                    className="group py-4 px-3 text-right min-w-[120px] text-blue-600 whitespace-nowrap cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
+                    title="点击排序"
+                  >
+                    <span className="inline-flex items-center justify-end w-full">
+                      月度盈亏 (已确权) {renderSortIcon('monthlyProfit')}
+                    </span>
+                  </th>
+                  <th 
+                    onClick={() => handleSort('yearlyProfit')}
+                    className={`group py-4 px-3 text-right min-w-[120px] text-indigo-600 whitespace-nowrap cursor-pointer hover:bg-slate-100/80 transition-colors select-none ${!showInTransitDetails ? 'rounded-tr-xl' : ''}`}
+                    title="点击排序"
+                  >
+                    <span className="inline-flex items-center justify-end w-full">
+                      年度盈亏 (已确权) {renderSortIcon('yearlyProfit')}
+                    </span>
+                  </th>
+                  {showInTransitDetails && (
+                    <>
+                      <th 
+                        onClick={() => handleSort('inTransitValuePackage')}
+                        className="group py-4 px-3 text-right min-w-[100px] text-amber-600 bg-amber-50/50 whitespace-nowrap cursor-pointer hover:bg-amber-100/60 transition-colors select-none"
+                        title="点击排序"
+                      >
+                        <span className="inline-flex items-center justify-end w-full">
+                          在途产兑 {renderSortIcon('inTransitValuePackage')}
+                        </span>
+                      </th>
+                      <th 
+                        onClick={() => handleSort('inTransitIncomePackage')}
+                        className="group py-4 px-3 text-right min-w-[110px] text-amber-600 bg-amber-50/50 whitespace-nowrap cursor-pointer hover:bg-amber-100/60 transition-colors select-none"
+                        title="点击排序"
+                      >
+                        <span className="inline-flex items-center justify-end w-full">
+                          含在途收产包 {renderSortIcon('inTransitIncomePackage')}
+                        </span>
+                      </th>
+                      <th 
+                        onClick={() => handleSort('inTransitMonthlyProfit')}
+                        className="group py-4 px-3 text-right min-w-[110px] text-amber-600 bg-amber-50/50 rounded-tr-xl whitespace-nowrap cursor-pointer hover:bg-amber-100/60 transition-colors select-none"
+                        title="点击排序"
+                      >
+                        <span className="inline-flex items-center justify-end w-full">
+                          含在途月度盈亏 {renderSortIcon('inTransitMonthlyProfit')}
+                        </span>
+                      </th>
+                    </>
+                  )}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-xs">
-                {filteredPairedRows.map((pair, idx) => {
-                  const { row1, row2 } = pair;
+              <tbody className="divide-y divide-slate-100 text-xs font-mono">
+                {sortedRows.map((row, idx) => {
                   const isEven = idx % 2 === 0;
 
                   return (
-                    <React.Fragment key={pair.unitName}>
-                      {/* 第一行: 含背书合计 */}
-                      <tr className={`${isEven ? 'bg-white' : 'bg-slate-50/30'} hover:bg-blue-50/20 transition-colors`}>
-                        {/* 排名 (跨两行, 最左侧) */}
-                        <td rowSpan={2} className="py-4 px-4 align-top border-r border-slate-100 text-center font-mono font-black">
-                          {typeof row1.rank === 'number' ? (
-                            <span className={`inline-flex items-center justify-center w-6 h-6 rounded-lg text-xs font-black shadow-sm ${
-                              row1.rank === 1 ? 'bg-amber-400 text-amber-950 ring-2 ring-amber-300' :
-                              row1.rank === 2 ? 'bg-slate-200 text-slate-800' :
-                              row1.rank === 3 ? 'bg-amber-100 text-amber-800' :
-                              'bg-slate-100 text-slate-600'
-                            }`}>
-                              {row1.rank}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">—</span>
-                          )}
-                        </td>
-
-                        {/* 经营单元名称 (跨两行) */}
-                        <td rowSpan={2} className="py-4 px-4 align-top border-r border-slate-100 font-black text-slate-900">
-                          <div className="flex items-center space-x-2 pt-1">
-                            <span className="w-2 h-2 rounded-full bg-blue-600"></span>
-                            <span className="text-sm font-black">{pair.unitName}</span>
-                          </div>
-                        </td>
-
-                        {/* 负责人 (跨两行) */}
-                        <td rowSpan={2} className="py-4 px-4 align-top border-r border-slate-100 text-slate-600 font-bold">
-                          <div className="pt-1">{pair.managers}</div>
-                        </td>
-
-                        {/* 第一行口径 */}
-                        <td className="py-3 px-3 text-center">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-black bg-blue-50 text-blue-700 border border-blue-200/50 whitespace-nowrap">
-                            已确权
+                    <tr key={row.unitName} className={`${isEven ? 'bg-white' : 'bg-slate-50/30'} hover:bg-blue-50/20 transition-colors border-b border-slate-200/60`}>
+                      {/* 排名 */}
+                      <td className="py-4 px-4 align-middle border-r border-slate-100 text-center font-black whitespace-nowrap">
+                        {typeof row.rank === 'number' ? (
+                          <span className={`inline-flex items-center justify-center w-6 h-6 rounded-lg text-xs font-black shadow-sm ${
+                            row.rank === 1 ? 'bg-amber-400 text-amber-950 ring-2 ring-amber-300' :
+                            row.rank === 2 ? 'bg-slate-200 text-slate-800' :
+                            row.rank === 3 ? 'bg-amber-100 text-amber-800' :
+                            'bg-slate-100 text-slate-600'
+                          }`}>
+                            {row.rank}
                           </span>
-                        </td>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
 
-                        {/* 收款 */}
-                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-700">
-                          {formatAmount(row1.revenue)}
-                        </td>
+                      {/* 经营单元名称 */}
+                      <td className="py-4 px-4 align-middle border-r border-slate-100 font-black text-slate-900 whitespace-nowrap font-sans">
+                        <div className="flex items-center space-x-2">
+                          <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                          <span className="text-sm font-black">{row.unitName}</span>
+                        </div>
+                      </td>
 
-                        {/* 产值 */}
-                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-700">
-                          {formatAmount(row1.outputValue)}
-                        </td>
+                      {/* 负责人 */}
+                      <td className="py-4 px-4 align-middle border-r border-slate-100 text-slate-600 font-bold whitespace-nowrap font-sans">
+                        <div>{row.managers}</div>
+                      </td>
 
-                        {/* 收款包 */}
-                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-700">
-                          {formatAmount(row1.revenuePackage)}
-                        </td>
+                      {/* 收款包 */}
+                      <td className="py-4 px-3 align-middle text-right font-bold text-slate-700 border-r border-slate-100 whitespace-nowrap">
+                        {formatAmount(row.revenuePackage)}
+                      </td>
 
-                        {/* 产兑包 */}
-                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-700">
-                          {formatAmount(row1.valuePackage)}
-                        </td>
+                      {/* 产兑包 (已确权) */}
+                      <td className="py-4 px-3 align-middle text-right font-bold text-slate-700 border-r border-slate-100 whitespace-nowrap">
+                        {formatAmount(row.confirmedValuePackage)}
+                      </td>
 
-                        {/* 收产包 */}
-                        <td className="py-3 px-3 text-right font-mono font-black text-slate-900 bg-slate-50/50">
-                          {formatAmount(row1.incomeValuePackage)}
-                        </td>
+                      {/* 收产包 (已确权) */}
+                      <td className="py-4 px-3 align-middle text-right font-black text-slate-900 border-r border-slate-100 whitespace-nowrap bg-slate-50/20">
+                        {formatAmount(row.incomeValuePackage)}
+                      </td>
 
-                        {/* 总成本 (受成本隐私保护) */}
-                        <td className="py-3 px-3 text-right font-mono font-bold text-rose-600">
-                          {formatAmount(row1.totalCost, true)}
-                        </td>
+                      {/* 成本包 */}
+                      <td className="py-4 px-3 align-middle text-right font-bold text-rose-600 border-r border-slate-100 whitespace-nowrap">
+                        {formatAmount(row.costPackage ?? row.totalCostOffset, true)}
+                      </td>
 
-                        {/* 月度盈亏 (不脱敏) */}
-                        <td className="py-3 px-3 text-right font-mono font-black text-sm">
-                          <span className={row1.monthlyProfit !== null && row1.monthlyProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
-                            {row1.monthlyProfit !== null && row1.monthlyProfit > 0 ? '+' : ''}
-                            {formatAmount(row1.monthlyProfit)}
-                          </span>
-                        </td>
+                      {/* 月度盈亏 (已确权) - 主排序依据 */}
+                      <td className="py-4 px-3 align-middle text-right font-black text-blue-600 border-r border-slate-100 whitespace-nowrap bg-blue-50/10 text-sm">
+                        {formatAmount(row.monthlyProfit)}
+                      </td>
 
-                        {/* 年度盈亏 (不脱敏) */}
-                        <td className="py-3 px-3 text-right font-mono font-black text-sm">
-                          <span className={row1.yearlyProfit !== null && row1.yearlyProfit >= 0 ? 'text-indigo-600' : 'text-rose-600'}>
-                            {row1.yearlyProfit !== null && row1.yearlyProfit > 0 ? '+' : ''}
-                            {formatAmount(row1.yearlyProfit)}
-                          </span>
-                        </td>
-                      </tr>
+                      {/* 年度盈亏 (已确权) */}
+                      <td className={`py-4 px-3 align-middle text-right font-black text-indigo-600 whitespace-nowrap ${showInTransitDetails ? 'border-r border-slate-100' : ''}`}>
+                        {formatAmount(row.yearlyProfit)}
+                      </td>
 
-                      {/* 第二行: 已确权+待确权 */}
-                      <tr className={`${isEven ? 'bg-white' : 'bg-slate-50/30'} border-b border-slate-200/60 hover:bg-amber-50/20 transition-colors`}>
-                        {/* 第二行口径 */}
-                        <td className="py-3 px-3 text-center">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-black bg-amber-50 text-amber-700 border border-amber-200/50 whitespace-nowrap">
-                            已确权+待确权
-                          </span>
-                        </td>
-
-                        {/* 收款 */}
-                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-700">
-                          {formatAmount(row2.revenue)}
-                        </td>
-
-                        {/* 产值 */}
-                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-700">
-                          {formatAmount(row2.outputValue)}
-                        </td>
-
-                        {/* 收款包 */}
-                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-700">
-                          {formatAmount(row2.revenuePackage)}
-                        </td>
-
-                        {/* 产兑包 */}
-                        <td className="py-3 px-3 text-right font-mono font-bold text-amber-600">
-                          {formatAmount(row2.valuePackage)}
-                        </td>
-
-                        {/* 收产包 */}
-                        <td className="py-3 px-3 text-right font-mono font-black text-slate-900 bg-amber-50/10">
-                          {formatAmount(row2.incomeValuePackage)}
-                        </td>
-
-                        {/* 总成本 (受成本隐私保护) */}
-                        <td className="py-3 px-3 text-right font-mono font-bold text-rose-600">
-                          {formatAmount(row2.totalCost, true)}
-                        </td>
-
-                        {/* 月度盈亏 */}
-                        <td className="py-3 px-3 text-right font-mono font-black text-sm">
-                          <span className={row2.monthlyProfit !== null && row2.monthlyProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
-                            {row2.monthlyProfit !== null && row2.monthlyProfit > 0 ? '+' : ''}
-                            {formatAmount(row2.monthlyProfit)}
-                          </span>
-                        </td>
-
-                        {/* 年度盈亏 */}
-                        <td className="py-3 px-3 text-right font-mono font-black text-sm">
-                          <span className={row2.yearlyProfit !== null && row2.yearlyProfit >= 0 ? 'text-indigo-600' : 'text-rose-600'}>
-                            {row2.yearlyProfit !== null && row2.yearlyProfit > 0 ? '+' : ''}
-                            {formatAmount(row2.yearlyProfit)}
-                          </span>
-                        </td>
-                      </tr>
-                    </React.Fragment>
+                      {/* 辅列：在途指标 */}
+                      {showInTransitDetails && (
+                        <>
+                          <td className="py-4 px-3 align-middle text-right font-bold text-amber-600 bg-amber-50/30 border-r border-slate-100 whitespace-nowrap">
+                            {formatAmount(row.inTransitValuePackage)}
+                          </td>
+                          <td className="py-4 px-3 align-middle text-right font-bold text-amber-600 bg-amber-50/30 border-r border-slate-100 whitespace-nowrap">
+                            {formatAmount(row.inTransitIncomePackage)}
+                          </td>
+                          <td className="py-4 px-3 align-middle text-right font-black text-amber-700 bg-amber-50/40 whitespace-nowrap">
+                            {formatAmount(row.inTransitMonthlyProfit)}
+                          </td>
+                        </>
+                      )}
+                    </tr>
                   );
                 })}
-
-                {filteredPairedRows.length === 0 && (
-                  <tr>
-                    <td colSpan={12} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
 
-          {/* 表下脚注 */}
-          <div className="pt-2 flex items-center space-x-2 text-xs font-bold text-slate-400">
-            <Info size={14} className="text-amber-500 flex-shrink-0" />
-            <span>
-              * 待确权产兑包＝联动确权（收款背书在途，无需人工操作）。总成本与直接费用包含刚性工资、承兑奖金与动态消耗，按全站成本隐私动态脱敏。
-            </span>
+          <div className="text-[11px] text-slate-400 font-sans flex items-center justify-end px-2 pt-2 border-t border-slate-100">
+            <div className="font-mono">
+              共 {sortedRows.length} 个经营单元
+            </div>
           </div>
         </div>
       )}
     </Card>
   );
 };
+

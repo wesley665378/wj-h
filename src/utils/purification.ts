@@ -17,6 +17,11 @@ export interface MiningQuadrants {
   value: QuadrantData;
 }
 
+import {
+  importNetAmount
+} from './importQuotaCheck';
+export { importNetAmount };
+
 /**
  * 获取每笔流水在四格中的入账量，基于 amount 原始值，禁止二次乘以 0.933 
  */

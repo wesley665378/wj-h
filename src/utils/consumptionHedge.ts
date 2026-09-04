@@ -1,11 +1,14 @@
 import { MiningResource, ValueCreationLog, AuditStatus, RefineCategory, RefineType, User } from '../../types';
 import { getInitialRevenueCapacity, getInitialValueCapacity } from './miningCapacity';
+import { importNetAmount } from './purification';
 import { TIER_COEFFICIENTS } from '../constants/coefficients';
+
+export { importNetAmount };
 
 /**
  * 获取单笔提报记录的真实注入积分 (SSOT)
  * - 产值端：为原始注入基数 rawAmount（回退为 amount）；
- * - 收款端：为原始输入金额提纯值 rawAmount * 0.933（回退为已提纯 amount）。
+ * - 收款端：为原始输入数值提纯值 rawAmount * 0.933（回退为已提纯 amount）。
  */
 export function calculateInjectedAmount(log?: ValueCreationLog | null): number {
   if (!log) return 0;
@@ -20,16 +23,16 @@ export function calculateInjectedAmount(log?: ValueCreationLog | null): number {
 
   if (isRevenue) {
     return log.rawAmount !== undefined && log.rawAmount !== null
-      ? Math.round(Number(log.rawAmount) * 0.933)
+      ? importNetAmount(Number(log.rawAmount), true)
       : Math.round(Number(log.amount) || 0);
   }
   return log.rawAmount !== undefined && log.rawAmount !== null
-    ? Math.round(Number(log.rawAmount))
+    ? importNetAmount(Number(log.rawAmount), false)
     : Math.round(Number(log.amount) || 0);
 }
 
 /**
- * 获取单笔提报记录的原始输入金额（输入收款/输入产值）
+ * 获取单笔提报记录的原始输入数值（输入收款/输入产值）
  */
 export function getRawInputAmount(log?: ValueCreationLog | null): number {
   if (!log) return 0;
@@ -224,7 +227,7 @@ export function applyConsumptionHedgeToLogs(
     const rawAmount = log.rawAmount !== undefined && log.rawAmount !== null ? Number(log.rawAmount) : Number(log.amount);
     
     const baseAmount = isRevenue 
-      ? (log.rawAmount !== undefined && log.rawAmount !== null ? Number(log.rawAmount) * 0.933 : Number(log.amount))
+      ? (log.rawAmount !== undefined && log.rawAmount !== null ? importNetAmount(Number(log.rawAmount), true) : Number(log.amount))
       : rawAmount;
 
     // 收款：只乘 C权；产值：始终乘 C权 × B2权

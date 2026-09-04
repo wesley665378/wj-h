@@ -1,10 +1,12 @@
 import { UI_TOKENS } from '../src/constants/uiTokens';
 import React, { useState, useEffect, useMemo } from 'react';
-import { User, ValueCreationLog, InternalTransaction, MiningResource, AuditStatus, TransactionStatus, RefineCategory } from '../types';
+import { User, ValueCreationLog, InternalTransaction, MiningResource, AuditStatus, TransactionStatus, RefineCategory, SystemConfig } from '../types';
+import { canExportExcel, getExportButtonTitle, EXPORT_DISABLED_TOOLTIP } from '../src/utils/accessControl';
 import { Card, Badge } from '../src/components/UI';
 import { getLocalMonthString, getLocalDateString, resolveLogBusinessMonth, resolveLogBusinessDate, formatSubmissionDate, formatSubmissionTime, isDateInRange, isLogInFilter } from '../src/utils/dateUtils';
 import { calculateHistoricalNetValue, getUserSalaryByMonth } from '../src/utils/business';
 import { aggregateUserMonthMetrics, calculateBonusAllocation } from '../src/utils/bonusAllocation';
+import { computeCfoKuanMetrics } from '../src/utils/distributionCfoMath';
 import { fetchDistributionData } from '../src/api/distribution';
 import { useCostPrivacy } from '../src/hooks/useCostPrivacy';
 import { CostPrivacyToggle } from '../src/components/CostPrivacyToggle';
@@ -15,6 +17,13 @@ import { XLSX, exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
 import { toast } from 'sonner';
 import { Wallet, TrendingUp, ShieldCheck, ArrowRight, FileSpreadsheet, Search, Filter, Calendar, RefreshCw } from 'lucide-react';
 import { UI_LABELS } from '../src/constants/uiLabels';
+import {
+  DynamicCostCategory,
+  DYNAMIC_COST_CATEGORY_META,
+  resolveDynamicCostCategory,
+  isDynamicCostConfirmedOrApproved,
+  getDynamicCostAmount
+} from '../src/utils/costCategory';
 
 interface MyAccountProps {
   currentUser: User;
@@ -22,9 +31,11 @@ interface MyAccountProps {
   transactions: InternalTransaction[];
   resources: MiningResource[];
   users: User[];
+  systemConfig?: SystemConfig;
 }
 
-const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, resources, users }) => {
+const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, resources, users, systemConfig }) => {
+  const canExport = useMemo(() => canExportExcel(currentUser, systemConfig), [currentUser, systemConfig]);
   const { isCostVisible, toggleCostVisible, maskMoney } = useCostPrivacy();
   
   // 业务月份与自定义起止日
@@ -37,6 +48,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterMiningId, setFilterMiningId] = useState<string>('');
   const [filterDirection, setFilterDirection] = useState<string>('all'); // all, income, expense
+  const [filterCostCategory, setFilterCostCategory] = useState<string>('all'); // all, A, B1, B2, C, D
   const [searchTerm, setSearchTerm] = useState<string>('');
 
   // 1. 口径计算：仅限本人 (recordedCollectorId === currentUser.id)
@@ -50,11 +62,13 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
       const bMonth = resolveLogBusinessMonth(l);
       const bDate = resolveLogBusinessDate(l);
       const netVal = calculateHistoricalNetValue(l, resources, users);
+      const costCat = resolveDynamicCostCategory(l);
       return {
         ...l,
         resolvedMonth: bMonth,
         resolvedDate: bDate,
-        calculatedNetValue: netVal
+        calculatedNetValue: netVal,
+        resolvedCostCategory: costCat
       };
     }).sort((a, b) => b.resolvedDate.localeCompare(a.resolvedDate) || b.timestamp - a.timestamp);
   }, [myLogs, resources, users]);
@@ -63,6 +77,28 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
   const activeLogs = useMemo(() => {
     return myUnifiedLogs.filter(l => isLogInFilter(l, selectedMonth, startDate, endDate));
   }, [myUnifiedLogs, selectedMonth, startDate, endDate]);
+
+  // 顶部五类动态消耗成本（只统计 activeLogs 范围内本人有效/已确权入库的动态消耗流水）
+  const dynamicCostFiveTiers = useMemo(() => {
+    const totals: Record<DynamicCostCategory, number> = {
+      A: 0,
+      B1: 0,
+      B2: 0,
+      C: 0,
+      D: 0
+    };
+
+    activeLogs.forEach(l => {
+      if (!isDynamicCostConfirmedOrApproved(l.status)) return;
+      const cat = l.resolvedCostCategory;
+      if (cat && totals[cat] !== undefined) {
+        totals[cat] += getDynamicCostAmount(l);
+      }
+    });
+
+    const totalCost = totals.A + totals.B1 + totals.B2 + totals.C + totals.D;
+    return { totals, totalCost };
+  }, [activeLogs]);
 
   // 包汇总计算（按净值口径）
   const collectionPackage = useMemo(() => {
@@ -91,24 +127,32 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
     return aggregateUserMonthMetrics(logs, currentUser, effectiveMonth, resources, users, [AuditStatus.Confirmed, AuditStatus.Approved]);
   }, [logs, currentUser, effectiveMonth, resources, users]);
 
-  // 奖金与欠产分配本地计算（仅 VITE_USE_LOCAL_AUTH === 'true' 才跑）
-  const bonusResult = useMemo(() => {
-    if (import.meta.env.VITE_USE_LOCAL_AUTH !== 'true') {
-      return { quota: 0, newDebt: 0, history: 0 };
-    }
-    return calculateBonusAllocation(effectiveMonth, currentUser, logs, resources, users, AuditStatus.Confirmed);
-  }, [effectiveMonth, currentUser, logs, resources, users]);
+  // ===== 前端 CFO 结余、额度与历史欠产按正确口径强覆写 =====
+  // 必须调用 computeCfoKuanMetrics 强覆写：本地 auth 与远程模式统一走 CFO 强覆写，禁止盲信 API 错误 currentSurplus
+  const cfoMetrics = useMemo(() => {
+    return computeCfoKuanMetrics({
+      currentUser,
+      effectiveMonth,
+      collectionPackage,
+      productionPackage,
+      logs,
+      resources,
+      users,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+    });
+  }, [currentUser, effectiveMonth, collectionPackage, productionPackage, logs, resources, users, startDate, endDate]);
 
-  // 当月结余 = 本月收入 - 本月成本（本地计算）
-  const monthlySalary = getUserSalaryByMonth(currentUser, effectiveMonth);
-  const localCost = monthlySalary + (currentUser.category?.includes('产专') ? monthMetrics.b1Cost : monthMetrics.aCost);
-  const localIncome = currentUser.category?.includes('产专') ? monthMetrics.productionPackage : monthMetrics.revenuePackage;
-  const localBalance = localIncome - localCost;
+  // 当月结余 rawSurplus (可负，禁止 floor 成 0；与顶部收款包同源)
+  const currentBalance = cfoMetrics.rawSurplus;
 
-  const localDebt = bonusResult.newDebt < 0 ? bonusResult.newDebt : (bonusResult.history < 0 ? bonusResult.history : 0);
-  const localBonusQuota = bonusResult.quota;
+  // 奖金额度（分配额度）allocQuota = max(0, rawSurplus + historyDebtSigned)
+  const bonusQuota = cfoMetrics.allocQuota;
 
-  // ===== 分配 API 降级控制 =====
+  // 历史欠产 historyDebtSigned (当年 1~M-1 滚动，2026-01 为 0，负数展示)
+  const historicalDebt = cfoMetrics.historyDebtSigned;
+
+  // ===== 分配 API 请求（保留用于对照或承兑类字段，但结余/额度/历史欠产以本地 CFO 强覆写为准） =====
   const [serverDistributionItem, setServerDistributionItem] = useState<any | null>(null);
   const [loadingDistribution, setLoadingDistribution] = useState(false);
   const [errorDistribution, setErrorDistribution] = useState<string | null>(null);
@@ -126,7 +170,6 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               setServerDistributionItem(item || null);
             } else {
               setErrorDistribution("数据格式错误");
-              toast.error("获取的分配数据格式不正确");
             }
           }
         })
@@ -134,7 +177,6 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
           console.error("MyAccount: fetchDistributionData API error:", err);
           if (isMounted) {
             setErrorDistribution("加载失败");
-            toast.error("无法加载分配数据");
           }
         })
         .finally(() => {
@@ -147,19 +189,6 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
     }
     return () => { isMounted = false; };
   }, [effectiveMonth, currentUser.id]);
-
-  // 权威分配 API 返回值优先，API 异常/无数据时：如果是远程模式，禁止静默降级至本地计算
-  const currentBalance = import.meta.env.VITE_USE_LOCAL_AUTH === 'true'
-    ? localBalance
-    : (serverDistributionItem ? (serverDistributionItem.confirmed?.currentSurplus ?? serverDistributionItem.currentSurplusConfirmed ?? serverDistributionItem.currentSurplus ?? 0) : null);
-
-  const bonusQuota = import.meta.env.VITE_USE_LOCAL_AUTH === 'true'
-    ? localBonusQuota
-    : (serverDistributionItem ? (serverDistributionItem.confirmed?.theoreticalBonus ?? serverDistributionItem.theoreticalBonusConfirmed ?? serverDistributionItem.theoreticalBonus ?? 0) : null);
-
-  const historicalDebt = import.meta.env.VITE_USE_LOCAL_AUTH === 'true'
-    ? localDebt
-    : (serverDistributionItem ? (serverDistributionItem.confirmed?.newDebt ?? serverDistributionItem.nextDebtConfirmed ?? serverDistributionItem.nextDebt ?? serverDistributionItem.historyDebt ?? 0) : null);
 
   // 明细列表过滤（按当前维度过滤后的 activeLogs 进行搜索与筛选）
   const filteredDetailLogs = useMemo(() => {
@@ -178,6 +207,9 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
       if (filterDirection === 'income' && l.calculatedNetValue <= 0) return false;
       if (filterDirection === 'expense' && l.calculatedNetValue >= 0) return false;
 
+      // 成本分类过滤 (all, A, B1, B2, C, D)
+      if (filterCostCategory !== 'all' && l.resolvedCostCategory !== filterCostCategory) return false;
+
       // 关键字搜索 (单号)
       if (searchTerm) {
         const term = searchTerm.toLowerCase();
@@ -186,7 +218,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
 
       return true;
     });
-  }, [activeLogs, filterType, filterStatus, filterMiningId, filterDirection, searchTerm]);
+  }, [activeLogs, filterType, filterStatus, filterMiningId, filterDirection, filterCostCategory, searchTerm]);
 
   // 筛选后汇总计算
   const filteredSummary = useMemo(() => {
@@ -219,6 +251,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
     setFilterStatus('all');
     setFilterMiningId('');
     setFilterDirection('all');
+    setFilterCostCategory('all');
     setSearchTerm('');
     setSelectedMonth(getLocalMonthString());
     setStartDate('');
@@ -227,6 +260,10 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
 
   // 导出表格
   const handleExportExcel = () => {
+    if (!canExport) {
+      toast.error(EXPORT_DISABLED_TOOLTIP);
+      return;
+    }
     const exportData = filteredDetailLogs.map((l, index) => ({
       '序号': index + 1,
       '单号': l.id,
@@ -236,6 +273,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
       '提交时间': formatSubmissionTime(l.timestamp),
       '类别': l.category,
       '类型/项目': l.type,
+      '成本分类': l.resolvedCostCategory ? DYNAMIC_COST_CATEGORY_META[l.resolvedCostCategory].label : '-',
       '矿山编号': l.miningId,
       '净额': Math.round(l.calculatedNetValue || 0),
       '状态': l.status
@@ -251,6 +289,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
       '提交时间': '' as any,
       '类别': `总收入: ${filteredSummary.income}` as any,
       '类型/项目': `总支出: ${filteredSummary.expense}` as any,
+      '成本分类': '' as any,
       '矿山编号': `收产包合计: ${filteredSummary.combinedPkg}` as any,
       '净额': filteredSummary.income - filteredSummary.expense as any,
       '状态': '' as any
@@ -266,8 +305,14 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
       ['本期收入合计', filteredSummary.income, '筛选范围内正向流水总和'],
       ['本期支出/成本合计', filteredSummary.expense, '筛选范围内负向流水总和'],
       ['收产包合计', filteredSummary.combinedPkg, '收款包 + 产兑包'],
+      ['动态消耗五类支出合计', dynamicCostFiveTiers.totalCost, 'A+B1+B2+C+D已确权/入库消耗总计'],
+      ['A类 · 款专类报销', dynamicCostFiveTiers.totals.A, '款专类报销'],
+      ['B1类 · 产专类报销', dynamicCostFiveTiers.totals.B1, '产专类报销'],
+      ['B2类 · 产专运维消耗', dynamicCostFiveTiers.totals.B2, '产专类项目运维消耗'],
+      ['C类 · C类对冲', dynamicCostFiveTiers.totals.C, '跨单元/指定矿山对冲消耗'],
+      ['D类 · 经营单元公摊', dynamicCostFiveTiers.totals.D, '经营单元公摊'],
       ['交易笔数', filteredSummary.count, '条记录'],
-      ['筛选条件', `时间: ${startDate && endDate ? `${startDate}至${endDate}` : (selectedMonth || '全部')} | 类别: ${filterType} | 状态: ${filterStatus} | 方向: ${filterDirection}`, '']
+      ['筛选条件', `时间: ${startDate && endDate ? `${startDate}至${endDate}` : (selectedMonth || '全部')} | 类别: ${filterType} | 状态: ${filterStatus} | 方向: ${filterDirection} | 成本分类: ${filterCostCategory}`, '']
     ];
     const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
     XLSX.utils.book_append_sheet(workbook, summarySheet, '汇总报告');
@@ -296,7 +341,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
         </div>
       </div>
 
-      {/* 1. 总览区：价值包汇总与月度财务分配指标 (金额整数展示) */}
+      {/* 1. 总览区：价值包汇总与月度财务分配指标 (数值整数展示) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
         {/* 收款包 */}
         <div className="bg-gradient-to-br from-blue-50 to-indigo-50/50 p-5 rounded-3xl border border-blue-100/80 shadow-2xs flex flex-col justify-between">
@@ -332,19 +377,17 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
         <div className="bg-gradient-to-br from-amber-50 to-orange-50/50 p-5 rounded-3xl border border-amber-100/80 shadow-2xs flex flex-col justify-between">
           <div>
             <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest block mb-1">当月结余 ({effectiveMonth})</span>
-            <h3 className={`text-2xl font-black font-mono ${currentBalance === null ? 'text-slate-500' : currentBalance >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
-              {loadingDistribution ? (
-                <span className="text-sm font-bold text-slate-400">加载中...</span>
-              ) : errorDistribution ? (
-                <span className="text-sm font-bold text-rose-500">无法加载分配数据</span>
-              ) : !isCostVisible ? (
+            <h3 className={`text-2xl font-black font-mono ${!isCostVisible ? 'text-slate-900' : currentBalance >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
+              {!isCostVisible ? (
                 '****'
-              ) : currentBalance !== null ? (
-                formatAmount(currentBalance)
               ) : (
-                '--'
+                `${currentBalance > 0 ? '+' : ''}${formatAmount(currentBalance)}`
               )}
             </h3>
+            <div className="text-[10px] text-slate-500 mt-1.5 flex items-center gap-1 truncate" title={cfoMetrics.formulaDescription}>
+              <span className="font-semibold text-amber-700">口径:</span>
+              <span className="truncate">{cfoMetrics.formulaDescription}</span>
+            </div>
           </div>
         </div>
 
@@ -353,18 +396,16 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
           <div>
             <span className="text-[10px] font-black text-sky-600 uppercase tracking-widest block mb-1">奖金额度 ({effectiveMonth})</span>
             <h3 className="text-2xl font-black text-slate-900 font-mono">
-              {loadingDistribution ? (
-                <span className="text-sm font-bold text-slate-400">加载中...</span>
-              ) : errorDistribution ? (
-                <span className="text-sm font-bold text-rose-500">无法加载分配数据</span>
-              ) : !isCostVisible ? (
+              {!isCostVisible ? (
                 '****'
-              ) : bonusQuota !== null ? (
-                formatAmount(bonusQuota)
               ) : (
-                '--'
+                formatAmount(bonusQuota)
               )}
             </h3>
+            <div className="text-[10px] text-slate-500 mt-1.5 flex items-center gap-1 truncate" title="max(0, 结余 + 历史欠产)">
+              <span className="font-semibold text-sky-700">口径:</span>
+              <span className="truncate">max(0, 结余 + 历史欠产)</span>
+            </div>
           </div>
         </div>
 
@@ -372,20 +413,70 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
         <div className="bg-gradient-to-br from-rose-50 to-red-50/50 p-5 rounded-3xl border border-rose-100/80 shadow-2xs flex flex-col justify-between">
           <div>
             <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest block mb-1">历史欠产 ({effectiveMonth})</span>
-            <h3 className="text-2xl font-black text-rose-600 font-mono">
-              {loadingDistribution ? (
-                <span className="text-sm font-bold text-slate-400">加载中...</span>
-              ) : errorDistribution ? (
-                <span className="text-sm font-bold text-rose-500">无法加载分配数据</span>
-              ) : !isCostVisible ? (
+            <h3 className={`text-2xl font-black font-mono ${!isCostVisible ? 'text-slate-900' : historicalDebt < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+              {!isCostVisible ? (
                 '****'
-              ) : historicalDebt !== null ? (
-                formatAmount(historicalDebt)
               ) : (
-                '--'
+                formatAmount(historicalDebt)
               )}
             </h3>
+            <div className="text-[10px] text-slate-500 mt-1.5 flex items-center gap-1 truncate" title="1~M-1月累计欠产滚动（每年1月清零）">
+              <span className="font-semibold text-rose-700">口径:</span>
+              <span className="truncate">1~M-1月累计欠产滚动</span>
+            </div>
           </div>
+        </div>
+      </div>
+
+      {/* 1.1 动态消耗五类支出总览 (A / B1 / B2 / C / D) */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-black text-slate-500 uppercase tracking-wider">动态消耗五类支出拆分</span>
+            <span className="text-[11px] text-slate-400 font-normal">
+              （当前窗口已确权/入库消耗合计：
+              <span className="font-mono font-bold text-slate-700">
+                {isCostVisible ? formatAmount(dynamicCostFiveTiers.totalCost) : '****'}
+              </span>
+              ）
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          {(['A', 'B1', 'B2', 'C', 'D'] as DynamicCostCategory[]).map((catKey) => {
+            const meta = DYNAMIC_COST_CATEGORY_META[catKey];
+            const amount = dynamicCostFiveTiers.totals[catKey];
+            const isSelected = filterCostCategory === catKey;
+
+            return (
+              <div
+                key={catKey}
+                onClick={() => setFilterCostCategory(prev => prev === catKey ? 'all' : catKey)}
+                className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${meta.bg} ${meta.border} ${
+                  isSelected ? 'ring-2 ring-slate-900 shadow-md' : 'hover:shadow-xs'
+                }`}
+                title={`点击以${isSelected ? '取消' : '仅查看'}${meta.label}`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className={`text-[11px] font-black uppercase tracking-wider ${meta.text}`}>
+                    {meta.label}
+                  </span>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white/80 text-slate-700 border border-slate-200">
+                    {catKey}
+                  </span>
+                </div>
+                <div>
+                  <div className="text-xl font-black font-mono text-slate-900">
+                    {isCostVisible ? formatAmount(amount) : '****'}
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-1 truncate" title={meta.desc}>
+                    {meta.desc}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -488,7 +579,24 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               </select>
             </div>
 
-            {/* 6. 单号搜索 */}
+            {/* 6. 成本分类筛选 */}
+            <div className="space-y-1.5 flex-1 min-w-[120px]">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">成本分类</label>
+              <select
+                value={filterCostCategory}
+                onChange={(e) => setFilterCostCategory(e.target.value)}
+                className="w-full bg-white border border-[#b8d0f7] text-[13px] text-slate-800 font-bold rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 cursor-pointer h-10 transition-all"
+              >
+                <option value="all">全部成本类</option>
+                <option value="A">A类 · 款专报销</option>
+                <option value="B1">B1类 · 产专报销</option>
+                <option value="B2">B2类 · 运维消耗</option>
+                <option value="C">C类 · C类对冲</option>
+                <option value="D">D类 · 单元公摊</option>
+              </select>
+            </div>
+
+            {/* 7. 单号搜索 */}
             <div className="space-y-1.5 flex-[1.5] min-w-[160px]">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">单号关键词</label>
               <div className="flex gap-2">
@@ -521,7 +629,13 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               <div className="h-8 w-px bg-slate-200"></div>
               <button
                 onClick={handleExportExcel}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm hover:shadow-md"
+                disabled={!canExport}
+                title={getExportButtonTitle(canExport, '导出账单')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm ${
+                  !canExport
+                    ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+                    : 'bg-slate-900 hover:bg-slate-800 text-white cursor-pointer hover:shadow-md'
+                }`}
               >
                 <FileSpreadsheet className="w-3.5 h-3.5" />
                 导出账单
@@ -578,7 +692,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
           </div>
         </div>
 
-        {/* 流水明细表格：业务日期、提交日期、类型、矿山、收产包、状态、单号 */}
+        {/* 流水明细表格：业务日期、提交日期、类型、成本分类、矿山、收产包、状态、单号 */}
         <div className="overflow-x-auto custom-scrollbar border border-slate-100 rounded-2xl">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -586,6 +700,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
                 <th className="p-4">业务日期</th>
                 <th className="p-4">提交日期</th>
                 <th className="p-4">类型</th>
+                <th className="p-4">成本分类</th>
                 <th className="p-4">矿山</th>
                 <th className="p-4 text-right">收产包</th>
                 <th className="p-4 text-center">状态</th>
@@ -608,6 +723,15 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
                         {l.category} ({l.type})
                       </span>
                     </td>
+                    <td className="p-4 whitespace-nowrap">
+                      {l.resolvedCostCategory ? (
+                        <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${DYNAMIC_COST_CATEGORY_META[l.resolvedCostCategory].bg} ${DYNAMIC_COST_CATEGORY_META[l.resolvedCostCategory].text} ${DYNAMIC_COST_CATEGORY_META[l.resolvedCostCategory].border}`}>
+                          {DYNAMIC_COST_CATEGORY_META[l.resolvedCostCategory].label}
+                        </span>
+                      ) : (
+                        <span className="text-slate-300 font-mono text-[11px]">-</span>
+                      )}
+                    </td>
                     <td className="p-4 font-bold text-slate-700 max-w-xs truncate" title={l.miningId}>
                       {l.miningId}
                     </td>
@@ -629,7 +753,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
                 ))
               ) : (
                 <tr>
-                  <td colSpan={7} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
+                  <td colSpan={8} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
                 </tr>
               )}
             </tbody>

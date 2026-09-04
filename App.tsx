@@ -6,7 +6,7 @@ import { filterUsersByCenter, filterResourcesByCenter, filterLogsByCenter, filte
 import { isVirtualDeductionMiningId } from './src/utils/virtualDeduction';
 import { TERM_FILTERED_LOGS, TERM_AUDIT_LOGS } from './src/constants/terminology';
 import { useCityGuardianModal, CityGuardianModal } from './src/components/CityGuardianModal';
-import { User, Role, MiningResource, ValueCreationLog, AuditStatus, RefineCategory, RefineType, InternalTransaction, TransactionStatus, SystemOperationLog, CircuitBreaker, ResourceStatus, QuotaSnapshot, AcceptanceRecord, MeetingSample, JydyUnit } from './types';
+import { User, Role, MiningResource, ValueCreationLog, AuditStatus, RefineCategory, RefineType, InternalTransaction, TransactionStatus, SystemOperationLog, CircuitBreaker, ResourceStatus, QuotaSnapshot, AcceptanceRecord, MeetingSample, JydyUnit, SystemConfig } from './types';
 import { canonicalizeBusinessUnitLabel, resolveBusinessUnitName } from './src/utils/businessUnitName';
 import Dashboard from './views/Dashboard';
 import ValueCreation from './views/ValueCreation';
@@ -52,6 +52,7 @@ import { useCircuitBreaker } from './src/hooks/useCircuitBreaker';
 import { buildSyncPayload, buildAppSyncPayload } from './src/app/workspaceSync';
 import { getLocalDateString, getLocalMonthString } from './src/utils/dateUtils';
 import { roundMoney } from './src/utils/formatMoney';
+import { mergeMiningResources } from './src/utils/miningCapacity';
 
 const INITIAL_USERS: User[] = [
   { id: 'admin', userId: 'admin', name: '系统管理员', role: Role.Admin, category: '系统管理员', salaryPackageType: 'NPC工资包', userStatus: 'active' },
@@ -102,6 +103,7 @@ const App: React.FC = () => {
 
   const [managedUsers, setManagedUsers] = useState<User[]>(INITIAL_USERS);
   const [meetingSamples, setMeetingSamples] = useState<MeetingSample[]>([]);
+  const [systemConfig, setSystemConfig] = useState<SystemConfig>({ exportEnabled: true });
   const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
   const [isLegalOpen, setIsLegalOpen] = useState(false);
   const [legalTab, setLegalTab] = useState<'agreement' | 'privacy'>('agreement');
@@ -231,6 +233,9 @@ const App: React.FC = () => {
           }
           if (data.meetingSamples && Array.isArray(data.meetingSamples)) {
             setMeetingSamples(data.meetingSamples);
+          }
+          if (data.systemConfig) {
+            setSystemConfig(data.systemConfig);
           }
           // 最后且关键：标记工作区已就绪
           setWorkspaceLoaded(true);
@@ -755,8 +760,26 @@ const App: React.FC = () => {
     }
   }, [addSystemLog, persistWorkspaceWithOverrides]);
 
+  const onAddResources = React.useCallback(async (newResources: MiningResource[]) => {
+    if (!newResources || newResources.length === 0) return;
+    const merged = mergeMiningResources(miningResources, newResources);
+    if (merged.length === 0) {
+      toast.error('本地矿山列表为空，拒绝同步');
+      return;
+    }
+    setMiningResources(merged);
+    try {
+      await persistWorkspaceWithOverrides({ miningResources: merged });
+      const idSample = newResources.map(r => r.id).slice(0, 5).join(', ');
+      addSystemLog('资源管理', `批量导入了 ${newResources.length} 个矿山资源: ${idSample}${newResources.length > 5 ? ' 等' : ''}`);
+    } catch (err: any) {
+      toastApiError(err, '批量新增资源同步失败');
+      throw err;
+    }
+  }, [addSystemLog, persistWorkspaceWithOverrides, miningResources]);
+
   const onAddResource = React.useCallback(async (res: MiningResource) => {
-    const nextRes = [...miningResources, res];
+    const nextRes = mergeMiningResources(miningResources, [res]);
     if (nextRes.length === 0) {
       toast.error('本地矿山列表为空，拒绝同步');
       return;
@@ -764,10 +787,11 @@ const App: React.FC = () => {
     setMiningResources(nextRes);
     try {
       await persistWorkspaceWithOverrides({ miningResources: nextRes }, { successMessage: '新增资源成功' });
+      addSystemLog('资源管理', `新增了矿山资源 ${res.id}`);
     } catch (err: any) {
       toastApiError(err, '新增资源同步失败');
+      throw err;
     }
-    addSystemLog('资源管理', `新增了矿山资源 ${res.id}`);
   }, [addSystemLog, persistWorkspaceWithOverrides, miningResources]);
 
   const onUpdateResource = React.useCallback(async (res: MiningResource) => {
@@ -1137,8 +1161,15 @@ const App: React.FC = () => {
   }, [addSystemLog, persistWorkspaceWithOverrides]);
 
   const effectiveBusinessUnits = useMemo(() => {
-    return jydyUnits.map(u => u.name);
-  }, [jydyUnits]);
+    const list = new Set<string>();
+    (jydyUnits || []).forEach(u => { if (u && u.name) list.add(u.name); });
+    (managedUsers || []).forEach(u => {
+      if (u && u.center && u.center !== '统筹水库' && u.center !== '公司' && u.center !== '总部') {
+        list.add(u.center);
+      }
+    });
+    return Array.from(list);
+  }, [jydyUnits, managedUsers]);
 
   const tabProps = useMemo(() => {
     if (!currentUser) return {} as any;
@@ -1155,7 +1186,8 @@ const App: React.FC = () => {
         onSwitchTab: setActiveTab,
         units: effectiveBusinessUnits,
         meetingSamples,
-        onSaveMeetingSample
+        onSaveMeetingSample,
+        systemConfig
       },
       creation: { 
         user: currentUser, 
@@ -1170,7 +1202,8 @@ const App: React.FC = () => {
         quotaSnapshots,
         processingLogIds,
         persistWorkspaceWithOverrides,
-        onPauseAutoSync: setPauseAutoSync
+        onPauseAutoSync: setPauseAutoSync,
+        systemConfig
       },
       consumption: { 
         user: currentUser, 
@@ -1181,7 +1214,8 @@ const App: React.FC = () => {
         dtcbLogs: auditLogs.filter(l => l.confirmationType === '手动确权'),
         onLogSubmit: onConsumptionSubmit,
         persistWorkspaceWithOverrides,
-        updateLastSyncedFingerprint
+        updateLastSyncedFingerprint,
+        systemConfig
       },
       audit: { 
         user: currentUser, 
@@ -1191,6 +1225,7 @@ const App: React.FC = () => {
         onAudit: processAudit,
         processingLogIds,
         onDeleteLog,
+        systemConfig,
         onRefreshWorkspace: async () => {
           try {
             const data = await fetchWorkspaceData();
@@ -1235,7 +1270,8 @@ const App: React.FC = () => {
         onRecoverCircuitBreaker,
         units: effectiveBusinessUnits,
         persistWorkspaceNow,
-        persistWorkspaceWithOverrides
+        persistWorkspaceWithOverrides,
+        systemConfig
       },
       resources: { 
         user: currentUser, 
@@ -1245,9 +1281,11 @@ const App: React.FC = () => {
         transactions: filteredTransactions,
         managedUsers: managedUsers,
         onAddResource,
+        onAddResources,
         onUpdateResource,
         onDeleteResource,
-        units: effectiveBusinessUnits
+        units: effectiveBusinessUnits,
+        systemConfig
       },
       reservoir: { 
         logs: filteredLogs,
@@ -1256,7 +1294,8 @@ const App: React.FC = () => {
         users: filteredUsers,
         transactions: filteredTransactions,
         units: effectiveBusinessUnits,
-        currentUser
+        currentUser,
+        systemConfig
       },
       evaluation: { 
         users: filteredUsers, 
@@ -1275,8 +1314,9 @@ const App: React.FC = () => {
         resources: filteredResources, 
         onSubmitTransaction,
         acceptanceRecords,
+        systemConfig
       },
-      account: { currentUser, logs: auditLogs, transactions: filteredTransactions, resources: filteredResources, users: filteredUsers },
+      account: { currentUser, logs: auditLogs, transactions: filteredTransactions, resources: filteredResources, users: filteredUsers, systemConfig },
       personnel: { 
         user: currentUser,
         users: filteredUsers, 
@@ -1298,7 +1338,7 @@ const App: React.FC = () => {
     };
   }, [filteredLogs, auditLogs, filteredResources, filteredUsers, managedUsers, miningResources, jydyUnits, transactions, currentUser, currentTime, logs,
        onSystemAdjustment, onLogSubmit, onConsumptionSubmit, processAudit, onSubmitTransaction, 
-       onAuditTransaction, onAddResource, onUpdateResource, onDeleteResource, onUpdateUsers, onClearTestData,
+       onAuditTransaction, onAddResource, onAddResources, onUpdateResource, onDeleteResource, onUpdateUsers, onClearTestData,
        circuitBreakers, onAddCircuitBreaker, onRecoverCircuitBreaker, persistWorkspaceWithOverrides, updateLastSyncedFingerprint]);
 
   const components = useMemo(() => {

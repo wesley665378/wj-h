@@ -26,10 +26,12 @@ import { XLSX, exportWorkbook, buildExcelFilename, EXCEL_IMPORT_MAX_BYTES, EXCEL
 import { calculateHistoricalNetValue, calculateDualTrackCoreMatrices, calculateT1PlusValue, calculateT1PlusRevenue } from '@/utils/business';
 import { calculateHedgeCapacitiesAndWeights, normalizeRefineTier, calculateInjectedAmount, getRawInputAmount } from '@/utils/consumptionHedge';
 import { deriveProjectStatus, isProjectWritable } from '@/utils/projectStatus';
-import { isAdminOrNpc, parseCenterList } from '@/utils/accessControl';
+import { isAdminOrNpc, parseCenterList, canExportExcel, getExportButtonTitle, EXPORT_DISABLED_TOOLTIP } from '@/utils/accessControl';
+import { SystemConfig } from '@/types';
+import { isSalaryActiveForMonth } from '@/utils/employmentStatus';
 import { userCenterMatchesBusinessUnit, businessUnitLabelsEqual } from '@/utils/businessUnitName';
 import { isCenterManagerUser, sortCenterManagers } from '@/utils/centerManager';
-import { centerMatch, isGlobalReader } from '@/utils/centerScope';
+import { centerMatch, isGlobalReader, filterAuditLogsByCenter } from '@/utils/centerScope';
 import { labelBusinessUnit } from '@/utils/statusDisplay';
 import { formatCollectorDisplay } from '@/utils/collector';
 import { safeGetItem, safeSetItem, safeRemoveItem } from '@/utils/safeLocalStorage';
@@ -102,6 +104,16 @@ import {
   getCurrentRevenueCapacity,
   getCurrentValueCapacity
 } from '@/utils/miningCapacity';
+import {
+  importNetAmount,
+  importBatchNetFromRawSum,
+  importGroupKey,
+  importGroupQuotaExceeded,
+  importAlreadyAtOrOverLimit,
+  importGroupPostOccupancy,
+  formatImportQuotaExceededReason,
+  allocateImportRowAmounts,
+} from '@/utils/importQuotaCheck';
 import { getExecutionType, getExecutionTypeBadgeColor, EXECUTION_TYPE_EXPLANATIONS } from '@/utils/executionType';
 import {
   getLocalDateString,
@@ -124,6 +136,9 @@ const AuditModal: React.FC<{
   onConfirm: () => void;
   data: { metric: string; original: number; target: number }[];
 }> = ({ isOpen, onClose, onConfirm, data }) => {
+  const cRow = data.find(d => d.metric === 'C权');
+  const isLowC = cRow ? cRow.target < 0.8 : false;
+
   return (
     <StandardModal
       isOpen={isOpen}
@@ -133,6 +148,15 @@ const AuditModal: React.FC<{
       maxWidthClassName="max-w-lg"
     >
       <div className="space-y-6">
+        {isLowC && cRow && (
+          <div className="p-4 bg-amber-50 border border-amber-200/80 rounded-2xl flex items-start gap-3 text-amber-900 shadow-sm">
+            <span className="text-xl">⚠️</span>
+            <div className="text-xs font-bold leading-relaxed">
+              <p className="font-black text-amber-950 mb-0.5">风险提示</p>
+              <p>当前 C 权值为 {cRow.target.toFixed(4)}，当前 C 权低于 0.8，请确认是否继续提交。</p>
+            </div>
+          </div>
+        )}
         <div className="overflow-x-auto border border-slate-100 rounded-xl custom-scrollbar">
           <table className="w-full text-sm">
             <thead>
@@ -194,6 +218,7 @@ interface ValueCreationProps {
   processingLogIds?: Set<string>;
   persistWorkspaceWithOverrides?: (overrides?: { logs?: ValueCreationLog[]; importBatchId?: string }, options?: { silent?: boolean; successMessage?: string; loadingMessage?: string; toastId?: string | number }) => Promise<void>;
   onPauseAutoSync?: (paused: boolean) => void;
+  systemConfig?: SystemConfig;
 }
 
 type TimePeriod = 'monthly' | 'quarterly' | 'yearly';
@@ -210,8 +235,9 @@ export const tierDisplayMap: Record<string, { name: string, desc: string }> = {
 
 const ValueCreation: React.FC<ValueCreationProps> = ({ 
   user, users = [], resources, logs, onLogSubmit, transactions = [], onConfirmTransaction, circuitBreakers = [], onAddCircuitBreaker,
-  quotaSnapshots = {}, processingLogIds = new Set(), persistWorkspaceWithOverrides, onPauseAutoSync
+  quotaSnapshots = {}, processingLogIds = new Set(), persistWorkspaceWithOverrides, onPauseAutoSync, systemConfig
 }) => {
+  const canExport = useMemo(() => canExportExcel(user, systemConfig), [user, systemConfig]);
   const miningReconciliations = useMemo(() => reconcileMiningLogs(logs, resources), [logs, resources]);
 
   const [managedUsers, setManagedUsers] = useState<User[]>([]);
@@ -227,7 +253,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   const [selectedTier, setSelectedTier] = useState<string>('T1');
   const [selectedSubCategory, setSelectedSubCategory] = useState<string>('企业项目');
   const [error, setError] = useState('');
-  const [recordTab, setRecordTab] = useState<'revenue' | 'linkedPending' | 'confirmed' | 'history'>('revenue');
+  const [recordTab, setRecordTab] = useState<'revenue' | 'linkedPending' | 'confirmed'>('revenue');
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('monthly');
   const [selectedMonth, setSelectedMonth] = useState(() => getLocalMonthString()); // YYYY-MM
   const [isAuditOpen, setIsAuditOpen] = useState(false);
@@ -367,13 +393,14 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   const collectorPool = useMemo(() => managedUsers.filter(u => {
     const isCollector = isRevenueExpert(u) || isValueExpert(u) || [Role.Operator, Role.RevenueCollector, Role.ValueCollector].includes(u.role);
     if (!isCollector) return false;
-    if (u.userStatus === 'inactive') return false;
+    const currentMonth = selectedDate ? selectedDate.slice(0, 7) : getLocalMonthString();
+    if (!isSalaryActiveForMonth(u, currentMonth)) return false;
     // 注入积分 采集主体 只显示 同一 经营单元 采集主体列表
     if (user.center) {
       if (!centerMatch(u.center, user.center)) return false;
     }
     return true;
-  }), [managedUsers, user.center]);
+  }), [managedUsers, user.center, selectedDate]);
   
   const isCategoryLocked = useMemo(() => {
     return selectedCollectors.some(c => {
@@ -414,7 +441,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       let changed = false;
       const next = prev.map(sc => {
         const raw = sc.rawAmount !== undefined && sc.rawAmount !== null ? sc.rawAmount : sc.amount;
-        const expectedAmount = isRev ? Math.round(raw * 0.933) : raw;
+        const expectedAmount = importNetAmount(raw, isRev);
         if (sc.amount !== expectedAmount || sc.rawAmount !== raw) {
           changed = true;
           return { ...sc, rawAmount: raw, amount: expectedAmount };
@@ -987,10 +1014,18 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   };
 
   const scopeLogs = useMemo(() => {
-    let list = logs.filter(l => l.rankId === selectedOperatorId || l.recordedCollectorId === selectedOperatorId);
+    let list = (logs || []).filter(Boolean);
+    const isAdmin = isGlobalReader(user);
+    if (!isAdmin) {
+      if (user.center) {
+        list = filterAuditLogsByCenter(list, resources, user, managedUsers);
+      } else {
+        list = list.filter(l => l.rankId === user.id || l.recordedCollectorId === user.id);
+      }
+    }
     list = list.filter(l => isLogInFilter(l, filterMonth, filterStartDate, filterEndDate));
     return list;
-  }, [logs, selectedOperatorId, filterMonth, filterStartDate, filterEndDate]);
+  }, [logs, user, resources, managedUsers, filterMonth, filterStartDate, filterEndDate]);
 
   const summaryRevenuePackage = useMemo(() => {
     return sumConfirmedRevenuePackage(scopeLogs, resources, managedUsers);
@@ -1009,19 +1044,27 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   }, [logs, resources, selectedResource, user.center, managedUsers]);
 
   const filteredLogs = useMemo(() => {
-    let list = logs.filter(l => l && (l.rankId === selectedOperatorId || l.recordedCollectorId === selectedOperatorId)).reverse();
+    let list = (logs || []).filter(Boolean).reverse();
+    const isAdmin = isGlobalReader(user);
+    if (!isAdmin) {
+      if (user.center) {
+        list = filterAuditLogsByCenter(list, resources, user, managedUsers);
+      } else {
+        list = list.filter(l => l.rankId === user.id || l.recordedCollectorId === user.id);
+      }
+    }
     list = list.filter(l => isLogInFilter(l, filterMonth, filterStartDate, filterEndDate));
 
     if (recordTab === 'revenue') {
       return list.filter(l => l.category === RefineCategory.Revenue && l.status === AuditStatus.Pending);
     } else if (recordTab === 'linkedPending') {
       return list.filter(l => l.category === RefineCategory.Value && l.status === AuditStatus.Pending && l.confirmationType === '联动确权');
-    } else if (recordTab === 'history') {
-      return list.filter(l => l.status === AuditStatus.Approved || l.status === AuditStatus.Rejected);
+    } else if (recordTab === 'confirmed') {
+      return list.filter(l => l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved);
     } else {
       return [];
     }
-  }, [logs, selectedOperatorId, recordTab, filterMonth, filterStartDate, filterEndDate]);
+  }, [logs, user, resources, managedUsers, recordTab, filterMonth, filterStartDate, filterEndDate]);
 
   const paginatedLogs = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
@@ -1073,7 +1116,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       '类别': '收款', // 或 产值
       '业务日期': new Date().toISOString().slice(0, 10),
       '采集主体': '工号或姓名(张三)',
-      '注入金额': 10000,
+      '注入数值': 10000,
       '提炼类型': '企业项目',
       '成本档位': 'T1',
       '操作员': '当前登入账号(可选)'
@@ -1141,7 +1184,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       '类别': row.categoryStr,
       '采集主体': row.collectorStr,
       '业务日期': row.businessDateStr,
-      '注入金额': row.rawAmountStr,
+      '注入数值': row.rawAmountStr,
       '失败原因': row.reason
     }));
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
@@ -1159,7 +1202,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       '类别': row.categoryStr,
       '采集主体': row.collectorStr,
       '业务日期': row.businessDateStr,
-      '注入金额': row.rawAmountStr,
+      '注入数值': row.rawAmountStr,
       '失败原因': row.reason
     }));
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
@@ -1213,7 +1256,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       // 落库成功后才合并本地 logs，只写一条汇总系统日志
       onLogSubmit(logsToSubmit, { isImport: true });
       setIsPersistingImport(false);
-      toast.success(`成功导入 ${logsToSubmit.length} 条确权记录`);
+      toast.success(`成功导入 ${logsToSubmit.length} 条待确权记录`);
       setPendingImportLogs([]);
       setFailedImportRows([]);
       setImportBatchId('');
@@ -1260,6 +1303,27 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         return;
       }
 
+      interface StagingRow {
+        lineNum: number;
+        miningId: string;
+        category: RefineCategory;
+        categoryStr: string;
+        rawAmount: number;
+        businessDateStr: string;
+        collectorStr: string;
+        collector: User;
+        resource: MiningResource;
+        refineType: RefineType;
+        tierStr: string;
+        operatorIdToUse: string;
+        cWeight: number;
+        b2Weight: number;
+        isHighExpert: boolean;
+        mStr: string;
+        logPayload: ValueCreationLog;
+      }
+
+      const stagingRows: StagingRow[] = [];
       const logsToSubmit: ValueCreationLog[] = [];
       const failedRows: FailedImportRow[] = [];
       const seenImportKeys = new Set<string>();
@@ -1268,28 +1332,25 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       const resourceOccupancyMap = new Map<string, {
         revenueCapacity: number;
         currentRevenueOccupancy: number;
-        accumulatedNewRevenue: number;
-        accumulatedUnroundedRevenue: number;
+        accumulatedRawRevenue: number;
         valueCapacity: number;
         currentValueOccupancy: number;
-        accumulatedNewValue: number;
-        accumulatedUnroundedValue: number;
+        accumulatedRawValue: number;
       }>();
 
       resources.forEach(r => {
         const quads = calculateSingleResourceQuadrants(r, logs);
         resourceOccupancyMap.set(r.id, {
-          revenueCapacity: quads.revenue.capacity,
-          currentRevenueOccupancy: quads.revenue.confirmed + quads.revenue.pending,
-          accumulatedNewRevenue: 0,
-          accumulatedUnroundedRevenue: 0,
-          valueCapacity: quads.value.capacity,
-          currentValueOccupancy: quads.value.confirmed + quads.value.pending,
-          accumulatedNewValue: 0,
-          accumulatedUnroundedValue: 0
+          revenueCapacity: Math.round(quads.revenue.capacity),
+          currentRevenueOccupancy: Math.round(quads.revenue.confirmed + quads.revenue.pending),
+          accumulatedRawRevenue: 0,
+          valueCapacity: Math.round(quads.value.capacity),
+          currentValueOccupancy: Math.round(quads.value.confirmed + quads.value.pending),
+          accumulatedRawValue: 0
         });
       });
 
+      // 阶段 1：逐行前置校验 (不含组级额度)
       let lineNum = 1;
       for (const row of rows) {
         lineNum++;
@@ -1307,7 +1368,8 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         const categoryStr = cleanedRow['类别']?.toString().trim() || '';
         const rawBusinessDateInput = cleanedRow['业务日期'];
         const collectorStr = cleanedRow['采集主体']?.toString().trim() || '';
-        const rawAmountVal = cleanedRow['注入金额'];
+        // 兼容顺序：注入数值 → 注入金额 → 输入数值 → 输入金额
+        const rawAmountVal = cleanedRow['注入数值'] ?? cleanedRow['注入金额'] ?? cleanedRow['输入数值'] ?? cleanedRow['输入金额'];
         const rawAmount = parseFloat(rawAmountVal);
         const refineTypeStr = cleanedRow['提炼类型']?.toString().trim();
         const tierStr = cleanedRow['成本档位']?.toString().trim() || 'T1';
@@ -1322,7 +1384,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         }
         if (!collectorStr) missingFields.push('采集主体');
         if (rawAmountVal === undefined || rawAmountVal === null || String(rawAmountVal).trim() === '' || isNaN(rawAmount) || rawAmount <= 0) {
-          missingFields.push('注入金额(须>0)');
+          missingFields.push('注入数值(须>0)');
         }
 
         const { dateObj: bDate, formattedStr: businessDateStr } = parseBusinessDateStr(rawBusinessDateInput);
@@ -1334,7 +1396,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             categoryStr: categoryStr || '-',
             businessDateStr: businessDateStr || '-',
             collectorStr: collectorStr || '-',
-            rawAmountStr: isNaN(rawAmount) ? (rawAmountVal?.toString() || '-') : String(rawAmount),
+            rawAmountStr: isNaN(rawAmount) ? (rawAmountVal?.toString() || '-') : formatMoney(Math.round(rawAmount)),
             reason: `缺少必填项: ${missingFields.join('、')}`
           });
           continue;
@@ -1347,7 +1409,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             categoryStr,
             businessDateStr: businessDateStr || String(rawBusinessDateInput),
             collectorStr,
-            rawAmountStr: String(rawAmount),
+            rawAmountStr: isNaN(rawAmount) ? '-' : formatMoney(Math.round(rawAmount)),
             reason: `业务日期格式无效`
           });
           continue;
@@ -1361,7 +1423,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             categoryStr,
             businessDateStr,
             collectorStr,
-            rawAmountStr: String(rawAmount),
+            rawAmountStr: isNaN(rawAmount) ? '-' : formatMoney(Math.round(rawAmount)),
             reason: `找不到矿山 [${miningId}]`
           });
           continue;
@@ -1373,7 +1435,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             categoryStr,
             businessDateStr,
             collectorStr,
-            rawAmountStr: String(rawAmount),
+            rawAmountStr: isNaN(rawAmount) ? '-' : formatMoney(Math.round(rawAmount)),
             reason: `矿山 [${miningId}] 状态不可提报`
           });
           continue;
@@ -1387,7 +1449,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             categoryStr,
             businessDateStr,
             collectorStr,
-            rawAmountStr: String(rawAmount),
+            rawAmountStr: isNaN(rawAmount) ? '-' : formatMoney(Math.round(rawAmount)),
             reason: `矿山 [${miningId}] 处于${status}状态`
           });
           continue;
@@ -1401,7 +1463,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             categoryStr,
             businessDateStr,
             collectorStr,
-            rawAmountStr: String(rawAmount),
+            rawAmountStr: isNaN(rawAmount) ? '-' : formatMoney(Math.round(rawAmount)),
             reason: `类别必须是 收款 或 产值`
           });
           continue;
@@ -1414,7 +1476,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             categoryStr,
             businessDateStr,
             collectorStr,
-            rawAmountStr: String(rawAmount),
+            rawAmountStr: isNaN(rawAmount) ? '-' : formatMoney(Math.round(rawAmount)),
             reason: `矿山产出已满，无法继续提报产值`
           });
           continue;
@@ -1435,7 +1497,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             categoryStr,
             businessDateStr,
             collectorStr,
-            rawAmountStr: String(rawAmount),
+            rawAmountStr: isNaN(rawAmount) ? '-' : formatMoney(Math.round(rawAmount)),
             reason: `找不到采集主体 [${collectorStr}]`
           });
           continue;
@@ -1449,7 +1511,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 categoryStr,
                 businessDateStr,
                 collectorStr,
-                rawAmountStr: String(rawAmount),
+                rawAmountStr: isNaN(rawAmount) ? '-' : formatMoney(Math.round(rawAmount)),
                 reason: `采集主体不具备该矿山的收款权限`
               });
               continue;
@@ -1462,7 +1524,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 categoryStr,
                 businessDateStr,
                 collectorStr,
-                rawAmountStr: String(rawAmount),
+                rawAmountStr: isNaN(rawAmount) ? '-' : formatMoney(Math.round(rawAmount)),
                 reason: `采集主体不具备该矿山的产值权限`
               });
               continue;
@@ -1472,8 +1534,8 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         const bDateObj = bDate || new Date(businessDateStr);
         const mStr = `${bDateObj.getFullYear()}-${String(bDateObj.getMonth() + 1).padStart(2, '0')}`;
 
-        // 防重校验：同一矿山编号 + 同一采集主体 + 同一业务月份 + 同一注入积分（原始金额）
-        const dedupeKey = `${miningId}_${collector.id}_${mStr}_${rawAmount}`;
+        // 防重校验：同一矿山编号 + 同一采集主体 + 同一业务月份 + 同一注入积分（原始数值）
+        const dedupeKey = `${miningId}_${collector.id}_${mStr}_${Math.round(rawAmount)}`;
         if (seenImportKeys.has(dedupeKey)) {
           failedRows.push({
             lineNum,
@@ -1481,7 +1543,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             categoryStr,
             businessDateStr,
             collectorStr,
-            rawAmountStr: String(rawAmount),
+            rawAmountStr: isNaN(rawAmount) ? '-' : formatMoney(Math.round(rawAmount)),
             reason: '重复记录'
           });
           continue;
@@ -1539,12 +1601,12 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         const b2Weight = hedgeInfo.b2Weight;
 
         const isHighExpert = isValueExpert(collector) || isRevenueExpert(collector);
-        const finalAmount = category === RefineCategory.Revenue ? Math.round(rawAmount * 0.933) : rawAmount;
+        const initialNetAmount = importNetAmount(rawAmount, category);
         let pPre = 0;
         if (category === RefineCategory.Value) {
-            pPre = calculateT1PlusValue(finalAmount, !!isHighExpert, tierStr as any, cWeight, b2Weight);
+            pPre = calculateT1PlusValue(initialNetAmount, !!isHighExpert, tierStr as any, cWeight, b2Weight);
         } else {
-            pPre = calculateT1PlusRevenue(finalAmount, !!isHighExpert, tierStr as any, cWeight);
+            pPre = calculateT1PlusRevenue(initialNetAmount, !!isHighExpert, tierStr as any, cWeight);
         }
         
         const currentCap = getCurrentValueCapacity(resource) || 0;
@@ -1565,104 +1627,175 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         if (!miningTotalMap.has(miningId)) {
             miningTotalMap.set(miningId, { [RefineCategory.Value]: 0, [RefineCategory.Revenue]: 0 });
         }
-        miningTotalMap.get(miningId)![category] += rawAmount;
+        miningTotalMap.get(miningId)![category] += Math.round(rawAmount);
 
         if (category === RefineCategory.Value && refineType === RefineType.Outsourced && resource.monthlyQuota !== undefined) {
             const monthlyUsed = resource.monthlyUsed || 0;
-            if (monthlyUsed + miningTotalMap.get(miningId)![category] > resource.monthlyQuota + 0.01) {
+            if (monthlyUsed + miningTotalMap.get(miningId)![category] > Math.round(resource.monthlyQuota)) {
                 failedRows.push({
                   lineNum,
                   miningId,
                   categoryStr,
                   businessDateStr,
                   collectorStr,
-                  rawAmountStr: String(rawAmount),
+                  rawAmountStr: isNaN(rawAmount) ? '-' : formatMoney(Math.round(rawAmount)),
                   reason: `矿山 [${miningId}] 本月外派额度不足`
                 });
-                miningTotalMap.get(miningId)![category] -= rawAmount;
+                miningTotalMap.get(miningId)![category] -= Math.round(rawAmount);
                 continue;
             }
         }
 
+        const logPayload: ValueCreationLog = {
+          id: `${category === RefineCategory.Revenue ? 'J' : 'M'}${(Date.now() % 100000000 + lineNum).toString().padStart(8, '0')}`,
+          batchId: newBatchId,
+          miningId: miningId,
+          rankId: operatorIdToUse,
+          recordedCollectorId: collector.id,
+          category: category,
+          type: refineType,
+          costCategory: tierStr as any,
+          amount: initialNetAmount,
+          rawAmount: rawAmount,
+          dynamicCost: 0,
+          cClassCost: getCClassCostForCollector(collector.id),
+          cClassRatio: cWeight,
+          b2ClassRatio: b2Weight,
+          netValue: netValue,
+          timestamp: Date.now(),
+          status: AuditStatus.Pending,
+          confirmationType: (category === RefineCategory.Value ? '联动确权' : '收款确权') as any,
+          month: mStr,
+          businessDate: businessDateStr
+        };
+
+        stagingRows.push({
+          lineNum,
+          miningId,
+          category,
+          categoryStr,
+          rawAmount,
+          businessDateStr,
+          collectorStr,
+          collector,
+          resource,
+          refineType,
+          tierStr,
+          operatorIdToUse,
+          cWeight,
+          b2Weight,
+          isHighExpert,
+          mStr,
+          logPayload
+        });
+      }
+
+      // 阶段 2：按组额度预检（AB.5.1～AB.5.5）与残差归集（AB.5.6）
+      // 1. 分组维度：仅按“矿山编号 + 轨（收款/产值）”，不区分采集主体、业务月份
+      const groupMap = new Map<string, StagingRow[]>();
+      for (const row of stagingRows) {
+        const gKey = importGroupKey(row.miningId, row.category);
+        if (!groupMap.has(gKey)) {
+          groupMap.set(gKey, []);
+        }
+        groupMap.get(gKey)!.push(row);
+      }
+
+      for (const [, groupRows] of groupMap.entries()) {
+        const firstRow = groupRows[0];
+        const { miningId, category } = firstRow;
+        const isRev = category === RefineCategory.Revenue;
         const occInfo = resourceOccupancyMap.get(miningId);
+
+        const currOcc = occInfo ? (isRev ? occInfo.currentRevenueOccupancy : occInfo.currentValueOccupancy) : 0;
+        const cap = occInfo ? (isRev ? occInfo.revenueCapacity : occInfo.valueCapacity) : -1;
+        
+        // 2. 对组内本次导入的原始数值（rawAmount）先求和，得到该矿山该轨的本次导入合计
+        const batchRawSum = groupRows.reduce((sum, r) => sum + r.rawAmount, 0);
+        // 3. 将合计数值进行统一折算取整，得到本次导入的组净值 (收款*0.933，产值1:1，禁止逐笔取整后累加)
+        const batchNet = importBatchNetFromRawSum(batchRawSum, isRev);
+
+        // 检查 1：当前是否已超限
+        if (importAlreadyAtOrOverLimit(currOcc, cap)) {
+          // 整组失败，每一行进入 failedRows
+          for (const r of groupRows) {
+            failedRows.push({
+              lineNum: r.lineNum,
+              miningId: r.miningId,
+              categoryStr: r.categoryStr,
+              businessDateStr: r.businessDateStr,
+              collectorStr: r.collectorStr,
+              rawAmountStr: formatMoney(Math.round(r.rawAmount)),
+              reason: '该矿已超限，禁止导入'
+            });
+            if (miningTotalMap.has(miningId)) {
+              miningTotalMap.get(miningId)![category] -= Math.round(r.rawAmount);
+            }
+          }
+          continue;
+        }
+
+        // 检查 2：导入后是否超过矿山上限 (净值 ≤ 上限 → 通过；> 上限 → 超限拦截)
+        if (importGroupQuotaExceeded(currOcc, batchNet, cap)) {
+          const postBatchOcc = importGroupPostOccupancy(currOcc, batchNet);
+          const reason = formatImportQuotaExceededReason(currOcc, postBatchOcc, cap, batchNet);
+          // 整组失败，每一行进入 failedRows
+          for (const r of groupRows) {
+            failedRows.push({
+              lineNum: r.lineNum,
+              miningId: r.miningId,
+              categoryStr: r.categoryStr,
+              businessDateStr: r.businessDateStr,
+              collectorStr: r.collectorStr,
+              rawAmountStr: formatMoney(Math.round(r.rawAmount)),
+              reason
+            });
+            if (miningTotalMap.has(miningId)) {
+              miningTotalMap.get(miningId)![category] -= Math.round(r.rawAmount);
+            }
+          }
+          continue;
+        }
+
+        // 阶段 2 校验通过：更新组内累计占用
         if (occInfo) {
-          const isRev = category === RefineCategory.Revenue;
-          const currOcc = isRev ? occInfo.currentRevenueOccupancy : occInfo.currentValueOccupancy;
-          const cap = isRev ? occInfo.revenueCapacity : occInfo.valueCapacity;
-          const accumUnrounded = isRev ? occInfo.accumulatedUnroundedRevenue : occInfo.accumulatedUnroundedValue;
-          const accumRounded = isRev ? occInfo.accumulatedNewRevenue : occInfo.accumulatedNewValue;
-          
-          // 额度校验时，使用未取整净值与上限比较（收款/产值：rawAmount × 0.933 与初上限比较）
-          const rowUnrounded = rawAmount * 0.933;
-          const rowRounded = finalAmount;
-
-          if (currOcc >= cap && cap >= 0) {
-            failedRows.push({
-              lineNum,
-              miningId,
-              categoryStr,
-              businessDateStr,
-              collectorStr,
-              rawAmountStr: String(rawAmount),
-              reason: `该矿已超限，禁止导入`
-            });
-            if (miningTotalMap.has(miningId)) {
-              miningTotalMap.get(miningId)![category] -= rawAmount;
-            }
-            continue;
-          }
-
-          // 若未取整净值 ≤ 上限，则允许导入
-          if (currOcc + accumUnrounded + rowUnrounded > cap + 0.001) {
-            const postBatchUnrounded = currOcc + accumUnrounded + rowUnrounded;
-            const postBatchRounded = currOcc + accumRounded + rowRounded;
-            failedRows.push({
-              lineNum,
-              miningId,
-              categoryStr,
-              businessDateStr,
-              collectorStr,
-              rawAmountStr: String(rawAmount),
-              reason: `占用将超过初限：当前 ${formatMoney(currOcc)}，本批后未取整 ${postBatchUnrounded.toFixed(2)} (取整后 ${formatMoney(postBatchRounded)})，上限 ${formatMoney(cap)}`
-            });
-            if (miningTotalMap.has(miningId)) {
-              miningTotalMap.get(miningId)![category] -= rawAmount;
-            }
-            continue;
-          }
-
           if (isRev) {
-            occInfo.accumulatedUnroundedRevenue += rowUnrounded;
-            occInfo.accumulatedNewRevenue += rowRounded;
+            occInfo.accumulatedRawRevenue += batchRawSum;
+            occInfo.currentRevenueOccupancy += batchNet;
           } else {
-            occInfo.accumulatedUnroundedValue += rowUnrounded;
-            occInfo.accumulatedNewValue += rowRounded;
+            occInfo.accumulatedRawValue += batchRawSum;
+            occInfo.currentValueOccupancy += batchNet;
           }
         }
 
-        logsToSubmit.push({
-            id: `${category === RefineCategory.Revenue ? 'J' : 'M'}${(Date.now() % 100000000 + lineNum).toString().padStart(8, '0')}`,
-            batchId: newBatchId,
-            miningId: miningId,
-            rankId: operatorIdToUse,
-            recordedCollectorId: collector.id,
-            category: category,
-            type: refineType,
-            costCategory: tierStr as any,
-            amount: finalAmount,
-            rawAmount: rawAmount,
-            dynamicCost: 0,
-            cClassCost: getCClassCostForCollector(collector.id),
-            cClassRatio: cWeight,
-            b2ClassRatio: b2Weight,
-            netValue: netValue,
-            timestamp: Date.now(),
-            status: AuditStatus.Pending,
-            confirmationType: (category === RefineCategory.Value ? '联动确权' : '收款确权') as any,
-            month: mStr,
-            businessDate: businessDateStr
-        });
+        // 残差归集（AB.5.6）：组内行金额之和必须等于组净值，末行吸收残差
+        const rawAmounts = groupRows.map(r => r.rawAmount);
+        const allocatedAmounts = allocateImportRowAmounts(rawAmounts, isRev);
+
+        for (let idx = 0; idx < groupRows.length; idx++) {
+          const r = groupRows[idx];
+          const finalAmount = allocatedAmounts[idx];
+
+          // 重新计算与 finalAmount 对应的确权指标与 netValue
+          let pPre = 0;
+          if (r.category === RefineCategory.Value) {
+            pPre = calculateT1PlusValue(finalAmount, !!r.isHighExpert, r.tierStr as any, r.cWeight, r.b2Weight);
+          } else {
+            pPre = calculateT1PlusRevenue(finalAmount, !!r.isHighExpert, r.tierStr as any, r.cWeight);
+          }
+          const currentCap = getCurrentValueCapacity(r.resource) || 0;
+          const kFactor = (r.category === RefineCategory.Value && pPre > currentCap)
+             ? (currentCap / pPre)
+             : 1.0;
+          const netValue = pPre * kFactor;
+
+          r.logPayload.amount = finalAmount;
+          r.logPayload.netValue = netValue;
+          logsToSubmit.push(r.logPayload);
+        }
       }
+
+      failedRows.sort((a, b) => a.lineNum - b.lineNum);
 
       setFailedImportRows(failedRows);
       setPendingImportLogs(logsToSubmit);
@@ -1680,6 +1813,10 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   };
 
   const exportToExcel = () => {
+    if (!canExport) {
+      toast.error(EXPORT_DISABLED_TOOLTIP);
+      return;
+    }
 
     const dataToExport = filteredLogs.map(log => {
       const collector = managedUsers.find(u => u.id === log.recordedCollectorId);
@@ -1722,9 +1859,9 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         '经营单元': labelBusinessUnit(operator?.center),
         '采集主体': formatCollectorDisplay(log.recordedCollectorId, managedUsers),
         '确权类型': log.confirmationType || '手动确权',
-        '输入金额': getRawInputAmount(log),
+        '输入数值': getRawInputAmount(log),
         '注入积分': displayInjection,
-        'C权': cWeight.toFixed(4),
+        'C权': cWeight < 0.8 ? `${cWeight.toFixed(4)} (低)` : cWeight.toFixed(4),
         'B2权': log.category === RefineCategory.Revenue ? '—' : b2Weight.toFixed(4),
         '产兑包': valuePackageDisplay,
         '收款包': revenuePackageDisplay,
@@ -2166,7 +2303,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                               ? { 
                                   ...sc, 
                                   rawAmount: val, 
-                                  amount: isRev ? Math.round(val * 0.933) : val 
+                                  amount: importNetAmount(val, isRev) 
                                 } 
                               : sc
                           ));
@@ -2431,8 +2568,13 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             </button>
             <button 
               onClick={exportToExcel}
-
-              className="px-3 py-1 text-[10px] font-bold bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-sm hover:bg-emerald-100 transition-colors flex items-center"
+              disabled={!canExport}
+              title={getExportButtonTitle(canExport, '导出 EXCEL')}
+              className={`px-3 py-1 text-[10px] font-bold border rounded-sm transition-colors flex items-center ${
+                !canExport
+                  ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+                  : 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100 cursor-pointer'
+              }`}
             >
               <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
               导出 EXCEL
@@ -2460,7 +2602,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
              <div className="flex bg-slate-200 p-0.5 rounded-sm">
               <button onClick={() => setRecordTab('revenue')} title="查看收款确权记录" className={`px-4 py-1 text-[10px] font-bold rounded-sm ${recordTab === 'revenue' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>收款确权</button>
               <button onClick={() => setRecordTab('linkedPending')} title="查看待联动确权记录" className={`px-4 py-1 text-[10px] font-bold rounded-sm ${recordTab === 'linkedPending' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>联动确权</button>
-              <button onClick={() => setRecordTab('history')} title="查看已完成确权的记录" className={`px-4 py-1 text-[10px] font-bold rounded-sm ${recordTab === 'history' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>确权记录</button>
+              <button onClick={() => setRecordTab('confirmed')} title="查看已完成确权的记录" className={`px-4 py-1 text-[10px] font-bold rounded-sm ${recordTab === 'confirmed' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>确权记录</button>
             </div>
           </div>
         }
@@ -2629,7 +2771,9 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 <div className="bg-slate-50 p-2 rounded-lg grid grid-cols-2 gap-2 text-[10px]">
                   <div>
                     <span className="text-slate-400">C权 / B2权: </span>
-                    <span className="font-mono font-bold text-slate-800">{cWeight.toFixed(4)} / {isRevenueLine ? '—' : b2Weight.toFixed(4)}</span>
+                    <span className={`font-mono font-bold ${cWeight < 0.8 ? 'text-amber-800 bg-amber-100 px-1 rounded' : 'text-slate-800'}`} title={cWeight < 0.8 ? "当前 C 权低于 0.8，请确认风险。" : undefined}>
+                      {cWeight.toFixed(4)}{cWeight < 0.8 ? ' (低)' : ''} / {isRevenueLine ? '—' : b2Weight.toFixed(4)}
+                    </span>
                   </div>
                   <div className="text-right">
                     <span className="text-slate-400">确权类型: </span>
@@ -2672,7 +2816,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 <th className="px-2 py-4">{TERMINOLOGY.BUSINESS_UNIT}</th>
                 <th className="px-2 py-4">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
                 <th className="px-2 py-4">确权类型</th>
-                <th className="px-2 py-4 text-right">输入金额</th>
+                <th className="px-2 py-4 text-right">输入数值</th>
                 <th className="px-2 py-4 text-right">注入积分</th>
                 <th className="px-2 py-4 text-right">C权</th>
                 <th className="px-2 py-4 text-right">B2权</th>
@@ -2744,8 +2888,15 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     </td>
                     <td className="px-2 py-4 text-right font-mono font-bold text-slate-700">{formatMoney(getRawInputAmount(log))}</td>
                     <td className="px-2 py-4 text-right font-mono font-bold text-slate-700">{formatMoney(displayInjection)}</td>
-                    <td className="px-2 py-4 text-right font-mono font-black text-slate-900 bg-slate-50/50">
-                      {cWeight.toFixed(4)}
+                    <td className={`px-2 py-4 text-right font-mono font-black ${cWeight < 0.8 ? 'bg-amber-100/60 text-amber-900' : 'text-slate-900 bg-slate-50/50'}`} title={cWeight < 0.8 ? "当前 C 权低于 0.8，请确认风险。" : undefined}>
+                      <span className="inline-flex items-center justify-end gap-1">
+                        {cWeight.toFixed(4)}
+                        {cWeight < 0.8 && (
+                          <span className="px-1 py-0.2 text-[9px] bg-amber-500 text-white rounded font-black shadow-sm" title="当前 C 权低于 0.8，请确认风险。">
+                            ⚠️ 低
+                          </span>
+                        )}
+                      </span>
                     </td>
                     <td className="px-2 py-4 text-right font-mono font-black text-slate-900 bg-slate-50/50">
                       {isRevenueLine ? '—' : b2Weight.toFixed(4)}
@@ -2897,7 +3048,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                       <th className="p-2 font-bold text-slate-600 w-16">类别</th>
                       <th className="p-2 font-bold text-slate-600 w-24">采集主体</th>
                       <th className="p-2 font-bold text-slate-600 w-24">业务日期</th>
-                      <th className="p-2 font-bold text-slate-600 w-20">注入金额</th>
+                      <th className="p-2 font-bold text-slate-600 w-20">输入数值</th>
                       <th className="p-2 font-bold text-slate-600">失败原因</th>
                     </tr>
                   </thead>

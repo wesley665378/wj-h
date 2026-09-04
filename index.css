@@ -30,6 +30,23 @@ body {
   font-size: 13px !important;
 }
 
+/* Global Border & Divider Enhancement for High Contrast & Readability */
+table, th, td, tr {
+  border-color: #cbd5e1 !important;
+}
+
+.divide-y > * + * {
+  border-color: #cbd5e1 !important;
+}
+
+.border-slate-100, .border-gray-100, .border-slate-200, .border-gray-200, .border-slate-50, .border-gray-50 {
+  border-color: #cbd5e1 !important;
+}
+
+hr {
+  border-color: #cbd5e1 !important;
+}
+
 /* Standard Modern Scrollbars */
 ::-webkit-scrollbar {
   width: 10px;
@@ -41,20 +58,20 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #e2e8f0;
+  background: #cbd5e1;
   border-radius: 20px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #cbd5e1;
+  background: #94a3b8;
 }
 
 /* For Firefox */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #e2e8f0 transparent;
+  scrollbar-color: #cbd5e1 transparent;
 }
 
 @layer components {
@@ -90,3 +107,4 @@ body {
     background: #94a3b8;
   }
 }
+

@@ -4,11 +4,13 @@ import {
   RefineCategory,
   User,
   ValueCreationLog,
+  Role,
 } from '../../types';
 import { calculateHistoricalNetValue, getUserSalaryByMonth } from './business';
-import { resolveLogBusinessMonth } from './dateUtils';
+import { resolveLogBusinessMonth, isLogInFilter } from './dateUtils';
 import { isNonEffectiveHoursEffective, isSalaryActiveForMonth } from './employmentStatus';
 import { getNonEffectiveHoursDeduction } from './nonEffectiveHours';
+import { centerMatch } from './centerScope';
 
 export interface UserMetricsResult {
   revenuePackage: number;
@@ -21,7 +23,156 @@ export interface UserMetricsResult {
   nonEffectiveDeduction: number;
 }
 
-import { Role } from '../../types';
+function findUserById(users: User[], id?: string): User | undefined {
+  if (!id) return undefined;
+  const cleanId = String(id).trim();
+  if (!cleanId) return undefined;
+  return users.find(u =>
+    u && (
+      String(u.id).trim() === cleanId ||
+      (u.userId && String(u.userId).trim() === cleanId) ||
+      (u.name && String(u.name).trim() === cleanId)
+    )
+  );
+}
+
+/**
+ * 解析流水的归属经营单元中心名称
+ * 优先采集人，其次提报人
+ */
+export function resolveLogBusinessUnitCenter(
+  log: ValueCreationLog,
+  users: User[]
+): string | undefined {
+  // 1. 优先根据采集人判断归属单元
+  const collector = findUserById(users, log.recordedCollectorId);
+  if (collector?.center) return collector.center;
+
+  // 2. 其次根据提报人 (rankId / operatorId) 判断归属单元
+  const submitter = findUserById(users, log.rankId) || findUserById(users, (log as any).operatorId);
+  if (submitter?.center) return submitter.center;
+
+  // 3. 流水本身附带的 center / businessUnit 字段
+  if ((log as any).center) return (log as any).center;
+  if ((log as any).businessUnit) return (log as any).businessUnit;
+
+  return undefined;
+}
+
+/**
+ * 判断用户是否为指定单元在岗采集主体（含款专/产专；排除 Admin/系统管理员/离职/无 center）
+ */
+export function isUnitActiveCollector(
+  u: User,
+  unitCenter?: string,
+  month?: string
+): boolean {
+  if (!u) return false;
+  if (!u.center || !u.center.trim()) return false;
+  if (u.center === '统筹水库' || u.center === '公司' || u.center === '总部') return false;
+
+  // 必须匹配目标单元
+  if (unitCenter && !centerMatch(u.center, unitCenter)) return false;
+
+  // 排除 Admin 与系统管理员
+  if (u.role === Role.Admin || (u.role as string) === 'admin') return false;
+  const cat = u.category || '';
+  if (cat === '系统管理员' || cat.includes('系统管理员')) return false;
+  if (cat.includes('管理员') && !cat.includes('款专') && !cat.includes('产专')) return false;
+
+  // 排除 NPC 与产值代录
+  const name = u.name || '';
+  if (cat === 'NPC' || cat.includes('NPC') || u.role === Role.NPC || u.role === Role.npcxie || name === 'NPC' || name === 'npcxie') return false;
+  if (cat.includes('产值代录') || name.includes('产值代录')) return false;
+
+  // 排除离职
+  if (u.status === '离职' || u.userStatus === 'inactive') return false;
+  if (month && !isSalaryActiveForMonth(u, month)) return false;
+
+  // 必须为采集主体（含款专/产专）
+  const isCollector =
+    cat.includes('款专') ||
+    cat.includes('产专') ||
+    u.role === Role.RevenueCollector ||
+    u.role === Role.ValueCollector ||
+    u.role === Role.Collector;
+
+  return isCollector;
+}
+
+function isStatusMatch(status: any, filter: AuditStatus[]): boolean {
+  if (!status) return false;
+  if (filter.includes(status as AuditStatus)) return true;
+  for (const s of filter) {
+    if (s === AuditStatus.Confirmed && (status === '已确权' || status === 'Confirmed' || status === 'confirmed')) return true;
+    if (s === AuditStatus.Approved && (status === '入库' || status === 'Approved' || status === 'approved')) return true;
+    if (s === AuditStatus.Pending && (status === '待确权' || status === 'Pending' || status === 'pending')) return true;
+  }
+  return false;
+}
+
+/**
+ * 计算单个用户应分摊的 D 类消耗
+ * 规则：
+ * 1. 仅摊给本经营单元内采集主体（排除 Admin/系统管理员/离职/无 center）
+ * 2. ΣD 按流水归属经营单元分组（采集人/提报人 center，centerMatch）
+ * 3. 分母 = 该单元在岗采集主体人数
+ * 4. 每人 dCost = 本单元ΣD / 本单元采集主体人数
+ */
+export function calculateUserDCost(
+  user: User,
+  logs: ValueCreationLog[],
+  users: User[],
+  month: string,
+  statusFilter: AuditStatus[] = [AuditStatus.Confirmed, AuditStatus.Approved],
+  startDate?: string,
+  endDate?: string
+): number {
+  if (!user || !user.center) return 0;
+
+  // 仅摊给本经营单元内采集主体：非在岗采集主体分摊为 0
+  if (!isUnitActiveCollector(user, user.center, month)) {
+    return 0;
+  }
+
+  // 筛选该月份/时间段内所有 D 类流水
+  const dLogs = logs.filter(l => {
+    if (l.costCategory !== 'D') return false;
+    if (!isStatusMatch(l.status, statusFilter)) return false;
+    if (startDate || endDate) {
+      return isLogInFilter(l, month, startDate, endDate);
+    }
+    return resolveLogBusinessMonth(l) === month;
+  });
+
+  // 筛选归属于本经营单元的 D 类流水（采集人/提报人 center，centerMatch）
+  const unitDLogs = dLogs.filter(l => {
+    const logCenter = resolveLogBusinessUnitCenter(l, users);
+    return logCenter ? centerMatch(logCenter, user.center) : false;
+  });
+
+  // 本单元 ΣD
+  const totalUnitD = unitDLogs.reduce((acc, l) => acc + (l.dynamicCost || 0), 0);
+  if (totalUnitD <= 0) return 0;
+
+  // 分母 = 该单元在岗采集主体（含款专/产专；排除 Admin/系统管理员/离职/无 center）
+  const seenUserIds = new Set<string>();
+  const unitCollectors = users.filter(u => {
+    if (!u || !u.id) return false;
+    if (seenUserIds.has(u.id)) return false;
+    if (isUnitActiveCollector(u, user.center, month)) {
+      seenUserIds.add(u.id);
+      return true;
+    }
+    return false;
+  });
+
+  const denominator = unitCollectors.length;
+  if (denominator <= 0) return 0;
+
+  // 每人 dCost = 本单元ΣD / 本单元采集主体人数
+  return totalUnitD / denominator;
+}
 
 export function aggregateUserMonthMetrics(
   logs: ValueCreationLog[],
@@ -29,7 +180,9 @@ export function aggregateUserMonthMetrics(
   month: string,
   resources: MiningResource[],
   users: User[],
-  statusFilter: AuditStatus[] // e.g., [AuditStatus.Confirmed, AuditStatus.Approved]
+  statusFilter: AuditStatus[], // e.g., [AuditStatus.Confirmed, AuditStatus.Approved]
+  startDate?: string,
+  endDate?: string
 ): UserMetricsResult {
   let revenuePackage = 0;
   let productionPackage = 0;
@@ -39,17 +192,33 @@ export function aggregateUserMonthMetrics(
   let cCost = 0;
   let nonEffectiveDeduction = 0;
 
+  const isMatchCollector = (l: ValueCreationLog, u: User) => {
+    return (
+      l.recordedCollectorId === u.id ||
+      l.recordedCollectorId === u.userId ||
+      (u.name && l.recordedCollectorId === u.name) ||
+      (!l.recordedCollectorId && (l.rankId === u.id || l.rankId === u.userId || (u.name && l.rankId === u.name)))
+    );
+  };
+
+  const isLogTimeMatch = (l: ValueCreationLog) => {
+    if (startDate || endDate) {
+      return isLogInFilter(l, month, startDate, endDate);
+    }
+    return resolveLogBusinessMonth(l) === month;
+  };
+
   const userLogs = logs.filter(
     (l) =>
-      l.recordedCollectorId === user.id &&
-      resolveLogBusinessMonth(l) === month &&
-      statusFilter.includes(l.status as AuditStatus)
+      isMatchCollector(l, user) &&
+      isLogTimeMatch(l) &&
+      isStatusMatch(l.status, statusFilter)
   );
 
   userLogs.forEach((l) => {
-    if (l.category === RefineCategory.Revenue) {
+    if (l.category === RefineCategory.Revenue || (l.category as string) === '收款') {
       revenuePackage += calculateHistoricalNetValue(l, resources, users);
-    } else if (l.category === RefineCategory.Value) {
+    } else if (l.category === RefineCategory.Value || (l.category as string) === '产值') {
       productionPackage += calculateHistoricalNetValue(l, resources, users);
     }
 
@@ -63,22 +232,14 @@ export function aggregateUserMonthMetrics(
     }
   });
 
-  const dLogsInMonth = logs.filter(
-    (l) =>
-      l.costCategory === 'D' &&
-      resolveLogBusinessMonth(l) === month &&
-      statusFilter.includes(l.status as AuditStatus)
-  );
-  const totalDInMonth = dLogsInMonth.reduce((acc, l) => acc + (l.dynamicCost || 0), 0);
-  const activeCount = users.filter((u) => u.status !== '离职' && u.category !== '系统管理员' && u.role !== Role.Admin).length || 1;
-  const dCost = totalDInMonth / activeCount;
+  const dCost = calculateUserDCost(user, logs, users, month, statusFilter, startDate, endDate);
 
   if (user.category !== 'VP') {
     const nonEffLogs = logs.filter(
       (l) =>
-        (l.recordedCollectorId === user.id || (!l.recordedCollectorId && l.rankId === user.id)) &&
-        resolveLogBusinessMonth(l) === month &&
-        statusFilter.includes(l.status as AuditStatus) &&
+        isMatchCollector(l, user) &&
+        isLogTimeMatch(l) &&
+        isStatusMatch(l.status, statusFilter) &&
         isNonEffectiveHoursEffective(l)
     );
     nonEffLogs.forEach((l) => {
@@ -92,7 +253,8 @@ export function aggregateUserMonthMetrics(
 export interface HistoryRecord {
   month: string;
   totalIncome: number;
-  totalCost: number;
+  costPackage: number; // 成本包
+  totalCost?: number; // 兼容字段
   current: number;
   startDebt: number;
   endDebt: number;
@@ -122,8 +284,8 @@ export function isExpertCategory(category: string): boolean {
   return c.includes('产专') || c.includes('款专');
 }
 
-export function calculateBonusAllocation(
-  targetMonth: string,
+export function calculateBonusAllocationForMonths(
+  months: string[],
   user: User,
   allLogs: ValueCreationLog[], // JZCZ + DTCB merged
   resources: MiningResource[],
@@ -133,7 +295,7 @@ export function calculateBonusAllocation(
   const category = user.category || '';
   const ratio = getExpertRatio(category);
 
-  if (!isExpertCategory(category)) {
+  if (!isExpertCategory(category) || !months || months.length === 0) {
     return {
       current: 0,
       history: 0,
@@ -148,17 +310,17 @@ export function calculateBonusAllocation(
   const isRevenueExpert = category.includes('款专');
   const isProdExpert = category.includes('产专') || category === '经管员高产专';
 
-  const [targetYear, targetMonthStr] = targetMonth.split('-');
-  const targetMonthNum = parseInt(targetMonthStr);
+  const startMonth = months[0];
+  const [startYear, startMonthStr] = startMonth.split('-');
+  const startMonthNum = parseInt(startMonthStr, 10);
 
   let currentRollingDebt = 0;
   const historyRecords: HistoryRecord[] = [];
 
-  // 从 1 月滚动到目标月的前一个月
-  for (let m = 1; m < targetMonthNum; m++) {
-    const ym = `${targetYear}-${String(m).padStart(2, '0')}`;
+  // 从 1 月滚动到查询区间起始月的前一个月（当年内按月滚动，每年 1 月清零）
+  for (let m = 1; m < startMonthNum; m++) {
+    const ym = `${startYear}-${String(m).padStart(2, '0')}`;
     const mRes = aggregateUserMonthMetrics(allLogs, user, ym, resources, users, [status]);
-    let mCurrent = 0;
     let mIncome = 0;
     let mCost = isSalaryActiveForMonth(user, ym) ? getUserSalaryByMonth(user, ym) : 0;
 
@@ -167,13 +329,11 @@ export function calculateBonusAllocation(
       mCost += mRes.b1Cost;
       mCost += mRes.dCost;
       mCost -= mRes.nonEffectiveDeduction;
-      mCurrent = mIncome - mCost;
     } else if (isRevenueExpert) {
       mIncome = mRes.revenuePackage;
       mCost += mRes.aCost;
       mCost += mRes.dCost;
       mCost -= mRes.nonEffectiveDeduction;
-      mCurrent = mIncome - mCost;
     }
     
     const startDebt = currentRollingDebt;
@@ -195,6 +355,7 @@ export function calculateBonusAllocation(
     historyRecords.push({
       month: ym,
       totalIncome: mIncome,
+      costPackage: mCost,
       totalCost: mCost,
       current: mIncome - mCost, // 业绩 (收入-成本)
       startDebt: startDebt,
@@ -205,29 +366,34 @@ export function calculateBonusAllocation(
 
   const history = currentRollingDebt;
 
-  const cRes = aggregateUserMonthMetrics(allLogs, user, targetMonth, resources, users, [status]);
-  
-  let currentIncome = 0;
-  let currentCost = isSalaryActiveForMonth(user, targetMonth) ? getUserSalaryByMonth(user, targetMonth) : 0;
+  // 动态累加多月份的收入与成本包：Cost Package = sum(Salary_i + ACost_i/B1Cost_i + DCost_i - NonEffective_i)
+  let totalIncome = 0;
+  let costPackage = 0;
 
-  if (isProdExpert) {
-    currentIncome = cRes.productionPackage;
-    currentCost += cRes.b1Cost;
-    currentCost += cRes.dCost;
-    currentCost -= cRes.nonEffectiveDeduction;
-  } else if (isRevenueExpert) {
-    currentIncome = cRes.revenuePackage;
-    currentCost += cRes.aCost;
-    currentCost += cRes.dCost;
-    currentCost -= cRes.nonEffectiveDeduction;
+  for (const mStr of months) {
+    const mRes = aggregateUserMonthMetrics(allLogs, user, mStr, resources, users, [status]);
+    const mSalary = isSalaryActiveForMonth(user, mStr) ? getUserSalaryByMonth(user, mStr) : 0;
+    let mIncome = 0;
+    let mMonthCost = mSalary;
+
+    if (isProdExpert) {
+      mIncome = mRes.productionPackage;
+      mMonthCost += mRes.b1Cost + mRes.dCost - mRes.nonEffectiveDeduction;
+    } else if (isRevenueExpert) {
+      mIncome = mRes.revenuePackage;
+      mMonthCost += mRes.aCost + mRes.dCost - mRes.nonEffectiveDeduction;
+    }
+
+    totalIncome += mIncome;
+    costPackage += mMonthCost;
   }
 
-  const currentPerformance = currentIncome - currentCost;
+  const currentPerformance = totalIncome - costPackage;
   
   let newDebt = history;
   let quota = 0;
 
-  // 当月业绩抵扣历史欠产
+  // 区间业绩抵扣起始点前的历史欠产
   if (currentPerformance > 0) {
     const remaining = currentPerformance - history;
     if (remaining >= 0) {
@@ -253,4 +419,22 @@ export function calculateBonusAllocation(
     ratio,
     historyRecords,
   };
+}
+
+export function calculateBonusAllocation(
+  targetMonth: string,
+  user: User,
+  allLogs: ValueCreationLog[], // JZCZ + DTCB merged
+  resources: MiningResource[],
+  users: User[],
+  status: AuditStatus
+): BonusAllocationResult {
+  return calculateBonusAllocationForMonths(
+    [targetMonth],
+    user,
+    allLogs,
+    resources,
+    users,
+    status
+  );
 }

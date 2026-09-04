@@ -138,3 +138,39 @@ export function isDateInRange(targetDate: string, startDate?: string, endDate?: 
   if (endDate && d > endDate) return false;
   return true;
 }
+
+/**
+ * 获取指定起止日期或月份之间所跨越的所有 YYYY-MM 月份数组
+ */
+export function getMonthsBetween(startMonthOrDate: string, endMonthOrDate: string): string[] {
+  if (!startMonthOrDate || !endMonthOrDate) {
+    if (startMonthOrDate) return [startMonthOrDate.slice(0, 7)];
+    if (endMonthOrDate) return [endMonthOrDate.slice(0, 7)];
+    return [getLocalMonthString()];
+  }
+  const startM = startMonthOrDate.slice(0, 7);
+  const endM = endMonthOrDate.slice(0, 7);
+
+  if (startM > endM) return [startM];
+
+  const [startYear, startMonth] = startM.split('-').map(Number);
+  const [endYear, endMonth] = endM.split('-').map(Number);
+
+  if (isNaN(startYear) || isNaN(startMonth) || isNaN(endYear) || isNaN(endMonth)) {
+    return [startM];
+  }
+
+  const months: string[] = [];
+  let curY = startYear;
+  let curM = startMonth;
+
+  while (curY < endYear || (curY === endYear && curM <= endMonth)) {
+    months.push(`${curY}-${String(curM).padStart(2, '0')}`);
+    curM++;
+    if (curM > 12) {
+      curM = 1;
+      curY++;
+    }
+  }
+  return months;
+}

@@ -1,8 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { ValueCreationLog, MiningResource, User, InternalTransaction, TransactionStatus, AuditStatus } from '../types';
+import { ValueCreationLog, MiningResource, User, InternalTransaction, TransactionStatus, AuditStatus, SystemConfig } from '../types';
+import { canExportExcel, getExportButtonTitle, EXPORT_DISABLED_TOOLTIP } from '../src/utils/accessControl';
+import { toast } from 'sonner';
 import { Card } from '../src/components/UI';
 import { BusinessUnitProfitRankingTable } from '../src/components/BusinessUnitProfitRankingTable';
 import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
+import { centerMatch } from '../src/utils/centerScope';
 import { sumConfirmedRevenuePackage, sumIncomeProductionPackage } from '../src/utils/reconcileMiningFromLogs';
 import { getUserSalaryByMonth } from '../src/utils/business';
 import { isSalaryActiveForMonth } from '../src/utils/employmentStatus';
@@ -44,6 +47,7 @@ interface ReservoirProps {
   transactions?: InternalTransaction[];
   units: string[];
   currentUser?: User;
+  systemConfig?: SystemConfig;
 }
 
 interface CenterMetricItem {
@@ -78,11 +82,9 @@ const ReservoirVisualizer: React.FC<{
             <span className="text-[10px] font-bold text-blue-700 tracking-wider">实时流向监测</span>
           </div>
           <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2">
-            统筹水库流向示意图
+            水库流向示意图
           </h3>
-          <p className="text-slate-500 text-xs font-medium leading-relaxed">
-            可视化各经营单元对统筹池的价值贡献（20%流入）与刚性成本补足的资金流动
-          </p>
+
         </div>
 
         <div className="flex items-center gap-2 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60 self-start sm:self-auto">
@@ -118,7 +120,7 @@ const ReservoirVisualizer: React.FC<{
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 bg-blue-50/80 px-2.5 py-1 rounded-lg border border-blue-100">
             <span className="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span>
-            <span className="text-[11px] font-bold text-blue-700">单元流入 (20%收款确权包)</span>
+            <span className="text-[11px] font-bold text-blue-700">单元流入（20%收款包）</span>
           </div>
           <div className="flex items-center gap-2 bg-amber-50/80 px-2.5 py-1 rounded-lg border border-amber-100">
             <span className="w-2 h-2 rounded-full bg-amber-500"></span>
@@ -418,7 +420,8 @@ const ReservoirVisualizer: React.FC<{
   );
 };
 
-const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users, transactions = [], units, currentUser }) => {
+const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users, transactions = [], units, currentUser, systemConfig }) => {
+  const canExport = useMemo(() => canExportExcel(currentUser, systemConfig), [currentUser, systemConfig]);
   const [selectedMonth, setSelectedMonth] = useState(() => getLocalMonthString()); // YYYY-MM
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
@@ -462,11 +465,23 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
       .reduce((acc, l) => acc + (l.dynamicCost || 0), 0);
   }, [filteredLogs]);
 
+  // 经营单元列表：来自完整经营单元列表（jydy / businessUnits 的 center 名），如为空则从 users 中聚合所有中心
+  const completeUnits = useMemo(() => {
+    const set = new Set<string>();
+    (units || []).forEach(u => { if (u) set.add(u); });
+    (users || []).forEach(u => {
+      if (u.center && u.center !== '统筹水库' && u.center !== '公司' && u.center !== '总部') {
+        set.add(u.center);
+      }
+    });
+    return Array.from(set);
+  }, [units, users]);
+
   // 3. 经营单元明细计算
-  const centerMetrics = useMemo(() => units.map(center => {
+  const centerMetrics = useMemo(() => completeUnits.map(center => {
     const centerLogs = filteredLogs.filter(l => {
-      const collector = users.find(u => u.id === l.recordedCollectorId);
-      return collector?.center === center;
+      const collector = users.find(u => u && (u.id === l.recordedCollectorId || u.userId === l.recordedCollectorId || (u.name && u.name === l.recordedCollectorId)));
+      return collector && centerMatch(collector.center, center);
     });
 
     const confirmedRevenuePackage = sumConfirmedRevenuePackage(centerLogs, resources, users);
@@ -475,7 +490,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
     const incomeProductionPackage = sumIncomeProductionPackage(centerLogs, resources, users);
     
     const centerUsers = users.filter(u => 
-      u.center === center && 
+      centerMatch(u.center, center) && 
       u.category !== 'VP' && 
       isSalaryActiveForMonth(u, effectiveMonth)
     );
@@ -490,7 +505,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
       unitSalary,
       unitSupplement
     };
-  }).filter(m => m.confirmedRevenuePackage > 0 || m.unitSalary > 0), [units, filteredLogs, resources, users, effectiveMonth]);
+  }).filter(m => m.confirmedRevenuePackage > 0 || m.unitSalary > 0), [completeUnits, filteredLogs, resources, users, effectiveMonth]);
 
   // 排序与搜索过滤后的单元明细
   const sortedAndFilteredMetrics = useMemo(() => {
@@ -509,6 +524,10 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
   }, [centerMetrics, searchUnit, sortBy]);
 
   const handleExport = () => {
+    if (!canExport) {
+      toast.error(EXPORT_DISABLED_TOOLTIP);
+      return;
+    }
     const data = centerMetrics.map(m => ({
       '经营单元': m.center,
       '已确权收款包': roundMoney(m.confirmedRevenuePackage),
@@ -541,9 +560,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
           <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">
             统筹水库管理
           </h2>
-          <p className="text-slate-500 text-xs font-medium max-w-xl">
-            全盘资产统筹池流向监控、经营单元刚性薪资兜底补足与动态消耗积分监管
-          </p>
+
         </div>
         
         <div className="flex flex-wrap items-center gap-3">
@@ -571,7 +588,13 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
           <button 
             type="button"
             onClick={handleExport}
-            className="px-4 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 transition-all flex items-center shadow-sm cursor-pointer"
+            disabled={!canExport}
+            title={getExportButtonTitle(canExport, '导出明细报表')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center shadow-sm ${
+              !canExport
+                ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+                : 'bg-slate-900 text-white hover:bg-slate-800 cursor-pointer'
+            }`}
           >
             <Download className="w-4 h-4 mr-2" />
             导出明细报表
@@ -615,7 +638,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
         />
       </div>
 
-      {/* 统筹水库流向示意图 (全宽展示) */}
+      {/* 水库流向示意图 (全宽展示) */}
       <ReservoirVisualizer 
         metrics={centerMetrics} 
         totalInflow={platformCoordinationInflow} 
@@ -633,7 +656,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
               </h3>
             </div>
             <p className="text-slate-500 text-xs mt-1">
-              周期: {startDate && endDate ? `${startDate} ~ ${endDate}` : effectiveMonth} · 监测各单元已确权收款包、20%流入统筹池及刚性缺口补足情况
+              周期: {startDate && endDate ? `${startDate} ~ ${endDate}` : effectiveMonth}
             </p>
           </div>
 
@@ -772,10 +795,11 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
 
       {/* 经营单元盈利排名榜 (全宽展示) */}
       <BusinessUnitProfitRankingTable
-        units={units}
+        units={completeUnits}
         selectedMonth={selectedMonth}
         users={users}
-        auditLogs={auditLogs || logs}
+        auditLogs={auditLogs?.length ? auditLogs : logs}
+        logs={logs}
         resources={resources}
         transactions={transactions}
         currentUser={currentUser}
@@ -824,25 +848,25 @@ const StatCard: React.FC<{
   const style = colorStyles[accentColor] || colorStyles.slate;
 
   return (
-    <div className={`p-5 md:p-6 rounded-2xl border ${style.border} bg-white shadow-sm flex flex-col justify-between`}>
+    <div className={`p-3 md:p-3.5 rounded-xl border ${style.border} bg-white shadow-sm flex flex-col justify-between`}>
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2.5">
-            {icon && <div className={`p-2 rounded-xl ${style.iconBg}`}>{icon}</div>}
-            <p className="text-xs font-bold text-slate-500">{label}</p>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            {icon && <div className={`p-1.5 rounded-lg ${style.iconBg}`}>{icon}</div>}
+            <p className="text-[11px] font-bold text-slate-500">{label}</p>
           </div>
           {badge && (
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${style.badgeBg}`}>
+            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${style.badgeBg}`}>
               {badge}
             </span>
           )}
         </div>
-        <h4 className={`text-2xl md:text-3xl font-black tracking-tight font-mono ${style.valueColor}`}>
+        <h4 className={`text-lg md:text-xl font-black tracking-tight font-mono ${style.valueColor}`}>
           {formatMoney(value)}
         </h4>
       </div>
       {subText && (
-        <p className="text-[11px] text-slate-400 font-medium mt-3 pt-2.5 border-t border-slate-100">
+        <p className="text-[10px] text-slate-400 font-medium mt-2 pt-1.5 border-t border-slate-100">
           {subText}
         </p>
       )}

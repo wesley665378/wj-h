@@ -1,5 +1,8 @@
 import { MiningResource, ValueCreationLog } from '../../types';
 import { calculateHedgeCapacitiesAndWeights } from './consumptionHedge';
+import { importNetAmount } from './purification';
+
+export { importNetAmount };
 
 export function getInitialRevenueCapacity(r: MiningResource): number {
   return r ? (r.initialRevenueCapacity || r.revenueCapacity || 0) : 0;
@@ -42,5 +45,23 @@ export function getHedgedRevenueCapacity(r: MiningResource, logs?: ValueCreation
 
 export function getHedgedValueCapacity(r: MiningResource, logs?: ValueCreationLog[]): number {
   return getCurrentValueCapacity(r, logs);
+}
+
+export function mergeMiningResources(existing: MiningResource[], incoming: MiningResource[]): MiningResource[] {
+  if (!incoming || incoming.length === 0) return existing || [];
+  if (!existing || existing.length === 0) return incoming || [];
+
+  const incomingMap = new Map<string, MiningResource>();
+  incoming.forEach(r => {
+    if (r && r.id) {
+      incomingMap.set(r.id, r);
+    }
+  });
+
+  const updatedExisting = existing.map(r => (r && incomingMap.has(r.id)) ? incomingMap.get(r.id)! : r);
+  const existingIds = new Set(existing.map(r => r?.id).filter(Boolean));
+  const trulyNew = incoming.filter(r => r && r.id && !existingIds.has(r.id));
+
+  return [...updatedExisting, ...trulyNew];
 }
 

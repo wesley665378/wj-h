@@ -1,20 +1,28 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Loader2 } from 'lucide-react';
-import { User, MiningResource, RefineType, Role, ResourceStatus, ValueCreationLog, InternalTransaction } from '../types';
-import { isSystemAdmin } from '../src/utils/accessControl';
+import { Loader2, RefreshCw, AlertCircle, CheckCircle2, Download } from 'lucide-react';
+import { User, MiningResource, RefineType, Role, ResourceStatus, ValueCreationLog, InternalTransaction, RefineCategory, SystemConfig } from '../types';
+import { isSystemAdmin, canExportExcel, getExportButtonTitle, EXPORT_DISABLED_TOOLTIP } from '../src/utils/accessControl';
 import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
 import { getLocalMonthString } from '../src/utils/dateUtils';
 import { Card, ProgressBar, Badge, ProjectStatusBadge } from '../src/components/UI';
 import { XLSX, exportWorkbook, buildExcelFilename, EXCEL_IMPORT_MAX_BYTES, EXCEL_IMPORT_MAX_ROWS } from '../src/utils/excelIo';
 import { deriveProjectStatus } from '../src/utils/projectStatus';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
-import { getInitialRevenueCapacity, getInitialValueCapacity } from '../src/utils/miningCapacity';
+import { getInitialRevenueCapacity, getInitialValueCapacity, importNetAmount } from '../src/utils/miningCapacity';
 import { roundMoney, formatMoney } from '../src/utils/formatMoney';
 import { toast } from 'sonner';
 import { deleteMiningResource, toastApiError } from '../src/api';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
+import StandardModal from '../src/components/StandardModal';
 import { MiningResourceQueryView, normalizeMiningId } from '../src/components/MiningResourceQueryView';
+
+interface FailedImportRow {
+  lineNum: number;
+  miningId: string;
+  raw: any;
+  reason: string;
+}
 import { formatProjectStatusLabel, formatRefineTypeLabel } from '../src/utils/statusDisplay';
 import { TERMINOLOGY } from '../src/constants/terminology';
 import { UI_LABELS } from '../src/constants/uiLabels';
@@ -28,9 +36,11 @@ interface ResourceManagementProps {
   transactions?: InternalTransaction[];
   managedUsers?: User[];
   onAddResource: (res: MiningResource) => Promise<any> | void;
+  onAddResources?: (resources: MiningResource[]) => Promise<any> | void;
   onUpdateResource: (res: MiningResource) => Promise<any> | void;
   onDeleteResource: (id: string) => Promise<boolean> | void;
   units: string[];
+  systemConfig?: SystemConfig;
 }
 
 const ResourceManagement: React.FC<ResourceManagementProps> = ({ 
@@ -40,11 +50,14 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
   transactions = [],
   managedUsers = [],
   onAddResource, 
+  onAddResources,
   onUpdateResource, 
   onDeleteResource, 
   user, 
-  units 
+  units,
+  systemConfig
 }) => {
+  const canExport = useMemo(() => canExportExcel(user, systemConfig), [user, systemConfig]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
@@ -60,6 +73,271 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
   const [refineTypeFactors, setRefineTypeFactors] = useState<Record<string, { customRevenueFactor?: number; customValueFactor?: number }>>({});
   const [totalMonths, setTotalMonths] = useState<number>(12);
   const [monthN, setMonthN] = useState<number>(1);
+
+  // 批量导入状态
+  const [importLoading, setImportLoading] = useState(false);
+  const [failedImportRows, setFailedImportRows] = useState<FailedImportRow[]>([]);
+  const [pendingImportResources, setPendingImportResources] = useState<MiningResource[]>([]);
+  const [isImportResultModalOpen, setIsImportResultModalOpen] = useState(false);
+  const [isImportConfirmPending, setIsImportConfirmPending] = useState(false);
+  const [isPersistingImport, setIsPersistingImport] = useState(false);
+  const [importPersistCount, setImportPersistCount] = useState(0);
+  const [persistSeconds, setPersistSeconds] = useState(0);
+
+  // 批量导入落库计时器
+  useEffect(() => {
+    let timer: any = null;
+    if (isPersistingImport) {
+      setPersistSeconds(0);
+      timer = setInterval(() => {
+        setPersistSeconds((prev) => prev + 1);
+      }, 1000);
+    } else {
+      setPersistSeconds(0);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [isPersistingImport]);
+
+  const handleDownloadTemplate = () => {
+    const templateData = [{
+      '矿山编号': 'R001',
+      '提炼类型': RefineType.Enterprise,
+      '款初': 100000,
+      '产初': 100000,
+      '收款指派': units[0] || '默认单元',
+      '产值指派': units[0] || '默认单元',
+      '核算类别': '100%'
+    }];
+    const worksheet = XLSX.utils.json_to_sheet(templateData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, '矿山资源模板');
+    exportWorkbook(workbook, '矿山资源导入模板.xlsx');
+  };
+
+  const handleDownloadFailedRows = () => {
+    if (failedImportRows.length === 0) return;
+    const dataToExport = failedImportRows.map(row => ({
+      '行号': row.lineNum,
+      '矿山编号': row.miningId,
+      '提炼类型': row.raw['提炼类型'] || row.raw['类型'] || '',
+      '款初(原始)': row.raw['款初'] ?? row.raw['收款上限'] ?? row.raw['收款额度'] ?? '',
+      '产初(原始)': row.raw['产初'] ?? row.raw['产值上限'] ?? row.raw['产值额度'] ?? '',
+      '收款指派': row.raw['收款指派'] || row.raw['执行单元'] || '',
+      '产值指派': row.raw['产值指派'] || row.raw['执行单元'] || '',
+      '核算类别': row.raw['核算类别'] || '',
+      '失败原因': row.reason
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "导入失败明细");
+    exportWorkbook(workbook, buildExcelFilename("矿山资源批量导入失败明细"));
+  };
+
+  const handleConfirmExecuteImport = async () => {
+    if (pendingImportResources.length === 0) return;
+    setIsImportResultModalOpen(false);
+    setIsImportConfirmPending(true);
+    setIsPersistingImport(true);
+    setImportPersistCount(pendingImportResources.length);
+
+    try {
+      const saveOperation = async () => {
+        if (onAddResources) {
+          await onAddResources(pendingImportResources);
+        } else {
+          for (const r of pendingImportResources) {
+            await onAddResource(r);
+          }
+        }
+      };
+
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('TIMEOUT_60S')), 60000);
+      });
+
+      await Promise.race([saveOperation(), timeoutPromise]);
+      toast.success(`批量导入完成：新增 ${pendingImportResources.length} 个矿山资源`);
+      setPendingImportResources([]);
+      setFailedImportRows([]);
+    } catch (err: any) {
+      console.error('批量导入矿山资源失败:', err);
+      if (err?.message === 'TIMEOUT_60S' || String(err?.message || '').includes('timeout')) {
+        toast.error('批量导入落库超时（60秒）或网络异常，请刷新核对，切勿重复提交！');
+      } else {
+        toast.error(err?.message || '批量导入落库失败，请重试');
+      }
+    } finally {
+      setIsPersistingImport(false);
+      setIsImportConfirmPending(false);
+    }
+  };
+
+  const handleResourceImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > EXCEL_IMPORT_MAX_BYTES) {
+      showAlert('文件过大，最大支持 10MB');
+      if (e.target) e.target.value = '';
+      return;
+    }
+
+    setImportLoading(true);
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const rawRows = XLSX.utils.sheet_to_json(sheet) as any[];
+
+      if (rawRows.length > EXCEL_IMPORT_MAX_ROWS) {
+        showAlert('导入数据超过 5000 行，请拆分后导入');
+        return;
+      }
+
+      const cleanedRows = rawRows.map(rawRow => {
+        const cleanObj: Record<string, any> = {};
+        Object.keys(rawRow || {}).forEach(key => {
+          const cleanKey = key.replace(/^\uFEFF/, '').trim();
+          cleanObj[cleanKey] = rawRow[key];
+        });
+        return cleanObj;
+      });
+
+      const failedRows: FailedImportRow[] = [];
+      const pendingList: MiningResource[] = [];
+      const seenInFileIds = new Set<string>();
+
+      for (let i = 0; i < cleanedRows.length; i++) {
+        const row = cleanedRows[i];
+        const lineNum = i + 2;
+
+        const idRaw = row['矿山编号'] ?? row['ID'];
+        if (idRaw === undefined || idRaw === null || String(idRaw).trim() === '') {
+          failedRows.push({
+            lineNum,
+            miningId: '未填写',
+            raw: row,
+            reason: '缺少矿山编号'
+          });
+          continue;
+        }
+
+        const id = String(idRaw).trim();
+
+        if (seenInFileIds.has(id)) {
+          failedRows.push({
+            lineNum,
+            miningId: id,
+            raw: row,
+            reason: '文件内存在重复的矿山编号'
+          });
+          continue;
+        }
+
+        if (resources.some(r => r.id === id)) {
+          failedRows.push({
+            lineNum,
+            miningId: id,
+            raw: row,
+            reason: '系统中已存在该矿山编号'
+          });
+          continue;
+        }
+
+        const rawRevCap = Number(row['款初'] ?? row['收款上限'] ?? row['收款额度'] ?? 0);
+        const rawValCap = Number(row['产初'] ?? row['产值上限'] ?? row['产值额度'] ?? 0);
+
+        if (isNaN(rawRevCap) || isNaN(rawValCap) || (rawRevCap <= 0 && rawValCap <= 0)) {
+          failedRows.push({
+            lineNum,
+            miningId: id,
+            raw: row,
+            reason: '额度无效（款初与产初须大于0）'
+          });
+          continue;
+        }
+
+        const assRev = row['收款指派'] || row['执行单元'] || units[0];
+        const assVal = row['产值指派'] || row['执行单元'] || units[0];
+
+        if (!assRev && !assVal) {
+          failedRows.push({
+            lineNum,
+            miningId: id,
+            raw: row,
+            reason: '缺少经营单元指派'
+          });
+          continue;
+        }
+
+        seenInFileIds.add(id);
+
+        const type = row['提炼类型'] || row['类型'] || RefineType.Enterprise;
+        const revCap = importNetAmount(rawRevCap, RefineCategory.Revenue);
+        const valCap = importNetAmount(rawValCap, RefineCategory.Value);
+        const cat = row['核算类别'] || '100%';
+
+        const newRes: MiningResource = {
+          id,
+          initialRevenueCapacity: revCap,
+          initialValueCapacity: valCap,
+          initialRevenueLimit: revCap,
+          initialValueLimit: valCap,
+          types: [type as RefineType],
+          revenueCapacity: revCap,
+          valueCapacity: valCap,
+          minedRevenue: 0,
+          minedValue: 0,
+          assignedTo: assRev,
+          assignedToRevenue: assRev,
+          assignedToValue: assVal,
+          incentiveOutput5: 0,
+          incentiveCollection2: 0,
+          category: cat as '100%' | '据实',
+          status: ResourceStatus.Exploring,
+          version: 1,
+          isPaused: false,
+          totalMonths: 12,
+          rhythmMonthN: 1,
+          monthlyQuota: undefined,
+          monthlyUsed: 0,
+          quotas: assRev === assVal 
+            ? [{ centerId: assRev, revenueQuota: revCap, valueQuota: valCap, minedRevenue: 0, minedValue: 0 }]
+            : [
+                { centerId: assRev, revenueQuota: revCap, valueQuota: 0, minedRevenue: 0, minedValue: 0 },
+                { centerId: assVal, revenueQuota: 0, valueQuota: valCap, minedRevenue: 0, minedValue: 0 }
+              ],
+          pendingValue: 0,
+          confirmedValue: 0,
+          unconfirmedValue: valCap,
+          valueDepleted: false,
+          pendingRevenue: 0,
+          confirmedRevenue: 0,
+          unconfirmedRevenue: revCap,
+          revenueDepleted: false,
+        };
+
+        pendingList.push(newRes);
+      }
+
+      if (pendingList.length === 0 && failedRows.length === 0) {
+        showAlert('文件为空或无数据');
+      } else {
+        setPendingImportResources(pendingList);
+        setFailedImportRows(failedRows);
+        setIsImportResultModalOpen(true);
+      }
+    } catch (err: any) {
+      console.error('解析 Excel 文件失败:', err);
+      showAlert('解析 Excel 文件失败，请检查文件格式。');
+    } finally {
+      setImportLoading(false);
+      if (e.target) e.target.value = '';
+    }
+  };
 
   // 按矿山编号查询相关状态
   const [searchMiningId, setSearchMiningId] = useState('');
@@ -162,7 +440,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
     const initialRev = getInitialRevenueCapacity(res);
     const initialVal = getInitialValueCapacity(res);
     setRevenueCapacity(roundMoney(initialRev / 0.933));
-    setValueCapacity(roundMoney(initialVal / 0.933));
+    setValueCapacity(roundMoney(initialVal));
     setAssigneeRevenue(res.assignedToRevenue || res.assignedTo || '');
     setAssigneeValue(res.assignedToValue || res.assignedTo || '');
     setCustomRevenueFactor(res.customRevenueFactor);
@@ -236,9 +514,9 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
     const isOutsourced = selectedType === RefineType.Outsourced;
     let authorizedQuota = undefined;
     
-    // 统一步骤：将用户输入的原始容量转换为 0.933 提纯后的基准进行存储
-    const purifiedRevenueCapacity = roundMoney(revenueCapacity * 0.933);
-    const purifiedValueCapacity = roundMoney(valueCapacity * 0.933);
+    // 统一步骤：使用统一 importNetAmount 函数转换为提纯后的基准进行存储 (收款×0.933，产值1:1)
+    const purifiedRevenueCapacity = importNetAmount(revenueCapacity, RefineCategory.Revenue);
+    const purifiedValueCapacity = importNetAmount(valueCapacity, RefineCategory.Value);
 
     const currentLogged = existingResource ? (existingResource.confirmedValue + existingResource.pendingValue + existingResource.minedValue) : 0;
 
@@ -349,6 +627,10 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
   };
 
   const exportToExcel = () => {
+    if (!canExport) {
+      toast.error(EXPORT_DISABLED_TOOLTIP);
+      return;
+    }
     const dataToExport = filteredResources.map(res => ({
       '矿山编号': res.id,
       '提炼类型': res.types.join(', '),
@@ -509,6 +791,8 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
           dtcbLogs={dtcbLogs}
           transactions={transactions}
           managedUsers={managedUsers}
+          user={user}
+          systemConfig={systemConfig}
           onClose={() => {
             setQueriedMiningId(null);
             setSearchMiningId('');
@@ -678,21 +962,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                 />
                 <button
                   type="button"
-                  onClick={() => {
-                    const templateData = [{
-                      '矿山编号': 'R001',
-                      '提炼类型': RefineType.Enterprise,
-                      '收款上限': 100000,
-                      '产值上限': 100000,
-                      '收款指派': units[0] || '默认单元',
-                      '产值指派': units[0] || '默认单元',
-                      '核算类别': '100%'
-                    }];
-                    const worksheet = XLSX.utils.json_to_sheet(templateData);
-                    const workbook = XLSX.utils.book_new();
-                    XLSX.utils.book_append_sheet(workbook, worksheet, '矿山资源模板');
-                    exportWorkbook(workbook, '矿山资源导入模板.xlsx');
-                  }}
+                  onClick={handleDownloadTemplate}
                   className="px-3 bg-slate-50 text-slate-600 border border-slate-200 rounded-[4px] text-[11px] font-black hover:bg-slate-100 transition-all flex items-center shadow-xs whitespace-nowrap h-10 shrink-0 cursor-pointer ml-2"
                   title="下载导入模板"
                 >
@@ -701,119 +971,19 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                 <button
                   type="button"
                   onClick={() => document.getElementById('excel-import-input')?.click()}
-                  className="px-3 bg-blue-50 text-blue-600 border border-blue-200 rounded-[4px] text-[11px] font-black hover:bg-blue-100 transition-all flex items-center shadow-xs whitespace-nowrap h-10 shrink-0 cursor-pointer ml-2"
+                  disabled={importLoading || isPersistingImport || isImportConfirmPending || isImportResultModalOpen}
+                  className="px-3 bg-blue-50 text-blue-600 border border-blue-200 rounded-[4px] text-[11px] font-black hover:bg-blue-100 transition-all flex items-center shadow-xs whitespace-nowrap h-10 shrink-0 cursor-pointer ml-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   title="批量导入矿山资源"
                 >
-                  📥 导入
+                  {importLoading ? '解析中...' : isPersistingImport ? '落库中...' : '📥 导入'}
                 </button>
                 <input
                   id="excel-import-input"
                   type="file"
                   accept=".xlsx, .xls"
                   className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      if (file.size > EXCEL_IMPORT_MAX_BYTES) {
-                        showAlert('文件过大，最大支持 5MB');
-                        if (e.target) e.target.value = '';
-                        return;
-                      }
-                      const reader = new FileReader();
-                      reader.onload = async (event) => {
-                        const data = event.target?.result;
-                        const workbook = XLSX.read(data, { type: 'binary' });
-                        const sheetName = workbook.SheetNames[0];
-                        const sheet = workbook.Sheets[sheetName];
-                        const jsonData = XLSX.utils.sheet_to_json(sheet) as any[];
-
-                        if (jsonData.length > EXCEL_IMPORT_MAX_ROWS) {
-                          showAlert('导入数据超过 5000 行，请拆分后导入');
-                          if (e.target) e.target.value = '';
-                          return;
-                        }
-                        
-                        let importCount = 0;
-                        const newResourcesList: MiningResource[] = [];
-                        jsonData.forEach(row => {
-                          const id = row['矿山编号'] || row['ID'];
-                          if (!id || resources.some(r => r.id === id)) return;
-
-                          const type = row['提炼类型'] || row['类型'] || RefineType.Enterprise;
-                          const rawRevCap = Number(row['款初'] || row['收款上限'] || row['收款额度'] || 0);
-                          const rawValCap = Number(row['产初'] || row['产值上限'] || row['产值额度'] || 0);
-                          // 批量导入时也进行提纯转换
-                          const revCap = roundMoney(rawRevCap * 0.933);
-                          const valCap = roundMoney(rawValCap * 0.933);
-                          
-                          const assRev = row['收款指派'] || row['执行单元'] || units[0];
-                          const assVal = row['产值指派'] || row['执行单元'] || units[0];
-                          const cat = row['核算类别'] || '100%';
-
-                          const newRes: MiningResource = {
-                            id: String(id),
-                            initialRevenueCapacity: revCap,
-                            initialValueCapacity: valCap,
-                            initialRevenueLimit: revCap,
-                            initialValueLimit: valCap,
-                            types: [type as RefineType],
-                            revenueCapacity: revCap,
-                            valueCapacity: valCap,
-                            minedRevenue: 0,
-                            minedValue: 0,
-                            assignedTo: assRev,
-                            assignedToRevenue: assRev,
-                            assignedToValue: assVal,
-                            incentiveOutput5: 0,
-                            incentiveCollection2: 0,
-                            category: cat as '100%' | '据实',
-                            status: ResourceStatus.Exploring,
-                            version: 1,
-                            isPaused: false,
-                            totalMonths: 12,
-                            rhythmMonthN: 1,
-                            monthlyQuota: undefined,
-                            monthlyUsed: 0,
-                            quotas: assRev === assVal 
-                              ? [{ centerId: assRev, revenueQuota: revCap, valueQuota: valCap, minedRevenue: 0, minedValue: 0 }]
-                              : [
-                                  { centerId: assRev, revenueQuota: revCap, valueQuota: 0, minedRevenue: 0, minedValue: 0 },
-                                  { centerId: assVal, revenueQuota: 0, valueQuota: valCap, minedRevenue: 0, minedValue: 0 }
-                                ],
-                            pendingValue: 0,
-                            confirmedValue: 0,
-                            unconfirmedValue: valCap,
-                            valueDepleted: false,
-                            pendingRevenue: 0,
-                            confirmedRevenue: 0,
-                            unconfirmedRevenue: revCap,
-                            revenueDepleted: false,
-                          };
-                          newResourcesList.push(newRes);
-                          importCount++;
-                        });
-
-                        if (newResourcesList.length === 0) {
-                          showAlert('未识别到有效的矿山资源或所有矿山编号已存在。');
-                          if (e.target) e.target.value = '';
-                          return;
-                        }
-
-                        showConfirm(
-                          `导入将批量写入 ${newResourcesList.length} 条记录，请确认数据无误，导入后需单独确权。`,
-                          () => {
-                            newResourcesList.forEach(r => onAddResource(r));
-                            toast.success(`批量导入完成：新增 ${newResourcesList.length} 个矿山资源。`);
-                          },
-                          undefined,
-                          '确认导入',
-                          '取消'
-                        );
-                        if (e.target) e.target.value = ''; // Reset input
-                      };
-                      reader.readAsBinaryString(file);
-                    }
-                  }}
+                  disabled={importLoading || isPersistingImport || isImportConfirmPending || isImportResultModalOpen}
+                  onChange={handleResourceImport}
                 />
                 <select
                   value={category}
@@ -1129,7 +1299,13 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
              </div>
              <button 
                onClick={exportToExcel}
-               className="px-4 py-2 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all flex items-center shadow-sm"
+               disabled={!canExport}
+               title={getExportButtonTitle(canExport, '导出 Excel')}
+               className={`px-4 py-2 border rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center shadow-sm ${
+                 !canExport
+                   ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+                   : 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100 cursor-pointer'
+               }`}
              >
                <span className="mr-2">📥</span>
                导出 Excel
@@ -1355,7 +1531,151 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
           </div>
         )}
       </Card>
+      {/* 批量导入解析结果 Modal */}
+      <StandardModal
+        isOpen={isImportResultModalOpen}
+        onClose={() => setIsImportResultModalOpen(false)}
+        title="批量导入解析结果"
+        subtitle={
+          <div className="flex items-center gap-2 mt-1 text-xs">
+            <span className="font-medium text-slate-600">总数据: {pendingImportResources.length + failedImportRows.length} 条</span>
+            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-200">
+              校验通过 {pendingImportResources.length} 条
+            </span>
+            {failedImportRows.length > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 font-bold border border-rose-200">
+                失败 {failedImportRows.length} 条
+              </span>
+            )}
+            {failedImportRows.some(r => r.reason.includes('重复')) && (
+              <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-bold border border-amber-200">
+                重复 {failedImportRows.filter(r => r.reason.includes('重复')).length} 条
+              </span>
+            )}
+          </div>
+        }
+        maxWidthClassName="max-w-3xl"
+      >
+        <StandardModal.Body className="space-y-4">
+          {failedImportRows.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-rose-50 border border-rose-200 p-3 rounded-md">
+                <div className="flex items-center gap-2 text-rose-800 text-xs font-bold">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                  <span>
+                    发现 {failedImportRows.length} 行无法通过校验的异常数据
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleDownloadFailedRows}
+                  className="px-3 py-1 bg-white hover:bg-rose-100 text-rose-700 text-xs font-bold border border-rose-300 rounded shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  下载失败明细 (.xlsx)
+                </button>
+              </div>
+
+              <div className="max-h-64 overflow-y-auto border border-slate-200 rounded-md bg-white shadow-inner">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead className="bg-slate-50 sticky top-0 z-10 border-b border-slate-200">
+                    <tr>
+                      <th className="p-2 font-bold text-slate-600 w-16">行号</th>
+                      <th className="p-2 font-bold text-slate-600 w-28">矿山编号</th>
+                      <th className="p-2 font-bold text-slate-600 w-24">提炼类型</th>
+                      <th className="p-2 font-bold text-slate-600 w-20">款初</th>
+                      <th className="p-2 font-bold text-slate-600 w-20">产初</th>
+                      <th className="p-2 font-bold text-slate-600">失败原因</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {failedImportRows.map((item, idx) => (
+                      <tr key={idx} className={`hover:bg-rose-50/50 transition-colors ${item.reason.includes('重复') ? 'bg-amber-50/30' : ''}`}>
+                        <td className="p-2 font-mono text-slate-500 font-bold">#{item.lineNum}</td>
+                        <td className="p-2 font-mono text-slate-700 font-bold">{item.miningId}</td>
+                        <td className="p-2 text-slate-700">{item.raw['提炼类型'] || item.raw['类型'] || '-'}</td>
+                        <td className="p-2 font-mono text-slate-700">{item.raw['款初'] ?? item.raw['收款上限'] ?? item.raw['收款额度'] ?? 0}</td>
+                        <td className="p-2 font-mono text-slate-700">{item.raw['产初'] ?? item.raw['产值上限'] ?? item.raw['产值额度'] ?? 0}</td>
+                        <td className={`p-2 font-bold ${item.reason.includes('重复') ? 'text-amber-700' : 'text-rose-600'}`}>
+                          {item.reason}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {pendingImportResources.length > 0 ? (
+            <div className="bg-emerald-50/80 border border-emerald-200 p-4 rounded-md text-xs space-y-2">
+              <div className="flex items-center gap-2 text-emerald-800 font-bold">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>有 {pendingImportResources.length} 条数据通过校验，点击下方按钮开始导入</span>
+              </div>
+              <p className="text-slate-600">
+                点击【确认导入并落库】将执行原子落库操作。
+                {failedImportRows.length > 0 && " (校验失败的行将被忽略)"}
+              </p>
+            </div>
+          ) : (
+            <div className="bg-slate-100 p-4 rounded-md text-center text-xs text-slate-500 font-medium">
+              没有符合导入条件的有效记录，请检查 Excel 文件修改后重试。
+            </div>
+          )}
+        </StandardModal.Body>
+
+        <StandardModal.Footer className="flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={() => setIsImportResultModalOpen(false)}
+            className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded transition-colors cursor-pointer"
+          >
+            {pendingImportResources.length > 0 ? '取消' : '关闭'}
+          </button>
+          {pendingImportResources.length > 0 && (
+            <button
+              type="button"
+              onClick={handleConfirmExecuteImport}
+              disabled={isImportConfirmPending || isPersistingImport}
+              className="px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded shadow-md transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              确认导入并落库 ({pendingImportResources.length} 个)
+            </button>
+          )}
+        </StandardModal.Footer>
+      </StandardModal>
+
       <CityGuardianModal state={modalState} onClose={closeModal} />
+
+      {/* 批量落库等待遮罩 */}
+      {isPersistingImport && (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-2xl border border-slate-200 p-6 max-w-sm w-full text-center space-y-5">
+            <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto border border-blue-100 shadow-inner">
+              <RefreshCw className="w-6 h-6 animate-spin" />
+            </div>
+            <div className="space-y-1.5">
+              <h3 className="text-base font-bold text-slate-800 tracking-tight">正在导入矿山资源，请勿关闭页面…</h3>
+              <p className="text-xs text-slate-500 font-medium">
+                准备写入 <span className="font-mono font-bold text-blue-600">{importPersistCount}</span> 个矿山资源 {persistSeconds > 0 && `(${persistSeconds}s)`}
+              </p>
+            </div>
+            {/* Indeterminate progress bar */}
+            <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden relative">
+              <div className="absolute inset-y-0 bg-blue-600 rounded-full animate-pulse w-full"></div>
+            </div>
+            {persistSeconds >= 30 ? (
+              <div className="bg-amber-50 border border-amber-200 rounded p-2.5 text-xs text-amber-800 font-bold space-y-1">
+                <p>仍在处理中，请勿关闭页面，可稍后刷新核对结果</p>
+              </div>
+            ) : (
+              <p className="text-[10px] text-slate-400">正在与服务器同步矿山主档，请稍候</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

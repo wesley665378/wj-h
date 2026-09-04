@@ -3,12 +3,13 @@ import React, { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 import { TIER_COEFFICIENTS } from "../src/constants/coefficients";
-import { calculateBonusAllocation, isExpertCategory, aggregateUserMonthMetrics } from "../src/utils/bonusAllocation";
+import { calculateBonusAllocation, calculateBonusAllocationForMonths, isExpertCategory, aggregateUserMonthMetrics } from "../src/utils/bonusAllocation";
 import { isCenterManagerUser, centerMatch } from "../src/utils/centerScope";
 import { parseCenterList, businessUnitLabelsEqual } from "../src/utils/purification";
 import { getUserSalaryByMonth } from "../src/utils/business";
+import { isSalaryActiveForMonth } from "../src/utils/employmentStatus";
 import { UI_LABELS } from '../src/constants/uiLabels';
-import { resolveLogBusinessMonth, getLocalMonthString, getLocalDateString, resolveLogBusinessDate, isDateInRange } from "../src/utils/dateUtils";
+import { resolveLogBusinessMonth, getLocalMonthString, getLocalDateString, resolveLogBusinessDate, isDateInRange, getMonthsBetween } from "../src/utils/dateUtils";
 import { formatAmount, formatRatio, formatPercent } from "../src/utils/formatters";
 import { InfoTip } from "../src/components/InfoTip";
 import { CostPrivacyToggle } from "../src/components/CostPrivacyToggle";
@@ -28,10 +29,13 @@ import {
   TransactionType,
   RefineType,
   AcceptanceRecord,
+  SystemConfig,
 } from "../types";
 import { XLSX, exportWorkbook, buildExcelFilename } from "../src/utils/excelIo";
+import { canExportExcel, getExportButtonTitle, EXPORT_DISABLED_TOOLTIP } from "../src/utils/accessControl";
 import { CityGuardianModal, useCityGuardianModal } from "../src/components/CityGuardianModal";
 import { useCostPrivacy } from "../src/hooks/useCostPrivacy";
+import { SealedDividendTable } from "../src/components/SealedDividendTable";
 import {
   TrendingUp,
   Wallet,
@@ -48,6 +52,11 @@ import {
   CheckCircle,
   FileSpreadsheet,
   Search,
+  Lock,
+  Unlock,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 
 interface DistributionProps {
@@ -58,6 +67,7 @@ interface DistributionProps {
   resources: MiningResource[];
   onSubmitTransaction?: (tx: InternalTransaction) => void;
   acceptanceRecords?: AcceptanceRecord[];
+  systemConfig?: SystemConfig;
 }
 
 interface BonusCalculation {
@@ -95,6 +105,30 @@ interface BonusCalculation {
   yearlyBonusApproved: number;
 
   salaryPackage: number;
+  costPackage?: number;
+  totalCost?: number;
+  nonEffectiveDeductionConfirmed?: number;
+  nonEffectiveDeductionApproved?: number;
+  historyDebt?: number;
+  currentSurplus?: number;
+  netRedundancy?: number;
+  nextDebt?: number;
+  ratio?: number;
+  historyDebtConfirmed?: number;
+  historyDebtApproved?: number;
+  currentSurplusConfirmed?: number;
+  currentSurplusApproved?: number;
+  netRedundancyConfirmed?: number;
+  netRedundancyApproved?: number;
+  nextDebtConfirmed?: number;
+  nextDebtApproved?: number;
+  historyRecordsConfirmed?: any[];
+  historyRecordsApproved?: any[];
+  theoreticalBonusConfirmed?: number;
+  theoreticalBonusApproved?: number;
+  baseValuePending?: number;
+  personalIncentiveStatus?: string;
+  teamDividendStatus?: string;
   cWeight: number;
   centerLevelBonus?: number;
   theoreticalBonus?: number;
@@ -115,61 +149,71 @@ const fmtDebt = (val: number | undefined | null): string => {
   if (rounded === 0) {
     return "0";
   }
-  const absValue = Math.abs(rounded);
-  return `-${absValue.toLocaleString()}`;
+  return rounded.toLocaleString();
 };
 
 const TheoreticalCell: React.FC<{
   isRevenueExpert: boolean;
   theoreticalBonus: number;
+  baseAmount?: number;
   expanded: boolean;
   onToggle: () => void;
-}> = ({ isRevenueExpert, theoreticalBonus, expanded, onToggle }) => {
-  const rounded100 = Math.round(theoreticalBonus);
-  const rounded80 = Math.round(theoreticalBonus * 0.8);
-  const rounded60 = Math.round(theoreticalBonus * 0.6);
+}> = ({ isRevenueExpert, theoreticalBonus, baseAmount, expanded, onToggle }) => {
+  const [selectedTier, setSelectedTier] = useState<'100' | '80' | '60'>('100');
+  const base = baseAmount !== undefined ? baseAmount : theoreticalBonus;
+  const rounded100 = Math.round(base);
+  const rounded80 = Math.round(base * 0.8);
+  const rounded60 = Math.round(base * 0.6);
 
-  if (!isRevenueExpert) {
-    return (
-      <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-amber-600 whitespace-nowrap">
-        {fmtAmount(theoreticalBonus)}
-      </div>
-    );
-  }
+  const displayVal = selectedTier === '100' ? rounded100 : selectedTier === '80' ? rounded80 : rounded60;
 
   return (
-    <div className="flex-1 px-3 py-2 flex flex-col w-full text-right select-none">
-      <div className="flex items-center justify-end gap-2">
-        <span className="font-mono text-[11px] font-black text-amber-600">
-          {fmtAmount(rounded100)}
+    <div className="flex-1 px-2 py-1 flex flex-col w-full text-right select-none">
+      <div className="flex items-center justify-end gap-1.5">
+        <select
+          value={selectedTier}
+          onChange={(e) => {
+            e.stopPropagation();
+            setSelectedTier(e.target.value as '100' | '80' | '60');
+          }}
+          className="bg-amber-100/60 hover:bg-amber-100 text-amber-800 text-[10px] font-bold py-0.5 px-1 rounded border border-amber-300 focus:outline-none cursor-pointer"
+          title="选择理论额度测算档位 (60% / 80% / 100%)"
+        >
+          <option value="100">100%</option>
+          <option value="80">80%</option>
+          <option value="60">60%</option>
+        </select>
+        <span className="font-mono text-[11px] font-black text-amber-700 min-w-[55px]">
+          {fmtAmount(displayVal)}
         </span>
         <button
           onClick={(e) => {
             e.stopPropagation();
             onToggle();
           }}
-          className="text-[10px] font-bold text-amber-600/80 hover:text-amber-700 flex items-center gap-0.5 bg-amber-100/40 hover:bg-amber-100 px-1.5 py-0.5 rounded transition-all"
+          className="text-[10px] font-bold text-amber-600/80 hover:text-amber-700 flex items-center gap-0.5 bg-amber-100/40 hover:bg-amber-100 px-1 py-0.5 rounded transition-all"
+          title="展开全部档位明细"
         >
-          <span>{expanded ? '收起' : '展开'}</span>
+          <span>{expanded ? '收起' : '档位'}</span>
           <span className="text-[9px]">{expanded ? '▴' : '▾'}</span>
         </button>
       </div>
 
       {expanded && (
-        <div className="mt-2 pt-2 border-t border-dashed border-amber-200 text-right flex flex-col gap-1 w-full max-w-[180px] ml-auto">
-          <div className="flex justify-between items-center text-[10px] py-1 border-b border-[#e5e7eb]">
+        <div className="mt-1.5 pt-1.5 border-t border-dashed border-amber-200 text-right flex flex-col gap-1 w-full max-w-[170px] ml-auto">
+          <div className="flex justify-between items-center text-[10px] py-0.5 border-b border-[#e5e7eb]">
             <span className="text-slate-400 font-medium">60% 档</span>
             <span className="font-mono font-bold text-amber-700">{fmtAmount(rounded60)}</span>
           </div>
-          <div className="flex justify-between items-center text-[10px] py-1 border-b border-[#e5e7eb]">
+          <div className="flex justify-between items-center text-[10px] py-0.5 border-b border-[#e5e7eb]">
             <span className="text-slate-400 font-medium">80% 档</span>
             <span className="font-mono font-bold text-amber-700">{fmtAmount(rounded80)}</span>
           </div>
-          <div className="flex justify-between items-center text-[10px] py-1 border-b border-[#e5e7eb]">
+          <div className="flex justify-between items-center text-[10px] py-0.5 border-b border-[#e5e7eb]">
             <span className="text-slate-400 font-medium">100% 档</span>
             <span className="font-mono font-bold text-amber-700">{fmtAmount(rounded100)}</span>
           </div>
-          <div className="text-[9px] text-slate-400 font-normal italic mt-1 text-center">
+          <div className="text-[8px] text-slate-400 font-normal italic text-center">
             情景参考，不代表实际发放
           </div>
         </div>
@@ -186,11 +230,27 @@ const Distribution: React.FC<DistributionProps> = ({
   resources,
   onSubmitTransaction,
   acceptanceRecords,
+  systemConfig,
 }) => {
+  const canExport = useMemo(() => canExportExcel(currentUser, systemConfig), [currentUser, systemConfig]);
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
+  const [activeTab, setActiveTab] = useState<'matrix' | 'sealed'>('matrix');
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
+  const [sealedUsers, setSealedUsers] = useState<Record<string, boolean>>({});
   const [theoreticalExpanded, setTheoreticalExpanded] = useState<Record<string, boolean>>({});
   const [bonusTarget, setBonusTarget] = useState<BonusCalculation | null>(null);
+
+  const handleToggleSealUser = (userId: string, userName: string) => {
+    setSealedUsers(prev => {
+      const nextState = !prev[userId];
+      if (nextState) {
+        toast.success(`已锁定封存 [${userName}] 当期价值分配核算数据`);
+      } else {
+        toast.info(`已解除 [${userName}] 当期数据锁定`);
+      }
+      return { ...prev, [userId]: nextState };
+    });
+  };
   const [bonusForm, setBonusForm] = useState({
     miningId: "",
     category: "收款奖金" as "收款奖金" | "产值奖金" | "分红" | "特别奖金",
@@ -208,16 +268,16 @@ const Distribution: React.FC<DistributionProps> = ({
     if (!currentUser) return false;
     const role = currentUser.role as string;
     const cat = currentUser.category || "";
+    const sRoles = currentUser.secondaryRoles || [];
 
-    // Admin、npcxie（保留）
-    if (role === Role.Admin || role === "admin" || cat === "系统管理员" || cat === "VP") return true;
-    if (role === Role.npcxie || role === "npcxie" || cat === "NPC" || cat === "经管员NPC") return true;
+    // Admin, npcxie
+    if (role === Role.Admin || role === "admin") return true;
+    if (role === Role.npcxie || role === "npcxie") return true;
 
-    // 经管员：category 为 经管员高款专 / 经管员高产专
-    if (cat === "经管员高款专" || cat === "经管员高产专") return true;
-
-    // 水库管理员/管理角色：role === Role.ReservoirManager
-    if (role === Role.ReservoirManager || role === "reservoir_manager") return true;
+    // Allowed specific categories / secondary roles: 经管员高款专, 经管员高产专, 高款专, 高产专
+    const allowedExact = ['经管员高款专', '经管员高产专', '高款专', '高产专'];
+    if (allowedExact.includes(cat)) return true;
+    if (sRoles.some(r => allowedExact.includes(r))) return true;
 
     return false;
   }, [currentUser]);
@@ -240,18 +300,18 @@ const Distribution: React.FC<DistributionProps> = ({
   const handleBonusSubmit = async () => {
     if (!bonusTarget) return;
     if (!bonusForm.amount || bonusForm.amount <= 0) {
-      showAlert("请输入有效的发放金额");
+      showAlert("请输入有效的发放数值");
       return;
     }
 
     const diff = bonusForm.amount - bonusForm.theoreticalAmount;
     if (Math.abs(diff) > 0.01 && !bonusForm.diffReason.trim()) {
-      showAlert("发放金额与理论金额不一致时，必须填写差异说明");
+      showAlert("发放数值与理论数值不一致时，必须填写差异说明");
       return;
     }
 
     showConfirm(
-      `确定确认提交奖金发放？\n\n【人员】${bonusTarget.userName} (${bonusTarget.category})\n【类别】${bonusForm.category}\n【实际发放金额】${fmtAmount(bonusForm.amount)}`,
+      `确定确认提交奖金发放？\n\n【人员】${bonusTarget.userName} (${bonusTarget.category})\n【类别】${bonusForm.category}\n【实际发放数值】${fmtAmount(bonusForm.amount)}`,
       async () => {
         const newRecord: AcceptanceRecord = {
           id: `ACC-${Date.now()}`,
@@ -274,6 +334,7 @@ const Distribution: React.FC<DistributionProps> = ({
 
         try {
           await createCdtzRecord(newRecord);
+          showAlert(`已成功写入承兑台账 cdtz！\n\n【人员】${bonusTarget.userName}\n【类别】${bonusForm.category}\n【实际发放】${fmtAmount(bonusForm.amount)}`);
           toast.success(`已成功写入承兑台账 cdtz！对 [${bonusTarget.userName}] 的 ${bonusForm.category} 发放：${fmtAmount(bonusForm.amount)}`);
           loadDistribution();
           loadLocalCdtz();
@@ -291,6 +352,16 @@ const Distribution: React.FC<DistributionProps> = ({
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  const monthsInRange = useMemo(() => {
+    if (startDate && endDate) {
+      return getMonthsBetween(startDate, endDate);
+    }
+    if (filterMonth) {
+      return [filterMonth];
+    }
+    return [getLocalMonthString()];
+  }, [startDate, endDate, filterMonth]);
 
   const effectiveMonth = useMemo(() => {
     if (startDate) return startDate.slice(0, 7);
@@ -353,373 +424,382 @@ const Distribution: React.FC<DistributionProps> = ({
   const C_WEIGHT = TIER_COEFFICIENTS.BASE_LOSS; // 系统默认 C 对冲权重
 
   const distributionData = useMemo(() => {
-    if (!isLocalEmbedded) {
-      if (distributionLoading || distributionError || !serverDistribution) {
-        return [];
-      }
-      return serverDistribution.map((serverItem) => {
-        const userObj = users.find((u) => u.id === serverItem.userId);
-        const userCenter = userObj?.center || "";
+    const getFirstPass = () => {
+      // 本地嵌入式（isLocalEmbedded 为 true）或多月份自定义查询动态聚合
+      const currentYear = effectiveMonth
+        ? effectiveMonth.split("-")[0]
+        : new Date().getFullYear().toString();
 
-        const conf = serverItem.confirmed || {};
-        const app = serverItem.approved || {};
+      const logsByUserYearly = new Map<string, ValueCreationLog[]>();
+      const logsByUserMonthly = new Map<string, ValueCreationLog[]>();
 
-        const centerLevelBonus = serverItem.centerLevelBonus ?? 0;
-        const isRevenueExpert = (serverItem.category || "").includes("款专");
-        const isChan = (serverItem.category || "").includes("产专") || serverItem.category === "经管员高产专";
+      (logs || []).forEach((log) => {
+        if (
+          log.status !== AuditStatus.Confirmed &&
+          log.status !== AuditStatus.Approved
+        )
+          return;
 
-        const currentSurplus = conf.currentSurplus ?? serverItem.currentSurplus ?? 0;
-        const historyDebt = conf.historyDebt ?? serverItem.historyDebt ?? 0;
-        const nextDebt = conf.newDebt ?? serverItem.nextDebt ?? 0;
-        const netRedundancy = conf.quota ?? serverItem.netRedundancy ?? 0;
-        const theoreticalBonus = conf.theoreticalBonus ?? serverItem.theoreticalBonus ?? 0;
-        const ratioVal = conf.ratio ?? serverItem.ratio ?? 0.05;
+        const collectorId = log.recordedCollectorId || "";
+        const logMonth = resolveLogBusinessMonth(log);
+        const logDate = resolveLogBusinessDate(log);
 
-        const historyDebtConfirmed = conf.historyDebt ?? serverItem.historyDebtConfirmed ?? serverItem.historyDebt ?? 0;
-        const historyDebtApproved = app.historyDebt ?? serverItem.historyDebtApproved ?? serverItem.historyDebt ?? 0;
-        const netRedundancyConfirmed = conf.quota ?? serverItem.netRedundancyConfirmed ?? serverItem.netRedundancy ?? 0;
-        const netRedundancyApproved = app.quota ?? serverItem.netRedundancyApproved ?? serverItem.netRedundancy ?? 0;
-        const theoreticalBonusConfirmed = conf.theoreticalBonus ?? serverItem.theoreticalBonusConfirmed ?? serverItem.theoreticalBonus ?? 0;
-        const theoreticalBonusApproved = app.theoreticalBonus ?? serverItem.theoreticalBonusApproved ?? serverItem.theoreticalBonus ?? 0;
-        const historyRecordsConfirmed = conf.historyRecords || serverItem.historyRecordsConfirmed || serverItem.historyRecords || [];
-        const historyRecordsApproved = app.historyRecords || serverItem.historyRecordsApproved || serverItem.historyRecords || [];
+        const matches = startDate && endDate
+          ? isDateInRange(logDate, startDate, endDate)
+          : monthsInRange.includes(logMonth);
 
-        const userLogsMonthly = (logs || []).filter(l => 
-          l.recordedCollectorId === serverItem.userId && 
-          (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved) &&
-          resolveLogBusinessMonth(l) === effectiveMonth
-        );
-
-        const confirmedMetrics = aggregateUserMonthMetrics(logs || [], userObj || { id: serverItem.userId } as User, effectiveMonth, resources || [], users || [], [AuditStatus.Confirmed]);
-        const approvedMetrics = aggregateUserMonthMetrics(logs || [], userObj || { id: serverItem.userId } as User, effectiveMonth, resources || [], users || [], [AuditStatus.Approved]);
-
-        const baseValueConfirmed = isChan ? confirmedMetrics.productionPackage : confirmedMetrics.revenuePackage;
-        const baseValueApproved = isChan ? approvedMetrics.productionPackage : approvedMetrics.revenuePackage;
-
-        let yearlyBaseValConfirmed = 0;
-        let yearlyBaseValApproved = 0;
-        let yearlyBonusApproved = 0;
-
-        const currentYear = effectiveMonth
-          ? effectiveMonth.split("-")[0]
-          : new Date().getFullYear().toString();
-
-        const userLogsYearly = (logs || []).filter(l => 
-          l.recordedCollectorId === serverItem.userId && 
-          (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved) &&
-          resolveLogBusinessMonth(l).startsWith(currentYear)
-        );
-
-        const yearlyMonths = Array.from(new Set(userLogsYearly.map(l => resolveLogBusinessMonth(l))));
-        for (const m of yearlyMonths) {
-          const mConf = aggregateUserMonthMetrics(userLogsYearly, userObj || { id: serverItem.userId } as User, m, resources || [], users || [], [AuditStatus.Confirmed]);
-          const mApp = aggregateUserMonthMetrics(userLogsYearly, userObj || { id: serverItem.userId } as User, m, resources || [], users || [], [AuditStatus.Approved]);
-          yearlyBaseValConfirmed += (isChan ? mConf.productionPackage : mConf.revenuePackage);
-          yearlyBaseValApproved += (isChan ? mApp.productionPackage : mApp.revenuePackage);
-        }
-
-        yearlyBonusApproved = yearlyBaseValApproved * (app.ratio ?? ratioVal);
-
-        return {
-          userId: serverItem.userId,
-          userName: serverItem.userName,
-          category: serverItem.category || "初级专家",
-          isRevenueExpert,
-          isChan,
-          historyDebt: historyDebt,
-          currentSurplus: currentSurplus,
-          netRedundancy: netRedundancy,
-          nextDebt: nextDebt,
-          theoreticalBonus: theoreticalBonus,
-          ratio: ratioVal,
-          centerLevelBonus,
-
-          historyRecordsConfirmed,
-          historyRecordsApproved,
-          historyDebtConfirmed,
-          historyDebtApproved,
-          currentSurplusConfirmed: conf.currentSurplus ?? currentSurplus,
-          currentSurplusApproved: app.currentSurplus ?? currentSurplus,
-          netRedundancyConfirmed,
-          netRedundancyApproved,
-          theoreticalBonusConfirmed,
-          theoreticalBonusApproved,
-          yearlyBonusApproved: app.theoreticalBonus ?? yearlyBonusApproved,
-
-          confirmedValueConfirmed: isChan ? baseValueConfirmed : 0,
-          bCostConfirmed: confirmedMetrics.b1Cost ?? 0,
-          b2CostConfirmed: confirmedMetrics.b2Cost ?? 0,
-          aCostConfirmed: confirmedMetrics.aCost ?? 0,
-          confirmedGoldConfirmed: !isChan ? baseValueConfirmed : 0,
-          baseValueConfirmed: baseValueConfirmed,
-          netBonusConfirmed: theoreticalBonusConfirmed,
-          isBreakthroughConfirmed: (conf.currentSurplus ?? currentSurplus) > 0,
-          gapToBreakthroughConfirmed: (conf.currentSurplus ?? currentSurplus) > 0 ? 0 : Math.abs(conf.currentSurplus ?? currentSurplus),
-          paymentMatchRateConfirmed: 1,
-
-          confirmedValueApproved: isChan ? baseValueApproved : 0,
-          bCostApproved: approvedMetrics.b1Cost ?? 0,
-          b2CostApproved: approvedMetrics.b2Cost ?? 0,
-          aCostApproved: approvedMetrics.aCost ?? 0,
-          confirmedGoldApproved: !isChan ? baseValueApproved : 0,
-          baseValueApproved: baseValueApproved,
-          netBonusApproved: theoreticalBonusApproved,
-          isBreakthroughApproved: (app.currentSurplus ?? currentSurplus) > 0,
-          gapToBreakthroughApproved: (app.currentSurplus ?? currentSurplus) > 0 ? 0 : Math.abs(app.currentSurplus ?? currentSurplus),
-          paymentMatchRateApproved: 1,
-
-          baseValuePending: 0,
-          yearlyIncomeApproved: yearlyBaseValApproved,
-          yearlyIncomeConfirmed: yearlyBaseValConfirmed,
-
-          cWeight: TIER_COEFFICIENTS.BASE_LOSS,
-          salaryPackage: userObj?.salaryPackage ?? 0,
-          details: userLogsMonthly || [],
-
-          personalIncentiveStatus: (app.currentSurplus ?? currentSurplus) > 0 ? "已激活超额价值分享" : "入库任务进行中",
-          teamDividendStatus: (app.currentSurplus ?? currentSurplus) > 0 ? "已激活超额价值分享" : "入库任务进行中",
-        };
-      });
-    }
-
-    // 本地嵌入式（isLocalEmbedded 为 true）
-    const currentYear = effectiveMonth
-      ? effectiveMonth.split("-")[0]
-      : new Date().getFullYear().toString();
-
-    const logsByUserYearly = new Map<string, ValueCreationLog[]>();
-    const logsByUserMonthly = new Map<string, ValueCreationLog[]>();
-
-    logs.forEach((log) => {
-      if (
-        log.status !== AuditStatus.Confirmed &&
-        log.status !== AuditStatus.Approved
-      )
-        return;
-
-      const collectorId = log.recordedCollectorId || "";
-      const logMonth = resolveLogBusinessMonth(log);
-      const logDate = resolveLogBusinessDate(log);
-
-      const matches = startDate && endDate
-        ? isDateInRange(logDate, startDate, endDate)
-        : logMonth === effectiveMonth;
-
-      if (matches) {
-        if (!logsByUserMonthly.has(collectorId)) {
-          logsByUserMonthly.set(collectorId, []);
-        }
-        logsByUserMonthly.get(collectorId)!.push(log);
-      }
-
-      if (logMonth.startsWith(currentYear)) {
-        if (!logsByUserYearly.has(collectorId)) {
-          logsByUserYearly.set(collectorId, []);
-        }
-        logsByUserYearly.get(collectorId)!.push(log);
-      }
-    });
-
-    return users
-      .filter((u) => {
-        if (u.userStatus === "inactive") return false;
-        const cat = u.category || "";
-        const sRoles = u.secondaryRoles || [];
-
-        const isExpert =
-          cat.includes("款专") || cat.includes("产专") || isCenterManagerUser(u);
-        const hasExpertSecondaryRole = sRoles.some(
-          (r) => r.includes("款专") || r.includes("产专"),
-        );
-
-        return isExpert || hasExpertSecondaryRole;
-      })
-      .map((user) => {
-        const userLogsMonthly = logsByUserMonthly.get(user.id) || [];
-        const userLogsYearly = logsByUserYearly.get(user.id) || [];
-
-        const salaryPackage = user.salaryPackage || 0;
-
-        const isRevenueExpert = (user.category || "").includes("款专");
-        const isChanExpert = (user.category || "").includes("产专");
-        const isChan = isChanExpert || user.category === "经管员高产专";
-
-        const confirmedMetrics = aggregateUserMonthMetrics(logs, user, effectiveMonth, resources, users, [AuditStatus.Confirmed]);
-        const approvedMetrics = aggregateUserMonthMetrics(logs, user, effectiveMonth, resources, users, [AuditStatus.Approved]);
-
-        const baseValueConfirmedStr = isChan ? confirmedMetrics.productionPackage : confirmedMetrics.revenuePackage;
-        const baseValueApprovedStr = isChan ? approvedMetrics.productionPackage : approvedMetrics.revenuePackage;
-
-        let yearlyBaseValConfirmed = 0;
-        let yearlyBaseValApproved = 0;
-        let pendingBaseVal = 0;
-        
-        const pendingMetrics = aggregateUserMonthMetrics(logs, user, effectiveMonth, resources, users, [AuditStatus.Pending]);
-        pendingBaseVal = isChan ? pendingMetrics.productionPackage : pendingMetrics.revenuePackage;
-
-        let yearlySalaryPackage = 0;
-        if (effectiveMonth) {
-          const [y, m] = effectiveMonth.split("-").map(Number);
-          for (let mIdx = 1; mIdx <= m; mIdx++) {
-            const mStr = `${y}-${String(mIdx).padStart(2, "0")}`;
-            yearlySalaryPackage += getUserSalaryByMonth(user, mStr);
+        if (matches) {
+          if (!logsByUserMonthly.has(collectorId)) {
+            logsByUserMonthly.set(collectorId, []);
           }
+          logsByUserMonthly.get(collectorId)!.push(log);
         }
 
-        const yearlyMonths = Array.from(new Set(userLogsYearly.map(l => resolveLogBusinessMonth(l))));
-        for (const m of yearlyMonths) {
-          const mConf = aggregateUserMonthMetrics(userLogsYearly, user, m, resources, users, [AuditStatus.Confirmed]);
-          const mApp = aggregateUserMonthMetrics(userLogsYearly, user, m, resources, users, [AuditStatus.Approved]);
-          yearlyBaseValConfirmed += (isChan ? mConf.productionPackage : mConf.revenuePackage);
-          yearlyBaseValApproved += (isChan ? mApp.productionPackage : mApp.revenuePackage);
+        if (logMonth.startsWith(currentYear)) {
+          if (!logsByUserYearly.has(collectorId)) {
+            logsByUserYearly.set(collectorId, []);
+          }
+          logsByUserYearly.get(collectorId)!.push(log);
         }
-
-        let historyDebt = 0;
-        let currentSurplus = 0;
-        let netRedundancy = 0;
-        let nextDebt = 0;
-        let theoreticalBonus = 0;
-
-        let historyDebtConfirmed = 0;
-        let nextDebtConfirmed = 0;
-        let currentSurplusConfirmed = 0;
-        let netRedundancyConfirmed = 0;
-        
-        let historyDebtApproved = 0;
-        let nextDebtApproved = 0;
-        let currentSurplusApproved = 0;
-        let netRedundancyApproved = 0;
-
-        let historyRecordsConfirmed: any[] = [];
-        let historyRecordsApproved: any[] = [];
-
-        let netBonusApprovedVal = 0;
-        let netBonusConfirmedVal = 0;
-
-        let ratioVal = 0;
-        let theoreticalBonusConfirmedVal = 0;
-        let theoreticalBonusApprovedVal = 0;
-        let yearlyBonusApprovedVal = 0;
-
-        const allocConfirmed = calculateBonusAllocation(
-            effectiveMonth,
-            user,
-            logs,
-            resources,
-            users,
-            AuditStatus.Confirmed
-        );
-
-        const allocApproved = calculateBonusAllocation(
-            effectiveMonth,
-            user,
-            logs,
-            resources,
-            users,
-            AuditStatus.Approved
-        );
-
-        if (allocConfirmed.ratio > 0 || allocApproved.ratio > 0) {
-            historyDebtConfirmed = Math.abs(allocConfirmed.history);
-            currentSurplusConfirmed = allocConfirmed.current;
-            netRedundancyConfirmed = allocConfirmed.quota;
-            nextDebtConfirmed = Math.abs(allocConfirmed.newDebt);
-
-            historyDebtApproved = Math.abs(allocApproved.history);
-            currentSurplusApproved = allocApproved.current;
-            netRedundancyApproved = allocApproved.quota;
-            nextDebtApproved = Math.abs(allocApproved.newDebt);
-            
-            historyRecordsConfirmed = allocConfirmed.historyRecords;
-            historyRecordsApproved = allocApproved.historyRecords;
-
-            historyDebt = historyDebtConfirmed;
-            currentSurplus = currentSurplusConfirmed;
-            netRedundancy = netRedundancyConfirmed;
-            nextDebt = nextDebtConfirmed;
-            theoreticalBonus = allocConfirmed.theoreticalBonus;
-        }
-
-        netBonusConfirmedVal = allocConfirmed.ratio > 0 ? allocConfirmed.theoreticalBonus : 0;
-        netBonusApprovedVal = allocApproved.ratio > 0 ? allocApproved.theoreticalBonus : 0;
-
-        ratioVal = allocConfirmed.ratio;
-        theoreticalBonusConfirmedVal = allocConfirmed.theoreticalBonus;
-        theoreticalBonusApprovedVal = allocApproved.theoreticalBonus;
-        yearlyBonusApprovedVal = yearlyBaseValApproved * allocApproved.ratio;
-
-        const userObj = users.find((u) => u.id === user.id);
-        const userCenter = userObj?.center || "";
-
-        let centerLevelBonus = 0;
-        if (user.category === "经管员高款专" || user.category === "经管员高产专") {
-          centerLevelBonus = resources
-            .filter((r) => centerMatch(r.assignedTo, userCenter))
-            .reduce((sum, r) => sum + (r.incentiveOutput5 || 0) + (r.incentiveCollection2 || 0), 0);
-        }
-
-        return {
-          userId: user.id,
-          userName: user.name,
-          category: user.category || "初级专家",
-          isRevenueExpert,
-          isChan,
-          historyDebt,
-          currentSurplus,
-          netRedundancy,
-          nextDebt,
-          theoreticalBonus,
-          ratio: ratioVal,
-          centerLevelBonus,
-
-          historyRecordsConfirmed,
-          historyRecordsApproved,
-          historyDebtConfirmed,
-          historyDebtApproved,
-          currentSurplusConfirmed,
-          currentSurplusApproved,
-          netRedundancyConfirmed,
-          netRedundancyApproved,
-          theoreticalBonusConfirmed: theoreticalBonusConfirmedVal,
-          theoreticalBonusApproved: theoreticalBonusApprovedVal,
-
-          confirmedValueConfirmed: confirmedMetrics.productionPackage,
-          bCostConfirmed: confirmedMetrics.b1Cost,
-          b2CostConfirmed: confirmedMetrics.b2Cost,
-          aCostConfirmed: confirmedMetrics.aCost,
-          confirmedGoldConfirmed: confirmedMetrics.revenuePackage,
-          baseValueConfirmed: baseValueConfirmedStr,
-          netBonusConfirmed: netBonusConfirmedVal,
-          isBreakthroughConfirmed: currentSurplus > 0,
-          gapToBreakthroughConfirmed: currentSurplus > 0 ? 0 : Math.abs(currentSurplus),
-          paymentMatchRateConfirmed: 1,
-
-          confirmedValueApproved: approvedMetrics.productionPackage,
-          bCostApproved: approvedMetrics.b1Cost,
-          b2CostApproved: approvedMetrics.b2Cost,
-          aCostApproved: approvedMetrics.aCost,
-          confirmedGoldApproved: approvedMetrics.revenuePackage,
-          baseValueApproved: baseValueApprovedStr,
-          netBonusApproved: netBonusApprovedVal,
-          isBreakthroughApproved: currentSurplus > 0,
-          gapToBreakthroughApproved: currentSurplus > 0 ? 0 : Math.abs(currentSurplus),
-          paymentMatchRateApproved: 1,
-
-          baseValuePending: pendingBaseVal,
-
-          yearlyIncomeApproved: yearlyBaseValApproved,
-          yearlyIncomeConfirmed: yearlyBaseValConfirmed,
-          yearlyBonusApproved: yearlyBonusApprovedVal,
-
-          cWeight: TIER_COEFFICIENTS.BASE_LOSS,
-          salaryPackage,
-          details: userLogsMonthly,
-
-          personalIncentiveStatus: currentSurplus > 0 ? "已激活超额价值分享" : "入库任务进行中",
-          teamDividendStatus: currentSurplus > 0 ? "已激活超额价值分享" : "入库任务进行中",
-        };
       });
-  }, [logs, users, effectiveMonth, startDate, endDate, isLocalEmbedded, distributionLoading, distributionError, serverDistribution]);
+
+      return users
+        .filter((u) => {
+          if (!monthsInRange.some(m => isSalaryActiveForMonth(u, m))) return false;
+          const cat = u.category || "";
+          const sRoles = u.secondaryRoles || [];
+
+          const isExpert =
+            cat.includes("款专") || cat.includes("产专") || isCenterManagerUser(u);
+          const hasExpertSecondaryRole = sRoles.some(
+            (r) => r.includes("款专") || r.includes("产专"),
+          );
+
+          return isExpert || hasExpertSecondaryRole;
+        })
+        .map((user) => {
+          const userLogsMonthly = logsByUserMonthly.get(user.id) || [];
+          const userLogsYearly = logsByUserYearly.get(user.id) || [];
+
+          // 1. 刚性工资多月份动态累加：Total Salary = sum_{i=1}^M Salary_i
+          const salaryPackage = monthsInRange.reduce((sum, m) => {
+            return sum + (isSalaryActiveForMonth(user, m) ? getUserSalaryByMonth(user, m) : 0);
+          }, 0);
+
+          const isRevenueExpert = (user.category || "").includes("款专");
+          const isChanExpert = (user.category || "").includes("产专");
+          const isChan = isChanExpert || user.category === "经管员高产专";
+
+          // 2. 消耗与收产包跨 M 个月动态累加
+          let confRevenue = 0;
+          let confProduction = 0;
+          let confACost = 0;
+          let confB1Cost = 0;
+          let confB2Cost = 0;
+          let confCCost = 0;
+          let confDCost = 0;
+          let confNonEff = 0;
+
+          let appRevenue = 0;
+          let appProduction = 0;
+          let appACost = 0;
+          let appB1Cost = 0;
+          let appB2Cost = 0;
+          let appCCost = 0;
+          let appDCost = 0;
+          let appNonEff = 0;
+
+          for (const m of monthsInRange) {
+            const cM = aggregateUserMonthMetrics(logs || [], user, m, resources || [], users || [], [AuditStatus.Confirmed]);
+            confRevenue += cM.revenuePackage;
+            confProduction += cM.productionPackage;
+            confACost += cM.aCost;
+            confB1Cost += cM.b1Cost;
+            confB2Cost += cM.b2Cost;
+            confCCost += cM.cCost;
+            confDCost += cM.dCost;
+            confNonEff += cM.nonEffectiveDeduction;
+
+            const aM = aggregateUserMonthMetrics(logs || [], user, m, resources || [], users || [], [AuditStatus.Approved]);
+            appRevenue += aM.revenuePackage;
+            appProduction += aM.productionPackage;
+            appACost += aM.aCost;
+            appB1Cost += aM.b1Cost;
+            appB2Cost += aM.b2Cost;
+            appCCost += aM.cCost;
+            appDCost += aM.dCost;
+            appNonEff += aM.nonEffectiveDeduction;
+          }
+
+          const baseValueConfirmedStr = isChan ? confProduction : confRevenue;
+          const baseValueApprovedStr = isChan ? appProduction : appRevenue;
+
+          let yearlyBaseValConfirmed = 0;
+          let yearlyBaseValApproved = 0;
+          let pendingBaseVal = 0;
+          
+          for (const m of monthsInRange) {
+            const pendingMetrics = aggregateUserMonthMetrics(logs || [], user, m, resources || [], users || [], [AuditStatus.Pending]);
+            pendingBaseVal += isChan ? pendingMetrics.productionPackage : pendingMetrics.revenuePackage;
+          }
+
+          let yearlySalaryPackage = 0;
+          if (effectiveMonth) {
+            const [y, m] = effectiveMonth.split("-").map(Number);
+            for (let mIdx = 1; mIdx <= m; mIdx++) {
+              const mStr = `${y}-${String(mIdx).padStart(2, "0")}`;
+              if (isSalaryActiveForMonth(user, mStr)) {
+                yearlySalaryPackage += getUserSalaryByMonth(user, mStr);
+              }
+            }
+          }
+
+          const yearlyMonths = Array.from(new Set(userLogsYearly.map(l => resolveLogBusinessMonth(l))));
+          for (const m of yearlyMonths) {
+            const mConf = aggregateUserMonthMetrics(userLogsYearly, user, m, resources || [], users || [], [AuditStatus.Confirmed]);
+            const mApp = aggregateUserMonthMetrics(userLogsYearly, user, m, resources || [], users || [], [AuditStatus.Approved]);
+            yearlyBaseValConfirmed += (isChan ? mConf.productionPackage : mConf.revenuePackage);
+            yearlyBaseValApproved += (isChan ? mApp.productionPackage : mApp.revenuePackage);
+          }
+
+          let historyDebt = 0;
+          let currentSurplus = 0;
+          let netRedundancy = 0;
+          let nextDebt = 0;
+          let theoreticalBonus = 0;
+
+          let historyDebtConfirmed = 0;
+          let nextDebtConfirmed = 0;
+          let currentSurplusConfirmed = 0;
+          let netRedundancyConfirmed = 0;
+          
+          let historyDebtApproved = 0;
+          let nextDebtApproved = 0;
+          let currentSurplusApproved = 0;
+          let netRedundancyApproved = 0;
+
+          let historyRecordsConfirmed: any[] = [];
+          let historyRecordsApproved: any[] = [];
+
+          let netBonusApprovedVal = 0;
+          let netBonusConfirmedVal = 0;
+
+          let ratioVal = 0;
+          let theoreticalBonusConfirmedVal = 0;
+          let theoreticalBonusApprovedVal = 0;
+          let yearlyBonusApprovedVal = 0;
+
+          const allocConfirmed = calculateBonusAllocationForMonths(
+              monthsInRange,
+              user,
+              logs || [],
+              resources || [],
+              users || [],
+              AuditStatus.Confirmed
+          );
+
+          const allocApproved = calculateBonusAllocationForMonths(
+              monthsInRange,
+              user,
+              logs || [],
+              resources || [],
+              users || [],
+              AuditStatus.Approved
+          );
+
+          if (allocConfirmed.ratio > 0 || allocApproved.ratio > 0) {
+              historyDebtConfirmed = allocConfirmed.history > 0 ? -allocConfirmed.history : 0;
+              currentSurplusConfirmed = allocConfirmed.current;
+              netRedundancyConfirmed = allocConfirmed.quota;
+              nextDebtConfirmed = allocConfirmed.newDebt;
+
+              historyDebtApproved = allocApproved.history > 0 ? -allocApproved.history : 0;
+              currentSurplusApproved = allocApproved.current;
+              netRedundancyApproved = allocApproved.quota;
+              nextDebtApproved = allocApproved.newDebt;
+              
+              historyRecordsConfirmed = allocConfirmed.historyRecords;
+              historyRecordsApproved = allocApproved.historyRecords;
+
+              historyDebt = historyDebtConfirmed;
+              currentSurplus = currentSurplusConfirmed;
+              netRedundancy = netRedundancyConfirmed;
+              nextDebt = nextDebtConfirmed;
+              theoreticalBonus = allocConfirmed.theoreticalBonus;
+          }
+
+          netBonusConfirmedVal = allocConfirmed.ratio > 0 ? allocConfirmed.theoreticalBonus : 0;
+          netBonusApprovedVal = allocApproved.ratio > 0 ? allocApproved.theoreticalBonus : 0;
+
+          ratioVal = allocConfirmed.ratio;
+          theoreticalBonusConfirmedVal = allocConfirmed.theoreticalBonus;
+          theoreticalBonusApprovedVal = allocApproved.theoreticalBonus;
+          yearlyBonusApprovedVal = yearlyBaseValApproved * allocApproved.ratio;
+
+          const userObj = users.find((u) => u.id === user.id);
+          const userCenter = userObj?.center || "";
+
+          let centerLevelBonus = 0;
+          if (user.category === "经管员高款专" || user.category === "经管员高产专") {
+            centerLevelBonus = (resources || [])
+              .filter((r) => centerMatch(r.assignedTo, userCenter))
+              .reduce((sum, r) => sum + (r.incentiveOutput5 || 0) + (r.incentiveCollection2 || 0), 0);
+          }
+
+          const serverItem = (!isLocalEmbedded && serverDistribution) 
+            ? serverDistribution.find((d: any) => d.userId === user.id)
+            : null;
+
+          // 远程模式支持读取 API 的 nonEffectiveDeduction、totalCost、historyDebt；同时本地有精确保底
+          const serverConfNonEff = serverItem?.confirmed?.nonEffectiveDeduction ?? serverItem?.nonEffectiveDeduction;
+          const serverAppNonEff = serverItem?.approved?.nonEffectiveDeduction ?? serverItem?.nonEffectiveDeduction;
+          const effectiveConfNonEff = serverConfNonEff !== undefined ? serverConfNonEff : confNonEff;
+          const effectiveAppNonEff = serverAppNonEff !== undefined ? serverAppNonEff : appNonEff;
+
+          const costOtherConfirmed = isRevenueExpert ? confACost : confB1Cost;
+          const costPackageConfirmed = -(salaryPackage + costOtherConfirmed - effectiveConfNonEff);
+          const totalCostConfirmed = Math.abs(costPackageConfirmed);
+
+          const costOtherApproved = isRevenueExpert ? appACost : appB1Cost;
+          const costPackageApproved = -(salaryPackage + costOtherApproved - effectiveAppNonEff);
+          const totalCostApproved = Math.abs(costPackageApproved);
+
+          return {
+            userId: user.id,
+            userName: user.name,
+            category: user.category || "初级专家",
+            isRevenueExpert,
+            isChan,
+            costPackage: costPackageConfirmed,
+            totalCost: totalCostConfirmed,
+            nonEffectiveDeductionConfirmed: effectiveConfNonEff,
+            nonEffectiveDeductionApproved: effectiveAppNonEff,
+            historyDebt,
+            currentSurplus,
+            netRedundancy,
+            nextDebt,
+            theoreticalBonus,
+            ratio: ratioVal,
+            centerLevelBonus,
+
+            historyRecordsConfirmed,
+            historyRecordsApproved,
+            historyDebtConfirmed,
+            historyDebtApproved,
+            currentSurplusConfirmed,
+            currentSurplusApproved,
+            netRedundancyConfirmed,
+            netRedundancyApproved,
+            theoreticalBonusConfirmed: theoreticalBonusConfirmedVal,
+            theoreticalBonusApproved: theoreticalBonusApprovedVal,
+
+            confirmedValueConfirmed: confProduction,
+            bCostConfirmed: confB1Cost,
+            b2CostConfirmed: confB2Cost,
+            aCostConfirmed: confACost,
+            confirmedGoldConfirmed: confRevenue,
+            baseValueConfirmed: baseValueConfirmedStr,
+            netBonusConfirmed: netBonusConfirmedVal,
+            isBreakthroughConfirmed: currentSurplus > 0,
+            gapToBreakthroughConfirmed: currentSurplus > 0 ? 0 : Math.abs(currentSurplus),
+            paymentMatchRateConfirmed: 1,
+
+            confirmedValueApproved: appProduction,
+            bCostApproved: appB1Cost,
+            b2CostApproved: appB2Cost,
+            aCostApproved: appACost,
+            confirmedGoldApproved: appRevenue,
+            baseValueApproved: baseValueApprovedStr,
+            netBonusApproved: netBonusApprovedVal,
+            isBreakthroughApproved: currentSurplus > 0,
+            gapToBreakthroughApproved: currentSurplus > 0 ? 0 : Math.abs(currentSurplus),
+            paymentMatchRateApproved: 1,
+
+            baseValuePending: pendingBaseVal,
+
+            yearlyIncomeApproved: yearlyBaseValApproved,
+            yearlyIncomeConfirmed: yearlyBaseValConfirmed,
+            yearlyBonusApproved: yearlyBonusApprovedVal,
+
+            cWeight: TIER_COEFFICIENTS.BASE_LOSS,
+            salaryPackage,
+            details: userLogsMonthly,
+
+            personalIncentiveStatus: currentSurplus > 0 ? "已激活超额价值分享" : "入库任务进行中",
+            teamDividendStatus: currentSurplus > 0 ? "已激活超额价值分享" : "入库任务进行中",
+          };
+        });
+    };
+
+    const firstPass = getFirstPass();
+
+    // Second pass to compute/override expert surplus based on accurate theory
+    return firstPass.map(data => {
+      const cat = data.category || "";
+      const isManagerKuan = cat === "经管员高款专";
+      const isKuan = cat === "初款专" || cat === "中款专" || cat === "高款专" || isManagerKuan;
+
+      const getIndRedundancy = (uid: string, c: string) => {
+        const isChan = (c || "").includes("产专");
+        if (isChan) {
+          const item = firstPass.find(d => d.userId === uid);
+          return item ? (item.netRedundancy || 0) : 0;
+        }
+        const isRankKuan = c === "中款专" || c === "初款专";
+        const rowLogs = (logs || []).filter(
+          (l) => l.recordedCollectorId === uid &&
+                 (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved) &&
+                 (startDate && endDate
+                   ? isDateInRange(resolveLogBusinessDate(l), startDate, endDate)
+                   : monthsInRange.includes(resolveLogBusinessMonth(l)))
+        );
+        const rxPoints = rowLogs.filter(l => l.category === RefineCategory.Revenue).reduce((sum, l) => sum + (l.amount || 0), 0);
+        return isRankKuan ? rxPoints * 0.02 : 0;
+      };
+
+      let redundancy = 0;
+      if (isManagerKuan) {
+        const managerUser = users.find(u => u.id === data.userId);
+        const managerCenter = managerUser?.center || "";
+        redundancy = firstPass.reduce((acc, d) => {
+          if (d.userId === data.userId) return acc;
+          const u = users.find(x => x.id === d.userId);
+          if (managerCenter && u?.center !== managerCenter) return acc;
+          return acc + getIndRedundancy(d.userId, d.category);
+        }, 0);
+      }
+
+      const collectionPackage = data.baseValueConfirmed || 0;
+      const costOther = data.isRevenueExpert ? (data.aCostConfirmed || 0) : (data.bCostConfirmed || 0);
+      const nonEffectiveDeduction = data.nonEffectiveDeductionConfirmed || 0;
+      const costPackage = -((data.salaryPackage || 0) + costOther - nonEffectiveDeduction);
+      const totalCost = Math.abs(costPackage);
+      
+      const collection = collectionPackage + redundancy;
+      const rawBase = collection + costPackage;
+      const currentSurplus = rawBase;
+      const historyDebt = data.historyDebtConfirmed ?? data.historyDebt ?? 0;
+      const netRedundancy = Math.max(0, currentSurplus + historyDebt);
+      const theoreticalBonus = Math.round(netRedundancy * (data.ratio || 0));
+
+      return {
+        ...data,
+        costPackage,
+        totalCost,
+        currentSurplus: rawBase,
+        currentSurplusConfirmed: rawBase,
+        currentSurplusApproved: rawBase,
+        netRedundancy,
+        netRedundancyConfirmed: netRedundancy,
+        netRedundancyApproved: netRedundancy,
+        theoreticalBonus,
+        theoreticalBonusConfirmed: theoreticalBonus,
+        theoreticalBonusApproved: theoreticalBonus,
+        netBonusConfirmed: theoreticalBonus,
+        netBonusApproved: theoreticalBonus,
+      };
+    });
+  }, [logs, users, resources, effectiveMonth, startDate, endDate, monthsInRange, isLocalEmbedded, distributionLoading, distributionError, serverDistribution]);
 
   const getRedundancyValue = React.useCallback(
     (userId: string, category: string) => {
@@ -736,7 +816,9 @@ const Distribution: React.FC<DistributionProps> = ({
             l.recordedCollectorId === uid &&
             (l.status === AuditStatus.Confirmed ||
               l.status === AuditStatus.Approved) &&
-            resolveLogBusinessMonth(l) === effectiveMonth,
+            (startDate && endDate
+              ? isDateInRange(resolveLogBusinessDate(l), startDate, endDate)
+              : monthsInRange.includes(resolveLogBusinessMonth(l))),
         );
 
         const rxPoints = rowLogs
@@ -750,15 +832,19 @@ const Distribution: React.FC<DistributionProps> = ({
       const isManager =
         category === "经管员高款专" || category === "经管员高产专";
       if (isManager) {
+        const managerUser = users.find(u => u.id === userId);
+        const managerCenter = managerUser?.center || "";
         return (distributionData || []).reduce((acc, d) => {
           if (d.userId === userId) return acc;
+          const u = users.find(x => x.id === d.userId);
+          if (managerCenter && u?.center !== managerCenter) return acc;
           return acc + getIndividualRedundancy(d.userId, d.category);
         }, 0);
       } else {
         return getIndividualRedundancy(userId, category);
       }
     },
-    [logs, effectiveMonth, startDate, endDate, distributionData],
+    [logs, users, effectiveMonth, startDate, endDate, monthsInRange, distributionData],
   );
 
   const getKuanTheoreticalTiers = React.useCallback(
@@ -775,12 +861,16 @@ const Distribution: React.FC<DistributionProps> = ({
       if (!isKuan) return null;
 
       const collectionPackage = data.baseValueConfirmed || 0;
-      const totalCost = (data.salaryPackage || 0) + (data.aCostConfirmed || 0);
+      const nonEffectiveDeduction = data.nonEffectiveDeductionConfirmed || 0;
+      const costPackage = -((data.salaryPackage || 0) + (data.isChan ? (data.bCostConfirmed || 0) : (data.aCostConfirmed || 0)) - nonEffectiveDeduction);
+      const totalCost = Math.abs(costPackage);
       const redundancy = isManagerKuan
         ? getRedundancyValue(data.userId, cat)
         : 0;
 
-      const rawBase = collectionPackage + redundancy - totalCost;
+      // 理论基数公式：TheoryBase = max(0, Collection + CostPackage)
+      const collection = collectionPackage + redundancy;
+      const rawBase = collection + costPackage;
       const base = rawBase < 0 ? 0 : rawBase;
 
       const t60 = Math.round(base * 0.6);
@@ -792,7 +882,9 @@ const Distribution: React.FC<DistributionProps> = ({
         t80,
         t100,
         base,
+        rawBase,
         collectionPackage,
+        costPackage,
         totalCost,
         redundancy,
         isManagerKuan,
@@ -819,29 +911,6 @@ const Distribution: React.FC<DistributionProps> = ({
     [distributionData],
   );
 
-  const avgValueQualityApproved = useMemo(() => {
-    const totalValue = distributionData.reduce(
-      (acc, curr) => acc + curr.confirmedValueApproved,
-      0,
-    );
-    const totalGold = distributionData.reduce(
-      (acc, curr) => acc + curr.confirmedGoldApproved,
-      0,
-    );
-    return totalValue > 0 ? totalGold / totalValue : 0;
-  }, [distributionData]);
-
-  const avgValueQualityConfirmed = useMemo(() => {
-    const totalValue = distributionData.reduce(
-      (acc, curr) => acc + curr.confirmedValueConfirmed,
-      0,
-    );
-    const totalGold = distributionData.reduce(
-      (acc, curr) => acc + curr.confirmedGoldConfirmed,
-      0,
-    );
-    return totalValue > 0 ? totalGold / totalValue : 0;
-  }, [distributionData]);
 
   const cdtzList = useMemo(() => {
     const list: AcceptanceRecord[] = [];
@@ -862,6 +931,11 @@ const Distribution: React.FC<DistributionProps> = ({
     return list;
   }, [localCdtzRecords, acceptanceRecords]);
 
+  type DistributionSortField = 'userName' | 'incomePackage' | 'costPackage' | 'totalCost' | 'historyDebt' | 'netRedundancy' | 'theoreticalBonus' | 'currentCdtz' | 'yearlyCdtz';
+
+  const [sortField, setSortField] = useState<DistributionSortField | null>(null);
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | null>(null);
+
   const filteredDistributionData = useMemo(() => {
     return distributionData.filter(d => {
       if (!searchQuery.trim()) return true;
@@ -870,7 +944,96 @@ const Distribution: React.FC<DistributionProps> = ({
     });
   }, [distributionData, searchQuery]);
 
+  const sortedDistributionData = useMemo(() => {
+    const list = [...filteredDistributionData];
+    if (!sortField || !sortOrder) return list;
+
+    const queryYear = startDate ? startDate.slice(0, 4) : (filterMonth ? filterMonth.slice(0, 4) : new Date().getFullYear().toString());
+
+    const getMetricValue = (d: any) => {
+      switch (sortField) {
+        case 'userName':
+          return d.userName || '';
+        case 'incomePackage': {
+          const kuanTiers = getKuanTheoreticalTiers(d);
+          return kuanTiers ? (kuanTiers.collectionPackage + kuanTiers.redundancy) : (d.baseValueConfirmed || 0);
+        }
+        case 'costPackage':
+        case 'totalCost': {
+          const costOther = d.isRevenueExpert ? (d.aCostConfirmed || 0) : (d.bCostConfirmed || 0);
+          return -((d.salaryPackage || 0) + costOther);
+        }
+        case 'historyDebt':
+          return d.historyDebtConfirmed ?? d.historyDebt ?? 0;
+        case 'netRedundancy':
+          return d.netRedundancyConfirmed ?? d.netRedundancy ?? 0;
+        case 'theoreticalBonus':
+          return d.theoreticalBonusConfirmed ?? d.theoreticalBonus ?? 0;
+        case 'currentCdtz':
+          return cdtzList
+            .filter((r) => r.userId === d.userId && monthsInRange.includes(r.month) && r.status === "已承兑")
+            .reduce((sum, r) => sum + r.amount, 0);
+        case 'yearlyCdtz': {
+          const userYearlyCdtzSum = cdtzList
+            .filter((r) => r.userId === d.userId && r.status === "已承兑" && r.month.startsWith(queryYear))
+            .reduce((sum, r) => sum + r.amount, 0);
+          return userYearlyCdtzSum || d.yearlyIncomeConfirmed || 0;
+        }
+        default:
+          return 0;
+      }
+    };
+
+    list.sort((a, b) => {
+      const valA = getMetricValue(a);
+      const valB = getMetricValue(b);
+
+      if (typeof valA === 'string' && typeof valB === 'string') {
+        const res = valA.localeCompare(valB, 'zh-CN');
+        return sortOrder === 'asc' ? res : -res;
+      } else {
+        const numA = Number(valA) || 0;
+        const numB = Number(valB) || 0;
+        if (numA === numB) return 0;
+        return sortOrder === 'asc' ? numA - numB : numB - numA;
+      }
+    });
+
+    return list;
+  }, [filteredDistributionData, sortField, sortOrder, getKuanTheoreticalTiers, cdtzList, monthsInRange, startDate, filterMonth]);
+
+  const handleSort = (field: DistributionSortField) => {
+    if (sortField === field || (field === 'costPackage' && sortField === 'totalCost') || (field === 'totalCost' && sortField === 'costPackage')) {
+      if (sortOrder === 'desc') {
+        setSortOrder('asc');
+      } else if (sortOrder === 'asc') {
+        setSortField(null);
+        setSortOrder(null);
+      } else {
+        setSortOrder('desc');
+      }
+    } else {
+      setSortField(field);
+      setSortOrder(field === 'userName' ? 'asc' : 'desc');
+    }
+  };
+
+  const renderSortIcon = (field: DistributionSortField) => {
+    const isActive = sortField === field || (field === 'costPackage' && sortField === 'totalCost') || (field === 'totalCost' && sortField === 'costPackage');
+    if (!isActive) {
+      return <ArrowUpDown className="w-3 h-3 ml-1 text-slate-300 opacity-60 group-hover:opacity-100 group-hover:text-slate-500 transition-opacity shrink-0 inline-block" />;
+    }
+    if (sortOrder === 'asc') {
+      return <ArrowUp className="w-3 h-3 ml-1 text-blue-600 font-bold shrink-0 inline-block" />;
+    }
+    return <ArrowDown className="w-3 h-3 ml-1 text-blue-600 font-bold shrink-0 inline-block" />;
+  };
+
   const exportToExcel = () => {
+    if (!canExport) {
+      toast.error(EXPORT_DISABLED_TOOLTIP);
+      return;
+    }
     const data = filteredDistributionData.map((d) => {
       const yearlyIncomeKey = d.isRevenueExpert
         ? "年度累计收款包"
@@ -918,7 +1081,7 @@ const Distribution: React.FC<DistributionProps> = ({
     return (
       <div className="w-full space-y-8 animate-in fade-in duration-700 pb-6 font-sans">
         {/* Header */}
-        <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} shadow-sm border border-slate-100`}>
+        <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} shadow-sm border border-slate-300`}>
           <div>
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white shadow-2xl">
@@ -936,7 +1099,7 @@ const Distribution: React.FC<DistributionProps> = ({
           </div>
         </div>
 
-        <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-sm overflow-hidden`}>
+        <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} border border-slate-300 shadow-sm overflow-hidden`}>
           <div className="p-6 md:p-8 border-b border-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest flex items-center">
               <Calculator size={16} className="mr-3 text-blue-600" />
@@ -975,7 +1138,13 @@ const Distribution: React.FC<DistributionProps> = ({
               </div>
               <button
                 onClick={exportToExcel}
-                className="px-4 py-2 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all flex items-center shadow-2xs"
+                disabled={!canExport}
+                title={getExportButtonTitle(canExport, '导出分配清单')}
+                className={`px-4 py-2 border rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center shadow-2xs ${
+                  !canExport
+                    ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+                    : 'bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-100 cursor-pointer'
+                }`}
               >
                 <Wallet size={13} className="mr-1.5" />
                 导出分配清单
@@ -991,7 +1160,7 @@ const Distribution: React.FC<DistributionProps> = ({
   return (
     <div className="w-full space-y-8 animate-in fade-in duration-700 pb-6 font-sans">
       {/* Header */}
-      <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} shadow-sm border border-slate-100`}>
+      <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} shadow-sm border border-slate-300`}>
         <div>
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white shadow-2xl">
@@ -1007,53 +1176,42 @@ const Distribution: React.FC<DistributionProps> = ({
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-1 gap-6">
-
-        <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} p-8 border border-slate-100 shadow-sm group hover:shadow-xl transition-all`}>
-          <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-2">
-            平均产值含金量
-          </p>
-          <div className="space-y-4">
-            <div>
-              <div className="flex items-baseline justify-between mb-1">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">
-                  入库
-                </span>
-                <span className="text-xl font-black font-mono tracking-tighter text-slate-900">
-                  {(avgValueQualityApproved * 100).toFixed(1)}%
-                </span>
-              </div>
-              <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
-                <div
-                  className="bg-amber-500 h-full transition-all duration-1000"
-                  style={{ width: `${avgValueQualityApproved * 100}%` }}
-                ></div>
-              </div>
-            </div>
-            <div>
-              <div className="flex items-baseline justify-between mb-1">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">
-                  已确权
-                </span>
-                <span className="text-xl font-black font-mono tracking-tighter text-slate-400">
-                  {(avgValueQualityConfirmed * 100).toFixed(1)}%
-                </span>
-              </div>
-              <div className="w-full bg-slate-50 h-1 rounded-full overflow-hidden">
-                <div
-                  className="bg-slate-300 h-full transition-all duration-1000"
-                  style={{ width: `${avgValueQualityConfirmed * 100}%` }}
-                ></div>
-              </div>
-            </div>
-          </div>
+        {/* Tab Switcher */}
+        <div className="flex items-center bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
+          <button
+            onClick={() => setActiveTab('matrix')}
+            className={`px-5 py-2.5 rounded-xl text-xs font-black tracking-tight transition-all cursor-pointer ${
+              activeTab === 'matrix'
+                ? 'bg-slate-900 text-white shadow-md'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+            }`}
+          >
+            专家价值核算矩阵
+          </button>
+          <button
+            onClick={() => setActiveTab('sealed')}
+            className={`px-5 py-2.5 rounded-xl text-xs font-black tracking-tight transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'sealed'
+                ? 'bg-indigo-600 text-white shadow-md'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+            }`}
+          >
+            <span>封存分红</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${activeTab === 'sealed' ? 'bg-indigo-700 text-indigo-100' : 'bg-slate-200 text-slate-700'}`}>
+              已封存
+            </span>
+          </button>
         </div>
       </div>
 
-      <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-sm overflow-hidden`}>
+      {activeTab === 'sealed' ? (
+        <SealedDividendTable logs={logs} users={users} currentUser={currentUser} resources={resources} />
+      ) : (
+        <>
+
+
+      <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} border border-slate-300 shadow-sm overflow-hidden`}>
         <div className="p-6 md:p-8 border-b border-slate-50 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest flex items-center">
@@ -1098,7 +1256,13 @@ const Distribution: React.FC<DistributionProps> = ({
             </div>
             <button
               onClick={exportToExcel}
-              className="px-4 py-2 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all flex items-center shadow-2xs"
+              disabled={!canExport}
+              title={getExportButtonTitle(canExport, '导出分配清单')}
+              className={`px-4 py-2 border rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center shadow-2xs ${
+                !canExport
+                  ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+                  : 'bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-100 cursor-pointer'
+              }`}
             >
               <Wallet size={13} className="mr-1.5" />
               导出分配清单
@@ -1108,641 +1272,535 @@ const Distribution: React.FC<DistributionProps> = ({
 
         {/* Table View with Horizontal Scroll */}
         <div className="block overflow-x-auto custom-scrollbar pb-4 relative">
-          <table className="w-full text-left border-separate border-spacing-0 border border-slate-200 rounded-2xl overflow-hidden">
+          <table className="w-full text-left border-separate border-spacing-0 border border-slate-300 rounded-xl overflow-hidden table-auto min-w-[1180px]">
             <thead className="sticky top-0 z-20">
-              <tr className="bg-slate-50/90 backdrop-blur-md">
-                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[160px]">
-                  采集主体
-                </th>
-                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[120px]">
-                  <div className="flex items-center justify-center gap-1.5">
-                    <span>收产包</span>
-                    <InfoTip title="收产包口径" content="款专收款已确权，产专产值已确权或待确权联动确权。" />
+              <tr className="bg-slate-100/90 backdrop-blur-md">
+                {/* 1. 采集主体 (Dimension) */}
+                <th 
+                  onClick={() => handleSort('userName')}
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-left text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[140px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="inline-flex items-center">
+                      采集主体 {renderSortIcon('userName')}
+                    </span>
                   </div>
                 </th>
-                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[100px]">
-                  <div className="flex items-center justify-center gap-1.5">
-                    <span>总成本对冲</span>
+                {/* 2. 收产包 (Measure) */}
+                <th 
+                  onClick={() => handleSort('incomePackage')}
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[110px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none"
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    <span className="inline-flex items-center">
+                      收产包 {renderSortIcon('incomePackage')}
+                    </span>
+                  </div>
+                </th>
+                {/* 3. 成本包 */}
+                <th 
+                  onClick={() => handleSort('costPackage')}
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[120px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none"
+                  title="点击按成本包排序"
+                >
+                  <div className="flex items-center justify-end gap-1.5">
+                    <span className="inline-flex items-center">
+                      成本包 {renderSortIcon('costPackage')}
+                    </span>
                     <CostPrivacyToggle size="sm" showLabel={false} />
-                    <InfoTip title="总成本对冲口径" content="款专工资+A类，产专工资+B1类，不含 B2/C 动态对冲。" />
+                    <InfoTip title="成本包口径" content="款专：刚性工资 − FXDC + A类消耗；产专：刚性工资 − FXDC + B1类消耗。强制展示取负。" />
                   </div>
                 </th>
-                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[100px]">
-                  <div className="flex items-center justify-center gap-1.5">
-                    <span>历史欠产包</span>
+                {/* 4. 历史欠产包 */}
+                <th 
+                  onClick={() => handleSort('historyDebt')}
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[105px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none"
+                  title="点击按历史欠产包排序"
+                >
+                  <div className="flex items-center justify-end gap-1.5">
+                    <span className="inline-flex items-center">
+                      历史欠产包 {renderSortIcon('historyDebt')}
+                    </span>
                     <InfoTip title="历史欠产包口径" content="当年 1~M-1 全量滚动，无流水仍计工资，不含当月，负数展示。" />
                   </div>
                 </th>
-                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[100px]">
-                  <div className="flex items-center justify-center gap-1.5">
-                    <span>分配额度（月）</span>
-                    <InfoTip title="分配额度口径" content="填平历史欠产后的净分配额度（≥0）。" />
+                {/* 5. 分配额度（月） */}
+                <th 
+                  onClick={() => handleSort('netRedundancy')}
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-indigo-700 bg-indigo-50/40 uppercase tracking-wider min-w-[115px] cursor-pointer hover:bg-indigo-100/60 transition-colors select-none"
+                  title="点击按分配额度排序"
+                >
+                  <div className="flex items-center justify-end gap-1.5">
+                    <span className="inline-flex items-center">
+                      分配额度（月） {renderSortIcon('netRedundancy')}
+                    </span>
+                    <InfoTip title="分配额度口径" content="净额度 = max(0, (收产包 + 成本包) + 历史欠产包)（≥0）。" />
                   </div>
                 </th>
-                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-amber-600 bg-amber-50/50 uppercase tracking-widest min-w-[100px]">
-                  <div className="flex items-center justify-center gap-1.5">
-                    <span>理论（额度）</span>
-                    <InfoTip title="理论（额度）口径" content="理论奖金=已确权额度×系数，计算应发理论额度。" />
+                {/* 6. 理论（额度） */}
+                <th 
+                  onClick={() => handleSort('theoreticalBonus')}
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-amber-700 bg-amber-50/50 uppercase tracking-wider min-w-[135px] cursor-pointer hover:bg-amber-100/60 transition-colors select-none"
+                  title="点击按理论额度排序"
+                >
+                  <div className="flex items-center justify-end gap-1.5">
+                    <span className="inline-flex items-center">
+                      理论（额度） {renderSortIcon('theoreticalBonus')}
+                    </span>
+                    <InfoTip title="理论（额度）口径" content="基数 = max(0, 收产包 + 成本包)，支持 60% / 80% / 100% 三档管理调节测算切换。" />
                   </div>
                 </th>
-                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-emerald-600 bg-emerald-50/50 uppercase tracking-widest min-w-[100px]">
-                  <div className="flex items-center justify-center gap-1.5">
-                    <span>承兑（实发）</span>
-                    <InfoTip title="承兑（实发）口径" content="当月 cdtz 实际发放和承兑记录。" />
+                {/* 7. 当月承兑实发 */}
+                <th 
+                  onClick={() => handleSort('currentCdtz')}
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-emerald-800 bg-emerald-50/50 uppercase tracking-wider min-w-[110px] cursor-pointer hover:bg-emerald-100/60 transition-colors select-none"
+                  title="点击按当月承兑实发排序"
+                >
+                  <div className="flex items-center justify-end gap-1.5">
+                    <span className="inline-flex items-center">
+                      当月承兑实发 {renderSortIcon('currentCdtz')}
+                    </span>
+                    <InfoTip title="当月承兑实发口径" content="当月在承兑台账 cdtz 中实际已发放的总额。" />
                   </div>
                 </th>
-                <th className="border-b border-r border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[100px]">
-                  <div className="flex items-center justify-center gap-1.5">
-                    <span>年度累计</span>
-                     <InfoTip title="年度累计口径" content="按选定审核状态年度全量累计计算。" />
+                {/* 8. 年度累计承兑 */}
+                <th 
+                  onClick={() => handleSort('yearlyCdtz')}
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[110px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none"
+                  title="点击按年度累计承兑排序"
+                >
+                  <div className="flex items-center justify-end gap-1.5">
+                    <span className="inline-flex items-center">
+                      年度累计承兑 {renderSortIcon('yearlyCdtz')}
+                    </span>
+                    <InfoTip title="年度累计承兑口径" content="自然年内累计已承兑实发总额。" />
                   </div>
                 </th>
-                <th className="border-b border-slate-200 py-4 px-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest min-w-[100px]">
+                {/* 9. 操作控制 */}
+                <th className="border-b border-slate-300 py-1.5 px-3 text-center text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[100px]">
                   操作控制
                 </th>
               </tr>
             </thead>
             <tbody>
-              {filteredDistributionData.length === 0 ? (
+              {sortedDistributionData.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">
+                  <td colSpan={9} className="px-6 py-20 text-center text-slate-400 font-bold uppercase text-[10px] tracking-widest">
                     没有找到符合条件的专家
                   </td>
                 </tr>
               ) : (
-                filteredDistributionData.map((data) => {
+                sortedDistributionData.map((data) => {
                   const userObj = users.find((u) => u.id === data.userId);
-                const userCenter = userObj?.center || "";
-                const userCenters = parseCenterList(userCenter);
+                  const userCenter = userObj?.center || "";
 
-                const coll2_Sum = resources
-                  .filter(
-                    (r) =>
-                      r.assignedToRevenue === data.userId ||
-                      r.assignedToRevenue === data.userName ||
-                      centerMatch(r.assignedToRevenue, userCenter),
-                  )
-                  .reduce((sum, r) => sum + (r.incentiveCollection2 || 0), 0);
+                  const coll2_Sum = resources
+                    .filter(
+                      (r) =>
+                        r.assignedToRevenue === data.userId ||
+                        r.assignedToRevenue === data.userName ||
+                        centerMatch(r.assignedToRevenue, userCenter),
+                    )
+                    .reduce((sum, r) => sum + (r.incentiveCollection2 || 0), 0);
 
-                const out5_Sum = resources
-                  .filter(
-                    (r) =>
-                      r.assignedToValue === data.userId ||
-                      r.assignedToValue === data.userName ||
-                      centerMatch(r.assignedToValue, userCenter),
-                  )
-                  .reduce((sum, r) => sum + (r.incentiveOutput5 || 0), 0);
+                  const out5_Sum = resources
+                    .filter(
+                      (r) =>
+                        r.assignedToValue === data.userId ||
+                        r.assignedToValue === data.userName ||
+                        centerMatch(r.assignedToValue, userCenter),
+                    )
+                    .reduce((sum, r) => sum + (r.incentiveOutput5 || 0), 0);
 
-                const isKuan =
-                  (data.category || "").includes("款专") ||
-                  (data.userName || "").includes("款专");
-                const isChan =
-                  (data.category || "").includes("产专") ||
-                  (data.userName || "").includes("产专");
+                  const kuanTiers = getKuanTheoreticalTiers(data);
 
-                const kuanTiers = getKuanTheoreticalTiers(data);
+                  const userCdtzSum = cdtzList
+                    .filter((r) => r.userId === data.userId && monthsInRange.includes(r.month) && r.status === "已承兑")
+                    .reduce((sum, r) => sum + r.amount, 0);
 
-                const userCdtzSum = cdtzList
-                  .filter((r) => r.userId === data.userId && r.month === effectiveMonth && r.status === "已承兑")
-                  .reduce((sum, r) => sum + r.amount, 0);
+                  const queryYear = startDate ? startDate.slice(0, 4) : (filterMonth ? filterMonth.slice(0, 4) : new Date().getFullYear().toString());
 
-                return (
-                  <React.Fragment key={data.userId}>
-                    <tr
-                      className={`group/tr hover:bg-slate-50/80 transition-colors ${selectedUser === data.userId ? "bg-blue-50/30" : ""}`}
-                    >
-                      {/* Column 1: 采集主体 */}
-                      <td className="p-4 border border-slate-200 text-center">
-                        <div className="flex flex-col gap-1 items-center justify-center">
-                          <span className="text-sm font-bold text-[#0f172a]">
-                            {data.userName}
-                          </span>
-                          <span className="text-[11px] font-normal text-[#64748b] bg-slate-100 px-2.5 py-0.5 rounded-full">
-                            {formatCategory(data.category)}
-                          </span>
-                          {data.category === "经管员高款专" && (
-                            <div className="mt-2 px-2 py-1 text-[10px] text-slate-500 border border-dashed border-slate-200 rounded-lg bg-slate-50/50 flex flex-col items-center select-none">
-                              <span className="text-slate-400">经营单元本级</span>
-                              <span className="font-mono font-bold text-indigo-600">
-                                {fmtAmount(out5_Sum + coll2_Sum)}
+                  const userYearlyCdtzSum = cdtzList
+                    .filter((r) => r.userId === data.userId && r.status === "已承兑" && r.month.startsWith(queryYear))
+                    .reduce((sum, r) => sum + r.amount, 0);
+
+                  const costOther = data.isRevenueExpert ? (data.aCostConfirmed || 0) : (data.bCostConfirmed || 0);
+                  const nonEffectiveDeduction = data.nonEffectiveDeductionConfirmed || 0;
+                  const totalCost = data.costPackage !== undefined ? Math.abs(data.costPackage) : Math.abs((data.salaryPackage || 0) + costOther - nonEffectiveDeduction);
+
+                  return (
+                    <React.Fragment key={data.userId}>
+                      <tr
+                        className={`group/tr hover:bg-slate-50/90 transition-colors ${selectedUser === data.userId ? "bg-blue-50/40" : ""}`}
+                      >
+                        {/* 1. 采集主体 (Dimension) */}
+                        <td className="py-1.5 px-3 border border-slate-300 text-left">
+                          <div className="flex flex-col text-left">
+                            <span className="text-xs font-bold text-slate-900">{data.userName}</span>
+                            <span className="text-[10px] font-medium text-slate-500 font-mono mt-0.5">
+                              {formatCategory(data.category)} · {data.userId}
+                            </span>
+                            {data.category === "经管员高款专" && (
+                              <span className="text-[9px] text-indigo-600 font-mono font-medium mt-0.5">
+                                单元本级: ¥{fmtAmount(out5_Sum + coll2_Sum)}
                               </span>
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                      {/* Column 2: 收产包 */}
-                      <td className="p-0 border border-slate-200">
-                        <div className="flex flex-col divide-y divide-slate-200 h-full w-full">
-                          <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
-                              已确权：
-                            </div>
-                            <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-slate-800 whitespace-nowrap">
-                              {fmtAmount(data.baseValueConfirmed)}
-                            </div>
-                          </div>
-                          <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
-                              入库：
-                            </div>
-                            <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-slate-800 whitespace-nowrap">
-                              {fmtAmount(data.baseValueApproved)}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Column 3: 总成本对冲 */}
-                      <td className="p-0 border border-slate-200">
-                        <div className="flex flex-col divide-y divide-slate-200 h-full w-full">
-                          <div className="flex items-stretch flex-1 min-h-[38px] group/cost">
-                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
-                              已确权
-                            </div>
-                            <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-bold text-slate-700 whitespace-nowrap relative group">
-                              <span title={`刚性工资包(${formatAmount(data.salaryPackage)}) + 浮动成本(${formatAmount(data.isRevenueExpert ? (data.aCostConfirmed || 0) : (data.bCostConfirmed || 0))})`}>
-                                {maskMoney(data.salaryPackage + (data.isRevenueExpert ? (data.aCostConfirmed || 0) : (data.bCostConfirmed || 0)), fmtAmount)}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="flex items-stretch flex-1 min-h-[38px] group/cost">
-                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
-                              入库
-                            </div>
-                            <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-bold text-slate-700 whitespace-nowrap relative group">
-                              <span title={`刚性工资包(${formatAmount(data.salaryPackage)}) + 浮动成本(${formatAmount(data.isRevenueExpert ? (data.aCostApproved || 0) : (data.bCostApproved || 0))})`}>
-                                {maskMoney(data.salaryPackage + (data.isRevenueExpert ? (data.aCostApproved || 0) : (data.bCostApproved || 0)), fmtAmount)}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Column 4: 历史欠产包 */}
-                      <td className="p-0 border border-slate-200">
-                        <div className="flex flex-col divide-y divide-slate-200 h-full w-full">
-                          <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
-                              已确权
-                            </div>
-                            <div
-                              className={`flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] whitespace-nowrap text-red-500 font-bold`}
-                            >
-                              {fmtDebt(data.historyDebtConfirmed)}
-                            </div>
-                          </div>
-                          <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
-                              入库
-                            </div>
-                            <div
-                              className={`flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] whitespace-nowrap text-red-500 font-bold`}
-                            >
-                              {fmtDebt(data.historyDebtApproved)}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Column 5: 分配额度（月） */}
-                      <td className="p-0 border border-slate-200">
-                        <div className="flex flex-col divide-y divide-slate-200 h-full w-full">
-                          <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
-                              已确权
-                            </div>
-                            <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-indigo-600 whitespace-nowrap">
-                              {fmtAmount(data.netRedundancyConfirmed)}
-                            </div>
-                          </div>
-                          <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
-                              入库
-                            </div>
-                            <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-[#10b981] whitespace-nowrap">
-                              {fmtAmount(data.netRedundancyApproved)}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Column 6: 理论（额度） */}
-                      <td className="p-0 border border-slate-200 bg-amber-50/30">
-                        <div className="flex flex-col divide-y divide-amber-100/50 h-full w-full">
-                          <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-amber-100/50 text-amber-600/70 text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
-                              已确权
-                            </div>
-                            <TheoreticalCell
-                              isRevenueExpert={data.isRevenueExpert}
-                              theoreticalBonus={data.theoreticalBonusConfirmed}
-                              expanded={!!theoreticalExpanded[`${data.userId}-confirmed`]}
-                              onToggle={() => setTheoreticalExpanded(prev => ({
-                                ...prev,
-                                [`${data.userId}-confirmed`]: !prev[`${data.userId}-confirmed`]
-                              }))}
-                            />
-                          </div>
-                          <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-amber-100/50 text-amber-600/70 text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
-                              入库
-                            </div>
-                            <TheoreticalCell
-                              isRevenueExpert={data.isRevenueExpert}
-                              theoreticalBonus={data.theoreticalBonusApproved}
-                              expanded={!!theoreticalExpanded[`${data.userId}-approved`]}
-                              onToggle={() => setTheoreticalExpanded(prev => ({
-                                ...prev,
-                                [`${data.userId}-approved`]: !prev[`${data.userId}-approved`]
-                              }))}
-                            />
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Column 7: 承兑（实发） */}
-                      <td className="p-0 border border-slate-200 bg-emerald-50/20">
-                        <div className="flex flex-col divide-y divide-emerald-100/50 h-full w-full">
-                          <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-emerald-100/50 text-emerald-600/70 text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
-                              已确权
-                            </div>
-                            <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-emerald-600 whitespace-nowrap">
-                              {fmtAmount(userCdtzSum)}
-                            </div>
-                          </div>
-                          <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-emerald-100/50 text-emerald-600/70 text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
-                              入库
-                            </div>
-                            <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-emerald-600 whitespace-nowrap">
-                              {fmtAmount(userCdtzSum)}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Column 8: 年度累计 */}
-                      <td className="p-0 border border-slate-200">
-                        <div className="flex flex-col divide-y divide-slate-200 h-full w-full">
-                          <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
-                              已确权
-                            </div>
-                            <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-slate-800 whitespace-nowrap">
-                              {fmtAmount(data.yearlyIncomeConfirmed)}
-                            </div>
-                          </div>
-                          <div className="flex items-stretch flex-1 min-h-[38px]">
-                            <div className="flex items-center justify-center w-[60px] flex-none border-r border-slate-200 bg-slate-50/35 group-hover/tr:bg-slate-50/60 text-[#64748b] text-[11px] font-normal tracking-tight px-2 py-1.5 whitespace-nowrap">
-                              入库
-                            </div>
-                            <div className="flex-1 px-3 py-1.5 flex items-center justify-end font-mono text-[11px] font-black text-slate-800 whitespace-nowrap">
-                              {fmtAmount(data.yearlyIncomeApproved)}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Column 9: 操作控制 */}
-                      <td className="p-4 border border-slate-200 text-center">
-                        <div className="flex flex-col items-center justify-center gap-1.5 py-2">
-                          {canRegisterPayout && (
-                            <button
-                              onClick={() => handleOpenBonus(data)}
-                              className="w-full max-w-[80px] px-2 py-1 bg-emerald-600 text-white rounded-lg text-[10px] font-bold hover:bg-emerald-700 transition-all shadow-sm flex items-center justify-center gap-1 select-none"
-                              title="登记承兑发放"
-                            >
-                              <Wallet size={12} />
-                              <span>发放</span>
-                            </button>
-                          )}
-                          <button
-                            onClick={() =>
-                              setSelectedUser(
-                                selectedUser === data.userId
-                                  ? null
-                                  : data.userId,
-                              )
-                            }
-                            className={`p-1 w-full max-w-[80px] rounded-lg transition-all flex items-center justify-center gap-1 text-[10px] font-bold ${selectedUser === data.userId ? "bg-blue-600 text-white shadow-md" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}
-                          >
-                            {selectedUser === data.userId ? (
-                              <>
-                                <ChevronUp size={12} />
-                                <span>收起</span>
-                              </>
-                            ) : (
-                              <>
-                                <ChevronDown size={12} />
-                                <span>明细</span>
-                              </>
                             )}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                          </div>
+                        </td>
 
-                    {/* Drill-down Detail */}
-                    <AnimatePresence>
-                      {selectedUser === data.userId && (
-                        <motion.tr
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="bg-slate-50/80 border-b border-slate-100"
-                        >
-                          <td colSpan={12} className="p-8">
-                            <div className={`grid grid-cols-1 lg:grid-cols-2 gap-12 bg-white ${UI_TOKENS.RADIUS_PANEL} p-10 shadow-inner border border-slate-100`}>
-                              {/* Waterfall Steps */}
-                              <div className="space-y-6">
-                                <h5 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] flex items-center">
-                                  <Calculator
-                                    size={14}
-                                    className="mr-2 text-blue-600"
-                                  />
-                                  奖金核算逻辑穿透
-                                </h5>
-                                <div className="pl-4 border-l-2 border-slate-100 space-y-4">
-                                  {(() => {
-                                    const kuanTiers = getKuanTheoreticalTiers(data);
-                                    let steps: Array<{
-                                      label: string;
-                                      value?: string;
-                                      color?: string;
-                                      desc: string;
-                                      isFinal?: boolean;
-                                      customContent?: React.ReactNode;
-                                    }> = [];
-                                    const ratioStr = (data.ratio * 100).toFixed(0) + '%';
-                                    if (kuanTiers) {
-                                      steps = [
-                                        {
-                                          label: "收款包",
-                                          value: fmtAmount(kuanTiers.collectionPackage),
-                                          color: "text-indigo-600 font-bold",
-                                          desc: "本月确权收款包，计算自实际流水",
-                                        },
-                                      ];
-                                      if (kuanTiers.isManagerKuan) {
-                                        steps.push({
-                                          label: "单元冗余",
-                                          value: fmtAmount(kuanTiers.redundancy),
-                                          color: "text-blue-600 font-bold",
-                                          desc: "名下单元冗余归集",
-                                        });
-                                      }
-                                      steps.push(
-                                        {
-                                          label: "成本包",
-                                          value: maskMoney(-kuanTiers.totalCost, fmtAmount),
-                                          color: "text-rose-500",
-                                          desc: maskText(`刚性工资包(${formatAmount(data.salaryPackage)}) + A类消耗(${formatAmount(data.aCostConfirmed)})`),
-                                        },
-                                        {
-                                          label: "理论额度（三档）",
-                                          color: "text-amber-600 font-black",
-                                          isFinal: true,
-                                          desc: "基数(≥0) × 60% / 80% / 100% 梯度测算",
-                                          customContent: (
-                                            <div className="flex flex-col items-end gap-1 font-mono font-black text-xs text-amber-600">
-                                              <div className="flex gap-2 items-center">
-                                                <span className="text-slate-400 text-[10px] font-normal">60%:</span>
-                                                <span>{fmtAmount(kuanTiers.t60)}</span>
-                                              </div>
-                                              <div className="flex gap-2 items-center">
-                                                <span className="text-slate-400 text-[10px] font-normal">80%:</span>
-                                                <span>{fmtAmount(kuanTiers.t80)}</span>
-                                              </div>
-                                              <div className="flex gap-2 items-center">
-                                                <span className="text-slate-400 text-[10px] font-normal">100%:</span>
-                                                <span>{fmtAmount(kuanTiers.t100)}</span>
-                                              </div>
-                                            </div>
-                                          ),
-                                        }
-                                      );
-                                    } else if (data.isRevenueExpert) {
-                                      steps = [
-                                        {
-                                          label: "收款包",
-                                          value: fmtAmount(data.baseValueConfirmed),
-                                          color: "text-indigo-600 font-bold",
-                                          desc: "本月确权收款包，计算自实际流水",
-                                        },
-                                        {
-                                          label: "总成本",
-                                          value: maskMoney(-(data.salaryPackage + data.aCostConfirmed), fmtAmount),
-                                          color: "text-rose-500",
-                                          desc: maskText(`刚性工资包(${formatAmount(data.salaryPackage)}) + A类消耗(${formatAmount(data.aCostConfirmed)})`),
-                                        },
-                                      ];
-                                    } else {
-                                      steps = [
-                                        {
-                                          label: "产兑包",
-                                          value: fmtAmount(data.baseValueConfirmed),
-                                          color: "text-indigo-600 font-bold",
-                                          desc: "本月确权产兑包",
-                                        },
-                                        {
-                                          label: "总成本",
-                                          value: maskMoney(-(data.salaryPackage + data.bCostConfirmed), fmtAmount),
-                                          color: "text-rose-500",
-                                          desc: maskText(`刚性工资包(${formatAmount(data.salaryPackage)}) + B1类消耗(${formatAmount(data.bCostConfirmed)})`),
-                                        },
-                                      ];
-                                    }
+                        {/* 2. 收产包 (Measure) */}
+                        <td className="py-1.5 px-3 border border-slate-300 text-right whitespace-nowrap">
+                          <span className="font-mono text-xs font-black text-slate-900">
+                            {fmtAmount(kuanTiers ? (kuanTiers.collectionPackage + kuanTiers.redundancy) : data.baseValueConfirmed)}
+                          </span>
+                        </td>
 
-                                    steps = steps.concat([
-                                      {
-                                        label: "当月结余",
-                                        value: fmtAmount(data.currentSurplus),
-                                        color: "text-slate-800 font-bold",
-                                        desc: "当月收入 - 当月成本",
-                                      },
-                                      {
-                                        label: "历史欠产包",
-                                        value: fmtDebt(data.historyDebt),
-                                        color: "text-orange-500",
-                                        desc: "本自然年内往期期初欠产积累（每年 1 月清零）",
-                                      },
-                                      {
-                                        label: "分配额度",
-                                        value: fmtAmount(data.netRedundancy),
-                                        color: "text-blue-600 font-black",
-                                        desc: "填平历史欠产后的正式分配额度 (0表示需要结转欠产)",
-                                      },
-                                      {
-                                        label: "提成系数",
-                                        value: `x ${ratioStr}`,
-                                        color: "text-slate-600",
-                                        desc: "系统核定的最终等级提成系数",
-                                      },
-                                      {
-                                        label: "理论分配值",
-                                        value: fmtAmount(data.theoreticalBonus),
-                                        color: "text-emerald-600 font-black",
-                                        isFinal: true,
-                                        desc: "基于额度及提成率的实际应当发放理论分配值",
-                                      },
-                                    ]);
+                        {/* 3. 成本包 */}
+                        <td className="py-1.5 px-3 border border-slate-300 text-right font-mono text-xs font-bold text-rose-600 whitespace-nowrap">
+                          <span title={`刚性工资包(${formatAmount(data.salaryPackage)}) + 消耗(${formatAmount(costOther)}) - FXDC(${formatAmount(nonEffectiveDeduction)})`}>
+                            {maskMoney(-totalCost, fmtAmount)}
+                          </span>
+                        </td>
 
-                                    return (
-                                      <div className="flex flex-col gap-2">
-                                        {steps.map((step, idx) => (
-                                          <motion.div
-                                            key={idx}
-                                            initial={{ opacity: 0, x: -10 }}
-                                            animate={{ opacity: 1, x: 0 }}
-                                            transition={{ delay: idx * 0.1 }}
-                                            className={`group relative p-4 rounded-2xl border transition-all hover:bg-white hover:shadow-md ${step.isFinal ? (kuanTiers ? "bg-amber-50 border-amber-100" : "bg-emerald-50 border-emerald-100") : "bg-slate-50/50 border-slate-100"}`}
-                                          >
-                                            <div className="flex justify-between items-center relative z-10">
-                                              <div className="flex flex-col">
-                                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                                                  {step.label}
-                                                </span>
-                                                <span className="text-[9px] text-slate-400 group-hover:text-slate-600 transition-colors mt-0.5">
-                                                  {step.desc}
-                                                </span>
-                                              </div>
-                                              {step.customContent ? (
-                                                step.customContent
-                                              ) : (
-                                                <span
-                                                  className={`font-mono font-black text-xs ${step.color}`}
-                                                >
-                                                  {step.value}
-                                                </span>
-                                              )}
-                                            </div>
-                                            {idx < steps.length - 1 && (
-                                              <div className="absolute left-6 -bottom-2 w-0.5 h-2 bg-slate-100 group-hover:bg-blue-100 z-0"></div>
-                                            )}
-                                          </motion.div>
-                                        ))}
-                                        <motion.div
-                                          initial={{ scale: 0.95, opacity: 0 }}
-                                          animate={{ scale: 1, opacity: 1 }}
-                                          transition={{
-                                            delay: steps.length * 0.1,
-                                          }}
-                                          className="flex justify-between items-center p-5 bg-slate-900 rounded-[2rem] shadow-xl mt-4 border border-blue-500/30"
-                                        >
-                                          <div>
-                                            <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">
-                                              本月理论应得奖金
-                                            </span>
-                                            <p className="text-[8px] text-blue-500/60 uppercase font-black">
-                                              Audit Validated · 财务校验通过
-                                            </p>
-                                          </div>
-                                          <div className="text-right">
-                                            <span className="font-mono font-black text-2xl text-white">
-                                              {fmtAmount(data.netBonusConfirmed)}
-                                            </span>
-                                          </div>
-                                        </motion.div>
-                                      </div>
-                                    );
-                                  })()}
-                                </div>
-                              </div>
+                        {/* 4. 历史欠产包 */}
+                        <td className={`py-1.5 px-3 border border-slate-300 text-right font-mono text-xs whitespace-nowrap font-bold ${(data.historyDebtConfirmed ?? 0) < 0 ? 'text-rose-600 bg-rose-50/40' : 'text-slate-800'}`}>
+                          {fmtDebt(data.historyDebtConfirmed ?? data.historyDebt)}
+                        </td>
 
-                              {/* Log Details */}
-                              <div className="space-y-6">
-                                <h5 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] flex items-center">
-                                  <TrendingUp
-                                    size={14}
-                                    className="mr-2 text-emerald-600"
-                                  />
-                                  关联确权记录明细
-                                </h5>
-                                <div className="space-y-3">
-                                  {(data.details || []).map((log) => (
-                                    <div
-                                      key={log.id}
-                                      className="p-4 bg-white rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between group hover:border-blue-200 transition-all"
+                        {/* 5. 分配额度（月） */}
+                        <td className="py-1.5 px-3 border border-slate-300 text-right font-mono text-xs font-black text-indigo-600 bg-indigo-50/20 whitespace-nowrap">
+                          {fmtAmount(data.netRedundancyConfirmed ?? data.netRedundancy)}
+                        </td>
+
+                        {/* 6. 理论（额度） */}
+                        <td className="py-1 px-2 border border-slate-300 bg-amber-50/30 text-right">
+                          <TheoreticalCell
+                            isRevenueExpert={data.isRevenueExpert}
+                            theoreticalBonus={data.theoreticalBonusConfirmed}
+                            baseAmount={Math.max(0, (data.currentSurplusConfirmed ?? data.currentSurplus))}
+                            expanded={!!theoreticalExpanded[`${data.userId}-confirmed`]}
+                            onToggle={() => setTheoreticalExpanded(prev => ({
+                              ...prev,
+                              [`${data.userId}-confirmed`]: !prev[`${data.userId}-confirmed`]
+                            }))}
+                          />
+                        </td>
+
+                        {/* 7. 当月承兑实发 */}
+                        <td className="py-1.5 px-3 border border-slate-300 bg-emerald-50/20 text-right whitespace-nowrap">
+                          <span className="font-mono text-xs font-black text-emerald-600">
+                            {fmtAmount(userCdtzSum)}
+                          </span>
+                        </td>
+
+                        {/* 8. 年度累计承兑 */}
+                        <td className="py-1.5 px-3 border border-slate-300 text-right whitespace-nowrap">
+                          <span className="font-mono text-xs font-bold text-slate-700">
+                            {fmtAmount(userYearlyCdtzSum || data.yearlyIncomeConfirmed)}
+                          </span>
+                        </td>
+
+                        {/* 9. 操作控制 */}
+                        <td className="py-1.5 px-3 border border-slate-300 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            {canRegisterPayout && (
+                              <button
+                                onClick={() => handleOpenBonus(data)}
+                                className="px-2 py-1 bg-emerald-600 text-white rounded text-[10px] font-bold hover:bg-emerald-700 transition-all shadow-2xs flex items-center gap-0.5"
+                                title="登记承兑发放"
+                              >
+                                <Wallet size={11} />
+                                <span>发放</span>
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleToggleSealUser(data.userId, data.userName)}
+                              className={`px-2 py-1 rounded transition-all flex items-center gap-0.5 text-[10px] font-bold ${
+                                sealedUsers[data.userId]
+                                  ? "bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs"
+                                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                              }`}
+                              title={sealedUsers[data.userId] ? "已锁定封存（点击解除）" : "锁定封存当前核算"}
+                            >
+                              {sealedUsers[data.userId] ? (
+                                <>
+                                  <Lock size={11} className="text-amber-700" />
+                                  <span>已封存</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Lock size={11} />
+                                  <span>封存</span>
+                                </>
+                              )}
+                            </button>
+                            <button
+                              onClick={() =>
+                                setSelectedUser(
+                                  selectedUser === data.userId ? null : data.userId
+                                )
+                              }
+                              className={`px-2 py-1 rounded transition-all flex items-center gap-0.5 text-[10px] font-bold ${
+                                selectedUser === data.userId
+                                  ? "bg-blue-600 text-white shadow-2xs"
+                                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                              }`}
+                            >
+                              {selectedUser === data.userId ? (
+                                <>
+                                  <ChevronUp size={11} />
+                                  <span>收起</span>
+                                </>
+                              ) : (
+                                <>
+                                  <ChevronDown size={11} />
+                                  <span>明细</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+
+                      {/* Drill-down Detail: 8-Row Standard Financial Audit Table */}
+                      <AnimatePresence>
+                        {selectedUser === data.userId && (
+                          <motion.tr
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="bg-slate-50/90 border-b border-slate-300"
+                          >
+                            <td colSpan={9} className="p-4">
+                              <div className="bg-white rounded-xl border border-slate-300 shadow-sm overflow-hidden mb-4">
+                                <div className="px-4 py-2 bg-slate-100 border-b border-slate-300 flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <Calculator size={14} className="text-blue-600" />
+                                    <h5 className="text-[11px] font-black text-slate-900 uppercase tracking-wider">
+                                      标准 8 行价值分配穿透审计表 · {data.userName} ({formatCategory(data.category)})
+                                    </h5>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => handleToggleSealUser(data.userId, data.userName)}
+                                      className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 transition-all ${
+                                        sealedUsers[data.userId]
+                                          ? "bg-amber-100 text-amber-900 border border-amber-300"
+                                          : "bg-slate-200 text-slate-700 hover:bg-slate-300"
+                                      }`}
                                     >
-                                      <div className="flex items-center gap-4">
-                                        <div
-                                          className={`w-2 h-2 rounded-full ${
-                                            log.status === AuditStatus.Approved
-                                              ? "bg-emerald-500"
-                                              : "bg-blue-400"
-                                          }`}
-                                        ></div>
-                                        <div>
-                                          <p className="text-xs font-black text-slate-900 uppercase tracking-tighter">
-                                            {log.type}
-                                          </p>
-                                          <p className="text-[9px] font-bold text-slate-400 uppercase">
-                                            {resolveLogBusinessDate(log)} ({resolveLogBusinessMonth(log)}) |{" "}
-                                            {log.status === AuditStatus.Approved
-                                              ? "入库"
-                                              : "已确权"}
-                                          </p>
-                                        </div>
-                                      </div>
-                                      <div className="text-right">
-                                        <p className="text-xs font-black font-mono text-slate-700">
-                                          {fmtAmount(log.netValue)}
-                                        </p>
-                                        <p className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">
-                                          {log.category}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-
-                              {/* Historical Debt Breakdown */}
-                              {data.historyRecordsConfirmed && data.historyRecordsConfirmed.length > 0 && (
-                                <div className="lg:col-span-2 space-y-6 mt-4">
-                                  <h5 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] flex items-center">
-                                    <Calculator size={14} className="mr-2 text-rose-600" />
-                                    历史欠产穿透 (自然年内按月滚动，每年 1 月清零)
-                                  </h5>
-                                  <div className="overflow-x-auto rounded-xl border border-slate-200 custom-scrollbar shadow-sm">
-                                    <table className="min-w-full text-slate-700 text-[11px] text-left font-mono border-separate border-spacing-0">
-                                      <thead className="bg-slate-50/80 backdrop-blur-sm sticky top-0 z-10">
-                                        <tr>
-                                          <th className="px-4 py-3 border-r border-b border-slate-200 text-center font-black uppercase text-[9px] text-slate-500 tracking-wider">滚动周期</th>
-                                          <th className="px-4 py-3 border-r border-b border-slate-200 text-right text-rose-500 font-black uppercase text-[9px] tracking-wider">期初欠产</th>
-                                          <th className="px-4 py-3 border-r border-b border-slate-200 text-right font-black uppercase text-[9px] text-slate-500 tracking-wider">产兑/收款总计</th>
-                                          <th className="px-4 py-3 border-r border-b border-slate-200 text-right text-slate-400 font-black uppercase text-[9px] tracking-wider">当月核定总成本</th>
-                                          <th className="px-4 py-3 border-r border-b border-slate-200 text-right font-black uppercase text-[9px] text-slate-500 tracking-wider">当月业绩</th>
-                                          <th className="px-4 py-3 border-r border-b border-slate-200 text-right text-blue-500 font-black uppercase text-[9px] tracking-wider">分配额度</th>
-                                          <th className="px-4 py-3 border-b border-slate-200 text-right text-rose-600 font-black uppercase text-[9px] tracking-wider">期末欠产</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-slate-100 bg-white">
-                                        {data.historyRecordsConfirmed.map((record: any, idx: number) => (
-                                          <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
-                                            <td className="px-4 py-3 font-bold border-r border-slate-100 text-center">{record.month}</td>
-                                            <td className="px-4 py-3 text-right text-rose-500 font-bold border-r border-slate-100">{fmtDebt(record.startDebt)}</td>
-                                            <td className="px-4 py-3 text-right text-slate-800 font-bold border-r border-slate-100">{fmtAmount(record.totalIncome)}</td>
-                                            <td className="px-4 py-3 text-right text-slate-400 border-r border-slate-100">{fmtAmount(-record.totalCost)}</td>
-                                            <td className={`px-4 py-3 text-right font-black border-r border-slate-100 ${record.current > 0 ? "text-emerald-600" : "text-slate-600"}`}>{record.current > 0 ? "+" : ""}{fmtAmount(record.current)}</td>
-                                            <td className="px-4 py-3 text-right text-blue-600 font-bold border-r border-slate-100">{fmtAmount(record.quota)}</td>
-                                            <td className="px-4 py-3 text-right text-rose-600 font-black">{fmtDebt(record.endDebt)}</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
+                                      <Lock size={11} />
+                                      <span>{sealedUsers[data.userId] ? "当期已锁定封存" : "锁定封存"}</span>
+                                    </button>
+                                    <span className="text-[10px] font-mono text-slate-600 bg-slate-200/80 px-2 py-0.5 rounded font-bold">
+                                      周期：{startDate && endDate ? `${startDate} ~ ${endDate}` : (monthsInRange.length > 1 ? `${monthsInRange[0]} ~ ${monthsInRange[monthsInRange.length - 1]} (共 ${monthsInRange.length} 个月)` : (effectiveMonth || '全期'))}
+                                    </span>
                                   </div>
                                 </div>
-                              )}
-                            </div>
-                          </td>
-                        </motion.tr>
-                      )}
-                    </AnimatePresence>
-                  </React.Fragment>
-                );
-              }))}
+
+                                <div className="divide-y divide-slate-200 text-xs">
+                                  {/* 1. 收产包 */}
+                                  <div className="px-4 py-1.5 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-700 font-mono font-bold text-[10px] flex items-center justify-center">1</span>
+                                      <span className="font-bold text-slate-800">收产包</span>
+                                      <span className="text-[10px] text-slate-400">（确权收款/产值包，计算自实际业务流水）</span>
+                                    </div>
+                                    <span className="font-mono font-black text-indigo-600 text-xs">
+                                      {fmtAmount(kuanTiers ? kuanTiers.collectionPackage : data.baseValueConfirmed)}
+                                    </span>
+                                  </div>
+
+                                  {/* 2. 经营单元本级 */}
+                                  <div className="px-4 py-1.5 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-700 font-mono font-bold text-[10px] flex items-center justify-center">2</span>
+                                      <span className="font-bold text-slate-800">经营单元本级</span>
+                                      <span className="text-[10px] text-slate-400">（名下经营单元本级包归集 / 单元冗余）</span>
+                                    </div>
+                                    <span className="font-mono font-bold text-blue-600 text-xs">
+                                      {fmtAmount(kuanTiers ? kuanTiers.redundancy : (data.centerLevelBonus || 0))}
+                                    </span>
+                                  </div>
+
+                                  {/* 3. 成本包 */}
+                                  <div className="px-4 py-1.5 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-700 font-mono font-bold text-[10px] flex items-center justify-center">3</span>
+                                      <span className="font-bold text-slate-800">成本包</span>
+                                      <span className="text-[10px] text-slate-400">
+                                        {maskText(`（刚性工资包${monthsInRange.length > 1 ? `(${monthsInRange.length}个月累计)` : ''} ¥${formatAmount(data.salaryPackage)} + 消耗 ¥${formatAmount(costOther)} − FXDC ¥${formatAmount(nonEffectiveDeduction)}，强制取负展示）`)}
+                                      </span>
+                                    </div>
+                                    <span className="font-mono font-bold text-rose-600 text-xs">
+                                      {maskMoney(-totalCost, fmtAmount)}
+                                    </span>
+                                  </div>
+
+                                  {/* 4. 历史欠产包 */}
+                                  <div className="px-4 py-1.5 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-700 font-mono font-bold text-[10px] flex items-center justify-center">4</span>
+                                      <span className="font-bold text-slate-800">历史欠产包</span>
+                                      <span className="text-[10px] text-slate-400">（查询区间起始点前滚动历史负债累积，每年 1 月清零）</span>
+                                    </div>
+                                    <span className={`font-mono font-bold text-xs ${(data.historyDebtConfirmed ?? data.historyDebt) < 0 ? 'text-rose-600' : 'text-slate-700'}`}>
+                                      {fmtDebt(data.historyDebtConfirmed ?? data.historyDebt)}
+                                    </span>
+                                  </div>
+
+                                  {/* 5. 当期结余 */}
+                                  <div className="px-4 py-1.5 flex items-center justify-between bg-slate-50/70 hover:bg-slate-100/70 transition-colors font-medium">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 font-mono font-bold text-[10px] flex items-center justify-center">5</span>
+                                      <span className="font-bold text-slate-900">{monthsInRange.length > 1 ? '多月累计结余' : '当月结余'}</span>
+                                      <span className="text-[10px] text-slate-500">（收入 − 成本 = (收产包 + 单元本级) − 成本包）</span>
+                                    </div>
+                                    <span className={`font-mono font-black text-xs ${data.currentSurplus < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+                                      {fmtAmount(data.currentSurplus)}
+                                    </span>
+                                  </div>
+
+                                  {/* 6. 理论额度（三档） */}
+                                  <div className="px-4 py-1.5 flex items-center justify-between bg-amber-50/40 hover:bg-amber-50/70 transition-colors">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-800 font-mono font-bold text-[10px] flex items-center justify-center">6</span>
+                                      <span className="font-bold text-amber-900">理论额度（三档）</span>
+                                      <span className="text-[10px] text-amber-700/80">（基数 max(0, 结余) × 60% / 80% / 100% 阶梯矩阵）</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 font-mono font-bold text-xs text-amber-800">
+                                      <span className="text-[10px] bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200">60%: {fmtAmount(Math.round(Math.max(0, data.currentSurplus) * 0.6))}</span>
+                                      <span className="text-[10px] bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200">80%: {fmtAmount(Math.round(Math.max(0, data.currentSurplus) * 0.8))}</span>
+                                      <span className="text-[10px] bg-amber-200/80 text-amber-900 font-black px-1.5 py-0.5 rounded border border-amber-300">100%: {fmtAmount(Math.round(Math.max(0, data.currentSurplus)))}</span>
+                                    </div>
+                                  </div>
+
+                                  {/* 7. 分配额度 */}
+                                  <div className="px-4 py-1.5 flex items-center justify-between bg-indigo-50/40 hover:bg-indigo-50/70 transition-colors">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 font-mono font-bold text-[10px] flex items-center justify-center">7</span>
+                                      <span className="font-bold text-indigo-950">分配额度（净额度）</span>
+                                      <span className="text-[10px] text-indigo-600/80">（填平历史欠产后额度 = max(0, 结余 + 历史欠产包)）</span>
+                                    </div>
+                                    <span className="font-mono font-black text-indigo-700 text-sm">{fmtAmount(data.netRedundancy)}</span>
+                                  </div>
+
+                                  {/* 8. 理论分配值 / 承兑实发 */}
+                                  <div className="px-4 py-2 flex items-center justify-between bg-emerald-50/50 hover:bg-emerald-50/80 transition-colors">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-mono font-bold text-[10px] flex items-center justify-center">8</span>
+                                      <span className="font-bold text-emerald-950">理论分配值 / 承兑实发</span>
+                                      <span className="text-[10px] text-emerald-700">（理论值 = 分配额度 × 提成率 {(data.ratio * 100).toFixed(0)}%；承兑实发 = 当期 cdtz 实发）</span>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                      <div className="text-right">
+                                        <span className="text-[10px] text-slate-400 block">理论应发</span>
+                                        <span className="font-mono font-bold text-slate-800 text-xs">{fmtAmount(data.theoreticalBonus)}</span>
+                                      </div>
+                                      <div className="h-6 w-px bg-slate-300 mx-1"></div>
+                                      <div className="text-right">
+                                        <span className="text-[10px] text-emerald-600 font-bold block">承兑实发</span>
+                                        <span className="font-mono font-black text-emerald-600 text-sm">{fmtAmount(userCdtzSum)}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Secondary Collapsible Cards: Logs & Historical Records */}
+                              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                {/* Log Details */}
+                                <div className="bg-white rounded-xl border border-slate-300 p-4 shadow-xs">
+                                  <h6 className="text-[10px] font-black text-slate-800 uppercase tracking-wider flex items-center mb-2">
+                                    <TrendingUp size={13} className="mr-1.5 text-emerald-600" />
+                                    关联确权记录明细 ({data.details?.length || 0} 笔)
+                                  </h6>
+                                  <div className="space-y-1.5 max-h-[220px] overflow-y-auto custom-scrollbar pr-1">
+                                    {(data.details || []).length === 0 ? (
+                                      <div className="text-[10px] text-slate-400 py-3 text-center font-mono">暂无本期确权记录</div>
+                                    ) : (
+                                      (data.details || []).map((log) => (
+                                        <div
+                                          key={log.id}
+                                          className="p-2 bg-slate-50 rounded-lg border border-slate-200 flex items-center justify-between text-xs"
+                                        >
+                                          <div className="flex items-center gap-2">
+                                            <div
+                                              className={`w-1.5 h-1.5 rounded-full ${
+                                                log.status === AuditStatus.Approved
+                                                  ? "bg-emerald-500"
+                                                  : "bg-blue-400"
+                                              }`}
+                                            ></div>
+                                            <div>
+                                              <p className="text-[11px] font-bold text-slate-900">
+                                                {log.type}
+                                              </p>
+                                              <p className="text-[9px] text-slate-400">
+                                                {resolveLogBusinessDate(log)} ({resolveLogBusinessMonth(log)}) | {log.status === AuditStatus.Approved ? "入库" : "已确权"}
+                                              </p>
+                                            </div>
+                                          </div>
+                                          <div className="text-right">
+                                            <p className="text-[11px] font-black font-mono text-slate-700">
+                                              {fmtAmount(log.netValue)}
+                                            </p>
+                                            <p className="text-[8px] text-slate-400">
+                                              {log.category}
+                                            </p>
+                                          </div>
+                                        </div>
+                                      ))
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Historical Debt Breakdown */}
+                                <div className="bg-white rounded-xl border border-slate-300 p-4 shadow-xs">
+                                  <h6 className="text-[10px] font-black text-slate-800 uppercase tracking-wider flex items-center mb-2">
+                                    <Calculator size={13} className="mr-1.5 text-rose-600" />
+                                    自然年内往期欠产滚动表
+                                  </h6>
+                                  {data.historyRecordsConfirmed && data.historyRecordsConfirmed.length > 0 ? (
+                                    <div className="overflow-x-auto rounded border border-slate-200 custom-scrollbar max-h-[220px]">
+                                      <table className="min-w-full text-slate-700 text-[10px] text-left font-mono border-separate border-spacing-0">
+                                        <thead className="bg-slate-100 sticky top-0 z-10">
+                                          <tr>
+                                            <th className="px-2 py-1 border-r border-b border-slate-200 text-center font-bold">周期</th>
+                                            <th className="px-2 py-1 border-r border-b border-slate-200 text-right text-rose-500 font-bold">期初欠产</th>
+                                            <th className="px-2 py-1 border-r border-b border-slate-200 text-right font-bold">收入总计</th>
+                                            <th className="px-2 py-1 border-r border-b border-slate-200 text-right text-slate-400 font-bold">成本包</th>
+                                            <th className="px-2 py-1 border-r border-b border-slate-200 text-right text-blue-600 font-bold">分配额度</th>
+                                            <th className="px-2 py-1 border-b border-slate-200 text-right text-rose-600 font-black">期末欠产</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 bg-white">
+                                          {data.historyRecordsConfirmed.map((record: any, idx: number) => (
+                                            <tr key={idx} className="hover:bg-slate-50">
+                                              <td className="px-2 py-1 font-bold border-r border-slate-200 text-center">{record.month}</td>
+                                              <td className="px-2 py-1 text-right text-rose-500 font-bold border-r border-slate-200">{fmtDebt(record.startDebt)}</td>
+                                              <td className="px-2 py-1 text-right text-slate-800 border-r border-slate-200">{fmtAmount(record.totalIncome)}</td>
+                                              <td className="px-2 py-1 text-right text-slate-400 border-r border-slate-200">{fmtAmount(record.costPackage !== undefined ? -Math.abs(record.costPackage) : -(record.totalCost || 0))}</td>
+                                              <td className="px-2 py-1 text-right text-blue-600 font-bold border-r border-slate-200">{fmtAmount(record.quota)}</td>
+                                              <td className="px-2 py-1 text-right text-rose-600 font-black">{fmtDebt(record.endDebt)}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  ) : (
+                                    <div className="text-[10px] text-slate-400 py-3 text-center font-mono">本年无往期历史欠产记录</div>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                          </motion.tr>
+                        )}
+                      </AnimatePresence>
+                    </React.Fragment>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -1786,7 +1844,7 @@ const Distribution: React.FC<DistributionProps> = ({
                   layout
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden"
+                  className="bg-white rounded-[2rem] border border-slate-300 shadow-sm overflow-hidden"
                 >
                   <div className="p-5 flex items-center justify-between border-b border-slate-50">
                     <div className="flex items-center gap-3">
@@ -1905,7 +1963,7 @@ const Distribution: React.FC<DistributionProps> = ({
                     {canRegisterPayout && (
                       <button
                         onClick={() => handleOpenBonus(data)}
-                        className="py-3 px-4 bg-emerald-600 text-white rounded-2xl transition-all flex items-center justify-center gap-1.5 text-xs font-bold shadow-sm hover:bg-emerald-700"
+                        className="py-1.5 px-4 bg-emerald-600 text-white rounded-2xl transition-all flex items-center justify-center gap-1.5 text-xs font-bold shadow-sm hover:bg-emerald-700"
                       >
                         <Wallet size={16} />
                         <span>发放</span>
@@ -1917,7 +1975,7 @@ const Distribution: React.FC<DistributionProps> = ({
                           selectedUser === data.userId ? null : data.userId,
                         )
                       }
-                      className={`flex-1 py-3 rounded-2xl transition-all flex items-center justify-center gap-2 ${selectedUser === data.userId ? "bg-blue-600 text-white shadow-lg" : "bg-slate-50 text-slate-400"}`}
+                      className={`flex-1 py-1.5 rounded-2xl transition-all flex items-center justify-center gap-2 ${selectedUser === data.userId ? "bg-blue-600 text-white shadow-lg" : "bg-slate-50 text-slate-400"}`}
                     >
                       <span className="text-[10px] font-black uppercase tracking-widest">
                         {selectedUser === data.userId ? "收起详情" : "查看详情"}
@@ -1954,7 +2012,7 @@ const Distribution: React.FC<DistributionProps> = ({
       </div>
 
       {/* Footer Info */}
-      <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} p-8 border border-slate-100 shadow-sm flex items-center justify-between`}>
+      <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} p-8 border border-slate-300 shadow-sm flex items-center justify-between`}>
         <div className="flex items-center gap-3">
           <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl">
             <ShieldCheck size={18} />
@@ -1964,7 +2022,7 @@ const Distribution: React.FC<DistributionProps> = ({
               城市守护者：价值核算与分配原则
             </h5>
             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
-              理论与承兑独立核算 ｜ 历史欠产包动态抵扣 ｜ 金额精确到整数
+              理论与承兑独立核算 ｜ 历史欠产包动态抵扣 ｜ 数值精确到整数
             </p>
           </div>
         </div>
@@ -2023,7 +2081,7 @@ const Distribution: React.FC<DistributionProps> = ({
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-slate-600 font-bold mb-1">理论发放金额</label>
+                    <label className="block text-slate-600 font-bold mb-1">理论发放数值</label>
                     <input
                       type="number"
                       disabled
@@ -2032,7 +2090,7 @@ const Distribution: React.FC<DistributionProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-slate-600 font-bold mb-1">实际发放金额 <span className="text-rose-500">*</span></label>
+                    <label className="block text-slate-600 font-bold mb-1">实际发放数值 <span className="text-rose-500">*</span></label>
                     <input
                       type="number"
                       value={bonusForm.amount}
@@ -2045,7 +2103,7 @@ const Distribution: React.FC<DistributionProps> = ({
                 {Math.abs(bonusForm.amount - bonusForm.theoreticalAmount) > 0.01 && (
                   <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
                     <div className="text-amber-800 font-bold text-[11px]">
-                      ⚠️ 实际发放与理论金额存在差异 ({fmtAmount(bonusForm.amount - bonusForm.theoreticalAmount)})
+                      ⚠️ 实际发放与理论数值存在差异 ({fmtAmount(bonusForm.amount - bonusForm.theoreticalAmount)})
                     </div>
                     <div>
                       <label className="block text-slate-600 font-bold mb-1">差异原因分类 <span className="text-rose-500">*</span></label>
@@ -2065,7 +2123,7 @@ const Distribution: React.FC<DistributionProps> = ({
                       <textarea
                         value={bonusForm.diffReason}
                         onChange={(e) => setBonusForm({ ...bonusForm, diffReason: e.target.value })}
-                        placeholder="请详细说明金额差异的具体原因..."
+                        placeholder="请详细说明数值差异的具体原因..."
                         rows={2}
                         className="w-full p-2 border border-slate-200 rounded-lg text-xs bg-white"
                       />
@@ -2096,7 +2154,7 @@ const Distribution: React.FC<DistributionProps> = ({
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-300">
                 <button
                   onClick={() => setBonusTarget(null)}
                   className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 transition-all"
@@ -2115,6 +2173,8 @@ const Distribution: React.FC<DistributionProps> = ({
           }}
           onClose={() => setBonusTarget(null)}
         />
+      )}
+      </>
       )}
       <CityGuardianModal state={modalState} onClose={closeModal} />
     </div>

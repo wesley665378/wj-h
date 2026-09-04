@@ -613,8 +613,9 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
           salaryPackageType = (category as string) === 'VP' ? 'VP工资包' : '收款工资包';
         }
         
-        const salaryPackageRaw = findValue(['单月刚性工资包金额', '工资包金额', '工资包额度', '工资包', 'Salary', 'salaryPackage', '金额', 'Amount', '刚性工资包金额']);
-        // 金额空则按 0 落库
+        // 兼容历史表头字段名 (含'工资包金额'/'金额'等历史兼容键)
+        const salaryPackageRaw = findValue(['单月刚性工资包数值', '工资包数值', '单月刚性工资包金额', '工资包金额', '工资包额度', '工资包', 'Salary', 'salaryPackage', '数值', '金额', 'Amount', '刚性工资包金额', '刚性工资包数值']);
+        // 数值空则按 0 落库
         const salaryPackage = (salaryPackageRaw === undefined || salaryPackageRaw === null || String(salaryPackageRaw).trim() === '')
           ? 0
           : (typeof salaryPackageRaw === 'string' 
@@ -1025,8 +1026,8 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">工资包金额</p>
-                  <input type="number" placeholder="工资包金额" value={newUserFormData.salaryPackage === 0 ? '' : newUserFormData.salaryPackage} onChange={e => setNewUserFormData({...newUserFormData, salaryPackage: e.target.value === '' ? 0 : Number(e.target.value)})} className="bg-white border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none text-[10px] w-full" />
+                  <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">工资包数值</p>
+                  <input type="number" placeholder="工资包数值" value={newUserFormData.salaryPackage === 0 ? '' : newUserFormData.salaryPackage} onChange={e => setNewUserFormData({...newUserFormData, salaryPackage: e.target.value === '' ? 0 : Number(e.target.value)})} className="bg-white border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none text-[10px] w-full" />
                 </div>
               </div>
 
@@ -1117,8 +1118,8 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                       </select>
                     </div>
                     <div className="space-y-1">
-                      <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">工资包金额</p>
-                      <input type="number" placeholder="工资包金额" value={formData.salaryPackage === 0 ? '' : formData.salaryPackage} onChange={e => setFormData({...formData, salaryPackage: e.target.value === '' ? 0 : Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" />
+                      <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">工资包数值</p>
+                      <input type="number" placeholder="工资包数值" value={formData.salaryPackage === 0 ? '' : formData.salaryPackage} onChange={e => setFormData({...formData, salaryPackage: e.target.value === '' ? 0 : Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" />
                     </div>
                     {editingUserId && formData.id === user.id && (
                       <div className="space-y-1">
@@ -1300,7 +1301,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                 {effectiveBusinessUnits.map((center, index) => {
                   const centerUsers = users.filter(u => u.center === center);
                   const collectors = centerUsers.filter(u => u.category?.includes('专') || u.role === Role.RevenueCollector || u.role === Role.ValueCollector);
-                  const totalCost = centerUsers.reduce((acc, u) => acc + (u.salaryPackage || 0), 0);
+                  const costPackage = centerUsers.reduce((acc, u) => acc + (u.salaryPackage || 0), 0);
                   return (
                     <div key={index} className="bg-white p-6 rounded-[2rem] border border-slate-100 group hover:shadow-md transition-all">
                       <div className="flex items-center justify-between">
@@ -1329,8 +1330,8 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                         </div>
                       </div>
                       <div className="mt-2 flex items-center justify-between text-[10px]">
-                        <p className="font-bold text-slate-400">刚性成本包</p>
-                        <p className="font-black text-slate-800">{totalCost.toLocaleString()}</p>
+                        <p className="font-bold text-slate-400">成本包</p>
+                        <p className="font-black text-slate-800">{costPackage.toLocaleString()}</p>
                       </div>
                       <div className="mt-4 pt-3 border-t border-slate-50">
                          <div className="flex justify-between items-center mb-2">
@@ -1662,7 +1663,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                 </div>
 
                 <div className="space-y-1">
-                  <p className="text-[10px] font-bold text-slate-400 ml-1 uppercase">非有效工时对冲金额 (实际对冲额)</p>
+                  <p className="text-[10px] font-bold text-slate-400 ml-1 uppercase">非有效工时对冲数值 (实际对冲额)</p>
                   <input 
                     type="number" 
                     value={hedgeAmount} 
@@ -1678,8 +1679,8 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                   <p className="text-[10px] leading-relaxed text-blue-700 font-medium">
                     业务说明：<br/>
                     1. 离职当月整月仍计入单元刚性工资包。<br/>
-                    2. 若离职非月末，建议设置对冲金额以冲减当月刚性。<br/>
-                    3. 对冲金额将生成「非有效工时」单据，经确权后在看板生效。
+                    2. 若离职非月末，建议设置对冲数值以冲减当月刚性。<br/>
+                    3. 对冲数值将生成「非有效工时」单据，经确权后在看板生效。
                   </p>
                 </div>
               </div>

@@ -68,8 +68,8 @@ interface DashboardProps {
 type PeriodType = 'month' | 'quarter' | 'half' | 'year';
 
 const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, users, resources, currentUser, transactions, onSystemAdjustment, onSwitchTab, units, meetingSamples, onSaveMeetingSample }) => {
-  const activeJzczLogs = jzczLogs || logs;
-  const activeAuditLogs = auditLogs || logs;
+  const activeJzczLogs = jzczLogs?.length ? jzczLogs : logs;
+  const activeAuditLogs = auditLogs?.length ? auditLogs : logs;
   const { isCostVisible, toggleCostVisible, maskMoney, maskText } = useCostPrivacy();
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const [now, setNow] = useState<Date>(() => new Date());
@@ -197,9 +197,14 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
 
   const unitRankingTable = useMemo(() => {
     if (periodType !== 'month') return null;
+    const allBusinessUnits = Array.from(new Set([
+      ...(units || []),
+      ...(users || []).map(u => u.center).filter(c => c && c !== '统筹水库' && c !== '公司' && c !== '总部')
+    ]));
+
     const rankingUnits = isGlobalReaderUser 
-      ? units 
-      : (isManager && currentUser?.center ? [currentUser.center] : []);
+      ? allBusinessUnits 
+      : (isManager && currentUser?.center ? [currentUser.center] : allBusinessUnits);
     
     if (rankingUnits.length === 0) return null;
 
@@ -210,15 +215,17 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
         <BusinessUnitProfitRankingTable 
           units={rankingUnits}
           selectedMonth={selectedMonth}
-          auditLogs={activeAuditLogs}
+          auditLogs={activeAuditLogs?.length ? activeAuditLogs : logs}
+          logs={logs}
           resources={resources}
           users={users}
           transactions={transactions || []}
+          currentUser={currentUser}
           defaultExpanded={true}
         />
       </div>
     );
-  }, [isManager, isGlobalReaderUser, currentUser, periodType, selectedYear, periodValue, units, activeAuditLogs, resources, users, transactions]);
+  }, [isManager, isGlobalReaderUser, currentUser, periodType, selectedYear, periodValue, units, activeAuditLogs, logs, resources, users, transactions]);
 
   const periodMonths = useMemo(() => {
     if (periodType === 'month') return 1;
@@ -770,7 +777,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
 
     const amountToInject = Math.abs(netBalance);
     showConfirm(
-      `确定执行【统筹池兜底注入】操作？\n\n• 刚性工资包：${formatMoney(rigidSalaryPackage)}\n• 当前收产包：${formatMoney(incomeWaterPool)}\n• 兜底缺口金额：${formatMoney(amountToInject)}\n\n确认后将从统筹池向收产包流入 ${formatMoney(amountToInject)} 收款确权积分。`,
+      `确定执行【统筹池兜底注入】操作？\n\n• 刚性工资包：${formatMoney(rigidSalaryPackage)}\n• 当前收产包：${formatMoney(incomeWaterPool)}\n• 兜底缺口数值：${formatMoney(amountToInject)}\n\n确认后将从统筹池向收产包流入 ${formatMoney(amountToInject)} 收款确权积分。`,
       () => {
         if (onSystemAdjustment) {
           const newLog = {
@@ -928,10 +935,10 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
       ['经办操作人', isFrozen && sample ? `${sample.frozenByName} (${sample.frozenByUserId})` : `${currentUser.name} (${currentUser.userId || currentUser.id || 'admin'})`],
       ['数据校验摘要', isFrozen && sample ? (sample.checksum || '—') : `流水 ${periodLogs.length} 条 | 收产包 ${totalRevVal} | 收款包 ${totalRev} | 产兑包 ${totalVal}`],
       ['报告导出时间', new Date().toLocaleString()],
-      ['合规声明', '本报告参照检测机构留样规范生成，金额均为整数计量，不含币种符号。'],
+      ['合规声明', '本报告参照检测机构留样规范生成，数值均为整数计量，不含币种符号。'],
       [],
       ['核心经营 KPI 汇总表'],
-      ['序号', '指标名称', '金额 / 数值', '指标定义及口径说明'],
+      ['序号', '指标名称', '数值', '指标定义及口径说明'],
       [1, '收产包 (Income & Value Package)', totalRevVal, '实收现金流提炼（收款包）与已确权产值提炼（产兑包）总和'],
       [2, '收款包 (Revenue Package)', totalRev, '实收现金流提炼收款包'],
       [3, '产兑包 (Value Conversion Package)', totalVal, '已确权产值提炼产兑包'],
@@ -1208,27 +1215,29 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
       </div>
 
       {/* 经营驾驶舱 - 核心指标 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-        <Card className="p-4 bg-white border-slate-100 shadow-sm rounded-3xl flex flex-col">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+        <Card className="p-3.5 bg-white border-slate-100 shadow-sm rounded-2xl flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">全盘加权含金量</span>
               <button 
                 onClick={() => setShowPurityRules(true)}
-                className="p-1 hover:bg-slate-100 rounded-full transition-colors"
+                className="p-0.5 hover:bg-slate-100 rounded-full transition-colors"
               >
-                <Info className="w-3.5 h-3.5 text-blue-500" />
+                <Info className="w-3 h-3 text-blue-500" />
               </button>
             </div>
-            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${globalWeightedPurityState.bg} ${globalWeightedPurityState.color}`}>
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${globalWeightedPurityState.bg} ${globalWeightedPurityState.color}`}>
               {globalWeightedPurityState.label}
             </span>
           </div>
-          <div className="flex items-end gap-2">
-            <span className={`text-3xl font-black tracking-tighter ${globalWeightedPurityState.color500}`}>{displayGlobalWeightedPurity.toFixed(1)}%</span>
-            <span className="text-[10px] font-bold text-slate-400 mb-1">加权平均</span>
+          <div className="flex items-baseline justify-between py-0.5">
+            <div className="flex items-baseline gap-1.5">
+              <span className={`text-2xl font-black tracking-tighter ${globalWeightedPurityState.color500}`}>{displayGlobalWeightedPurity.toFixed(1)}%</span>
+              <span className="text-[10px] font-bold text-slate-400">加权平均</span>
+            </div>
           </div>
-          <div className="mt-4 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+          <div className="mt-1.5 h-1 bg-slate-100 rounded-full overflow-hidden">
             <div 
               className={`h-full transition-all duration-1000 ${globalWeightedPurityState.color500.replace('text', 'bg')}`}
               style={{ width: `${displayGlobalWeightedPurity}%` }}
@@ -1236,37 +1245,39 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
           </div>
         </Card>
 
-        <Card className="p-4 bg-white border-slate-100 shadow-sm rounded-3xl flex flex-col">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
+        <Card className="p-3.5 bg-white border-slate-100 shadow-sm rounded-2xl flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">组织造血能力 (对冲)</span>
               <button 
                 onClick={() => setShowHedgingRules(true)}
-                className="p-1 hover:bg-slate-100 rounded-full transition-colors"
+                className="p-0.5 hover:bg-slate-100 rounded-full transition-colors"
               >
-                <Info className="w-3.5 h-3.5 text-slate-300 hover:text-blue-500" />
+                <Info className="w-3 h-3 text-slate-300 hover:text-blue-500" />
               </button>
             </div>
             <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
               {((displayReservoirInflow / (displayTotalRigidExpenses || 1)) * 100).toFixed(0)}% 对冲
             </span>
           </div>
-          <div className="flex items-end gap-2">
-            <span className="text-3xl font-black tracking-tighter text-slate-900">
-              <span className="text-lg mr-1 opacity-50"></span>{formatMoney(displayReservoirInflow)}
+          <div className="flex items-baseline justify-between py-0.5">
+            <div className="flex items-baseline gap-1">
+              <span className="text-xl font-black tracking-tighter text-slate-900">
+                {formatMoney(displayReservoirInflow)}
+              </span>
+              <span className="text-[10px] font-bold text-slate-400">/ {formatMoney(displayTotalRigidExpenses)}</span>
+            </div>
+            <span className="text-[10px] font-bold text-slate-400">
+              差额: {formatMoney(Math.max(0, displayReservoirInflow - displayTotalRigidExpenses))}
             </span>
-            <span className="text-[10px] font-bold text-slate-400 mb-1">/ {formatMoney(displayTotalRigidExpenses)}</span>
           </div>
-          <div className="mt-4 h-1.5 bg-slate-100 rounded-full overflow-hidden relative">
+          <div className="mt-1.5 h-1 bg-slate-100 rounded-full overflow-hidden relative">
             <div 
               className="h-full bg-blue-500 transition-all duration-1000"
               style={{ width: `${Math.min((displayReservoirInflow / (displayTotalRigidExpenses || 1)) * 100, 100)}%` }}
             />
-            <div className="absolute top-0 left-[100%] w-px h-full bg-rose-500 z-10" title="盈亏平衡线"></div>
           </div>
-          <p className="mt-2 text-[9px] font-bold text-slate-400 italic">离“核心均衡”还有 {formatMoney(Math.max(0, displayReservoirInflow - displayTotalRigidExpenses))} 额度</p>
         </Card>
-
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6 lg:gap-8">
@@ -1478,8 +1489,8 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
               }
             `}</style>
             
-            <div className="relative w-full aspect-[10/9] md:aspect-[35/24] bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden mb-8">
-              <div className="absolute top-4 left-6 right-6 flex items-center justify-between z-10">
+            <div className="relative w-full aspect-[4/3] md:aspect-[5/3] bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden mb-4">
+              <div className="absolute top-4 left-5 right-5 flex items-center justify-between z-10">
                 <div className="text-xl font-black text-slate-700">价值流转沙盘</div>
                 {waterMetrics.incomeWaterPool < waterMetrics.rigidSalaryPackage && (
                   <button
@@ -1703,17 +1714,17 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
               </svg>
             </div>
 
-            <div className="mt-6 p-6 bg-slate-50 rounded-[2rem] border border-slate-100">
+            <div className="mt-4 p-4 bg-slate-50 rounded-[1.5rem] border border-slate-100">
                <div className="w-full">
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center justify-between mb-2">
                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">经营单元效率看板</p>
                      <span className="text-[8px] px-2 py-0.5 bg-rose-100 text-rose-600 rounded font-black uppercase">锁定周期</span>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
                      {salaryByCenter.map(c => {
                        const isExcludedUnit = ['HR', 'FIN', 'QA'].some(dept => (c.name || '').trim().toUpperCase().includes(dept));
                        return (
-                         <div key={c.name} className="bg-white p-4 rounded-2xl border border-slate-200 hover:border-blue-400 transition-all shadow-sm hover:shadow-md space-y-3">
+                         <div key={c.name} className="bg-white p-3 rounded-2xl border border-slate-200 hover:border-blue-400 transition-all shadow-sm hover:shadow-md space-y-2">
                             <div className="flex justify-between items-start">
                               <div className="flex flex-col">
                                 <span className="text-[11px] font-black text-slate-900 truncate max-w-[120px]">{c.name}</span>
@@ -1724,7 +1735,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                               </div>
                             </div>
                             
-                            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-2 border-t border-slate-50">
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1.5 border-t border-slate-50">
                               <div className="flex justify-between items-center">
                                 <span className="text-[9px] text-slate-500">产值初限</span>
                                 <span className="text-[9px] font-bold text-slate-700">{formatMoney(c.valueLimit)}</span>
@@ -1736,7 +1747,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                             </div>
 
                             {!isExcludedUnit && (
-                              <div className="p-2.5 bg-blue-50/50 rounded-xl border border-blue-100/50 space-y-2">
+                              <div className="p-2 bg-blue-50/50 rounded-xl border border-blue-100/50 space-y-1.5">
                                 <div className="flex items-center justify-between">
                                   <span className="text-[9px] font-black text-blue-800 tracking-tight">经营单元本级</span>
                                   <div className="flex gap-1">
@@ -1744,7 +1755,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                                      <span className="w-1 h-1 rounded-full bg-blue-200"></span>
                                   </div>
                                 </div>
-                                <div className="grid grid-cols-2 gap-3">
+                                <div className="grid grid-cols-2 gap-2">
                                   <div className="flex flex-col">
                                     <div className="flex items-center gap-1">
                                       <span className="text-[8px] text-blue-600 font-bold">产值专项计提</span>
@@ -1787,15 +1798,15 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
         </div>
       </div>
 
-      <Card className={`lg:col-span-12 rounded-[2rem] md:${UI_TOKENS.RADIUS_PANEL} p-4 md:p-6 overflow-hidden relative border-none shadow-2xl bg-white`}>
+      <Card className={`lg:col-span-12 rounded-[2rem] md:${UI_TOKENS.RADIUS_PANEL} p-3 md:p-4 overflow-hidden relative border-none shadow-2xl bg-white`}>
         {/* Background decoration */}
         <div className="absolute -right-20 -top-20 w-80 h-80 bg-blue-50 rounded-full blur-3xl opacity-50"></div>
         <div className="absolute -left-20 -bottom-20 w-80 h-80 bg-rose-50 rounded-full blur-3xl opacity-50"></div>
 
-        <div className="relative z-10 grid grid-cols-1 xl:grid-cols-12 gap-8 md:gap-12">
+        <div className="relative z-10 grid grid-cols-1 xl:grid-cols-12 gap-4 md:gap-6">
           {/* 经营导航 / 资产穿透 */}
-          <div className="xl:col-span-12 space-y-6 md:space-y-8">
-            <div className="flex flex-col gap-4">
+          <div className="xl:col-span-12 space-y-4 md:space-y-4">
+            <div className="flex flex-col gap-3">
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">经营导航 / 资产穿透</span>
                 <div className="h-px flex-1 bg-slate-100"></div>
@@ -1804,7 +1815,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
               <div className="flex flex-wrap gap-2 overflow-x-auto pb-2 custom-scrollbar">
                 <button
                   onClick={() => { setFilterCenter(null); setFilterType(null); setFilterPurity(null); }}
-                  className={`px-4 py-2 rounded-full text-[10px] font-black whitespace-nowrap transition-all ${(!filterCenter && !filterType && !filterPurity) ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                  className={`px-3 py-1.5 rounded-full text-[10px] font-black whitespace-nowrap transition-all ${(!filterCenter && !filterType && !filterPurity) ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
                 >
                   全盘资产 ({resources.length})
                 </button>
@@ -1816,7 +1827,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                   <button
                     key={center}
                     onClick={() => setFilterCenter(filterCenter === center ? null : center)}
-                    className={`px-4 py-2 rounded-full text-[10px] font-black whitespace-nowrap transition-all ${filterCenter === center ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                    className={`px-3 py-1.5 rounded-full text-[10px] font-black whitespace-nowrap transition-all ${filterCenter === center ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
                   >
                     {center} ({resources.filter(r => isResourceAssignedToCenter(r, center)).length})
                   </button>
@@ -1829,7 +1840,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                   <button
                     key={type}
                     onClick={() => setFilterType(filterType === type ? null : type)}
-                    className={`px-4 py-2 rounded-full text-[10px] font-black whitespace-nowrap transition-all ${filterType === type ? 'bg-emerald-600 text-white shadow-lg' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                    className={`px-3 py-1.5 rounded-full text-[10px] font-black whitespace-nowrap transition-all ${filterType === type ? 'bg-emerald-600 text-white shadow-lg' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
                   >
                     {type} ({resources.filter(r => r.types?.includes(type as RefineType)).length})
                   </button>
@@ -1849,7 +1860,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                     <button
                       key={purity}
                       onClick={() => setFilterPurity(filterPurity === purity ? null : purity)}
-                      className={`px-4 py-2 rounded-full text-[10px] font-black whitespace-nowrap transition-all ${filterPurity === purity ? `${colorClass} text-white shadow-lg` : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                      className={`px-3 py-1.5 rounded-full text-[10px] font-black whitespace-nowrap transition-all ${filterPurity === purity ? `${colorClass} text-white shadow-lg` : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
                     >
                       {purity} ({resources.filter(r => (getPurityInfo(r.confirmedRevenue, r.confirmedValue, r.pendingValue, r.valueCapacity)?.label || '').includes(purity)).length})
                     </button>

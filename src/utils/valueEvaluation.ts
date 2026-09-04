@@ -1,6 +1,6 @@
 import { User, ValueCreationLog, MiningResource, AuditStatus, ValueEfficiencySnapshot, RefineCategory, Role } from '../../types';
 import { calculateHistoricalNetValue, getUserSalaryByMonth } from './business';
-import { aggregateUserMonthMetrics } from './bonusAllocation';
+import { aggregateUserMonthMetrics, calculateUserDCost, calculateBonusAllocation } from './bonusAllocation';
 import { isLogInFilter, resolveLogBusinessMonth } from './dateUtils';
 import { isNonEffectiveHoursEffective, isSalaryActiveForMonth } from './employmentStatus';
 import { getNonEffectiveHoursDeduction } from './nonEffectiveHours';
@@ -9,6 +9,7 @@ export interface EvaluationResult extends ValueEfficiencySnapshot {
   tierLabel: string;
   tierColor: string;
   contributionStatus: '优秀' | '观察' | '预警';
+  historyDebt?: number;
   baseSalary: number;
   aCost: number;
   b1Cost: number;
@@ -28,6 +29,9 @@ export interface EvaluationResult extends ValueEfficiencySnapshot {
   monthlyEfficiencyLower?: number;
   yearlyIncomeUpper?: number;
   yearlyIncomeLower?: number;
+  yearlyContribution?: number;
+  yearlyContributionUpper?: number;
+  yearlyContributionLower?: number;
   yearlyEfficiencyUpper?: number;
   yearlyEfficiencyLower?: number;
   tierUpper?: string;
@@ -172,14 +176,15 @@ export function computePersonEvaluation(
       )
       .reduce((acc, l) => acc + getNonEffectiveHoursDeduction(l), 0);
 
-    const dLogsInPeriod = logs.filter(l =>
-      l.costCategory === 'D' &&
-      [AuditStatus.Confirmed, AuditStatus.Approved].includes(l.status as AuditStatus) &&
-      isLogInFilter(l, filterMonth, startDate, endDate)
+    const dCost = calculateUserDCost(
+      user,
+      logs,
+      allUsers,
+      refMonth,
+      [AuditStatus.Confirmed, AuditStatus.Approved],
+      startDate,
+      endDate
     );
-    const totalDCostInPeriod = dLogsInPeriod.reduce((acc, l) => acc + (l.dynamicCost || 0), 0);
-    const activeUserCount = allUsers.filter(u => u.status !== '离职' && u.category !== '系统管理员' && u.role !== Role.Admin).length || 1;
-    const dCost = totalDCostInPeriod / activeUserCount;
 
     const baseSalary = isSalaryActiveForMonth(user, refMonth) ? getUserSalaryByMonth(user, refMonth) : 0;
     let mCost = baseSalary;
@@ -285,6 +290,9 @@ export function computePersonEvaluation(
 
   const yearlyIncomeUpper = isProdExpert ? (yearlyConfirmedValue + yearlyPendingValue) : yearlyIncome;
   const yearlyIncomeLower = isProdExpert ? yearlyConfirmedValue : yearlyIncome;
+  const yearlyContribution = yearlyIncome - yearlyCost;
+  const yearlyContributionUpper = yearlyIncomeUpper - yearlyCost;
+  const yearlyContributionLower = yearlyIncomeLower - yearlyCost;
   const yearlyEfficiencyUpper = yearlyCost > 0 ? yearlyIncomeUpper / yearlyCost : 0;
   const yearlyEfficiencyLower = yearlyCost > 0 ? yearlyIncomeLower / yearlyCost : 0;
 
@@ -317,6 +325,22 @@ export function computePersonEvaluation(
     tierColor = 'text-emerald-500';
   }
 
+  // 历史欠产（当年 1 ~ M-1 滚动，每年 1 月清零；负数表示欠产）
+  let historyDebt = 0;
+  try {
+    const allocConfirmed = calculateBonusAllocation(
+      refMonth,
+      user,
+      logs,
+      resources,
+      allUsers,
+      AuditStatus.Confirmed
+    );
+    historyDebt = allocConfirmed.history > 0 ? -allocConfirmed.history : 0;
+  } catch {
+    historyDebt = 0;
+  }
+
   return {
     userId: user.id,
     userName: user.name,
@@ -325,6 +349,7 @@ export function computePersonEvaluation(
     monthlyIncome,
     monthlyCost,
     monthlyEfficiency: efficiency,
+    historyDebt,
     yearlyIncome,
     yearlyCost,
     yearlyEfficiency,
@@ -354,6 +379,9 @@ export function computePersonEvaluation(
     monthlyEfficiencyLower,
     yearlyIncomeUpper,
     yearlyIncomeLower,
+    yearlyContribution,
+    yearlyContributionUpper,
+    yearlyContributionLower,
     yearlyEfficiencyUpper,
     yearlyEfficiencyLower,
     tierUpper: upperTierInfo.tier,
@@ -384,8 +412,8 @@ export function computeAllEvaluations(
   // - category 或姓名含「产值代录」（只排除代录，不要用 Role.ValueCollector 当排除条件）
   // 不要再写：role === Role.ValueCollector 就 return false。
   const activeUsers = users.filter(u => {
-    // 1. 排除离职人员
-    if (u.userStatus === 'inactive') return false;
+    // 1. 排除离职人员（根据目标月份动态判断计薪与在职状态）
+    if (!isSalaryActiveForMonth(u, filterMonth)) return false;
 
     const cat = u.category || '';
     const name = u.name || '';

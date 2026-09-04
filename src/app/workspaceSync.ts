@@ -8,6 +8,7 @@ import {
   MeetingSample,
   AcceptanceRecord,
   Role,
+  SystemConfig,
 } from '../../types';
 import { buildValueEfficiencySnapshots } from '../utils/valueEfficiencySnapshots';
 import { buildJzfpSnapshot } from '../utils/jzfpSnapshot';
@@ -25,7 +26,7 @@ export interface BuildSyncPayloadInput {
   fhctzRecords?: any[];
   settlementPayouts?: any[];
   valueEfficiencySnapshots?: any[];
-  systemConfig?: any;
+  systemConfig?: SystemConfig;
 }
 
 export function buildSyncPayload(input: BuildSyncPayloadInput) {
@@ -41,6 +42,7 @@ export function buildSyncPayload(input: BuildSyncPayloadInput) {
     settlementPayouts: input.settlementPayouts,
     valueEfficiencySnapshots: input.valueEfficiencySnapshots,
     systemConfig: input.systemConfig,
+    exportEnabled: input.systemConfig?.exportEnabled,
   };
 }
 
@@ -56,6 +58,7 @@ export interface BuildAppSyncPayloadInput {
   filterMonth: string;
   currentUser: User | null;
   includePassword?: boolean;
+  systemConfig?: SystemConfig;
   overrides?: Partial<{
     users: User[];
     logs: ValueCreationLog[];
@@ -64,6 +67,7 @@ export interface BuildAppSyncPayloadInput {
     circuitBreakers: CircuitBreaker[];
     meetingSamples: MeetingSample[];
     acceptanceRecords: AcceptanceRecord[];
+    systemConfig: SystemConfig;
     importBatchId: string;
   }>;
 }
@@ -74,6 +78,7 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
   const isAdmin = isSystemAdmin(currentUser);
 
   const nextUsers = overrides?.users ?? input.managedUsers;
+  const nextConfig = overrides?.systemConfig ?? input.systemConfig;
   
   // 1. 数据清洗：确保同步给后端的 center/category 是标准口径（还原回填）
   // 即使是 admin 同步，也要确保不把展示层的“水库管理员”写回数据库的“统筹水库管理员”
@@ -120,12 +125,14 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
       fhctzRecords: overrides ? undefined : [],
       settlementPayouts: overrides ? undefined : [],
       valueEfficiencySnapshots: snapshots,
-      systemConfig: undefined,
+      systemConfig: nextConfig,
     }),
     acceptanceRecords: nextAcc,
     jzfp: jzfpSnapshots,
     rdq: nextCBs,
     meetingSamples: nextSamples,
+    systemConfig: nextConfig,
+    exportEnabled: nextConfig?.exportEnabled,
     importBatchId: overrides?.importBatchId,
     import_batch_id: overrides?.importBatchId,
   };

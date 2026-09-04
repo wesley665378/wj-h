@@ -99,7 +99,7 @@ export const UnitMonthlyPnLCard: React.FC<UnitMonthlyPnLCardProps> = ({
       <div className="grid grid-cols-2 gap-4 text-xs">
         <StatItem label="收款包" value={data.revenuePackage.toLocaleString()} />
         <StatItem label="收产包" value={`${data.row1IncomeValuePackage.toLocaleString()} / ${data.row2IncomeValuePackage.toLocaleString()}`} />
-        <StatItem label="总成本" value={isCostVisible ? data.totalCost.toLocaleString() : '***'} />
+        <StatItem label="成本包" value={isCostVisible ? ((data as any).costPackage ?? data.totalCost).toLocaleString() : '***'} />
         <StatItem label="直接费用" value={isCostVisible ? data.directCost.toLocaleString() : '***'} />
       </div>
       

@@ -1,5 +1,5 @@
 /**
- * 城市守护者统一金额与数字展示及计算圆整工具
+ * 城市守护者统一数值展示及计算圆整工具
  * 
  * 附录 S · §一 第 7 条 规范要求：
  * 1. 积分/额度/包/工资/产初·款初/占用/可用提炼量：录入、计算、落库、展示一律四舍五入为整数（Math.round 等价）。
@@ -10,7 +10,7 @@
  */
 
 /**
- * 金额/额度圆整为整数
+ * 数值/额度圆整为整数
  */
 export function roundMoney(value: number | string | undefined | null): number {
   if (value === undefined || value === null || value === '') return 0;
@@ -20,7 +20,7 @@ export function roundMoney(value: number | string | undefined | null): number {
 }
 
 /**
- * 格式化整数金额（0 位小数千分位，无货币符号）
+ * 格式化整数数值（0 位小数千分位，无货币符号）
  * @example formatMoney(12345.67) -> "12,346"
  */
 export function formatMoney(value: number | string | undefined | null): string {
@@ -31,7 +31,7 @@ export function formatMoney(value: number | string | undefined | null): string {
 }
 
 /**
- * 格式化整数金额别名（与 formatMoney 等价）
+ * 格式化整数数值别名（与 formatMoney 等价）
  */
 export const formatAmount = formatMoney;
 export const formatCurrency = formatMoney;

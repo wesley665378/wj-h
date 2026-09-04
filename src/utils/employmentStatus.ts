@@ -30,7 +30,7 @@ export function isSalaryActiveForMonth(user: User, monthYYYYMM: string): boolean
 }
 
 /**
- * 计算离职当月的建议对冲金额
+ * 计算离职当月的建议对冲数值
  * 公式：suggested = round( getUserSalaryByMonth(u, resignMonth) / daysInMonth * remainingDaysAfterResign )
  * remainingDays = 当月总天数 - 离职日日号
  */

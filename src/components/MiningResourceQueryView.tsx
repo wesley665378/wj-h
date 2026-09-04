@@ -6,7 +6,8 @@ import {
   User, 
   AuditStatus, 
   RefineCategory, 
-  TransactionType 
+  TransactionType,
+  SystemConfig
 } from '../../types';
 import { Card, ProjectStatusBadge } from './UI';
 import { deriveProjectStatus } from '../utils/projectStatus';
@@ -15,6 +16,8 @@ import { calculateHistoricalNetValue } from '../utils/business';
 import { calculateHedgeCapacitiesAndWeights, calculateInjectedAmount, getRawInputAmount } from '../utils/consumptionHedge';
 import { InfoTip } from './InfoTip';
 import { exportWorkbook, buildExcelFilename, XLSX } from '../utils/excelIo';
+import { canExportExcel, getExportButtonTitle, EXPORT_DISABLED_TOOLTIP } from '../utils/accessControl';
+import { toast } from 'sonner';
 import { BusinessDateFilter } from './BusinessDateFilter';
 import { isLogInFilter, getLocalMonthString } from '../utils/dateUtils';
 import { formatMoney } from '../utils/formatMoney';
@@ -41,6 +44,8 @@ interface MiningResourceQueryViewProps {
   transactions?: InternalTransaction[];
   managedUsers?: User[];
   onClose?: () => void;
+  user?: User;
+  systemConfig?: SystemConfig;
 }
 
 export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = ({
@@ -51,7 +56,10 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
   transactions = [],
   managedUsers = [],
   onClose,
+  user,
+  systemConfig,
 }) => {
+  const canExport = useMemo(() => canExportExcel(user, systemConfig), [user, systemConfig]);
   const [filterMonth, setFilterMonth] = useState<string>(() => getLocalMonthString());
   const [filterStartDate, setFilterStartDate] = useState<string>('');
   const [filterEndDate, setFilterEndDate] = useState<string>('');
@@ -165,8 +173,12 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
     return list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
   }, [transactions, normQueryId, filterMonth, filterStartDate, filterEndDate]);
 
-  // 导出 Excel (多 Sheet，无货币符号，金额整数)
+  // 导出 Excel (多 Sheet，无货币符号，数值整数)
   const handleExportExcel = () => {
+    if (!canExport) {
+      toast.error(EXPORT_DISABLED_TOOLTIP);
+      return;
+    }
     const wb = XLSX.utils.book_new();
 
     // Sheet 1: 矿山主档
@@ -213,7 +225,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
         '注入积分': rawInj,
         '收款包': isRev ? pkgNet : '—',
         '产兑包': !isRev ? pkgNet : '—',
-        'C权': isRev ? `${(cWeightRev * 100).toFixed(2)}%` : `${(cWeightVal * 100).toFixed(2)}%`,
+        'C权': isRev ? (cWeightRev < 0.8 ? `${(cWeightRev * 100).toFixed(2)}% (低)` : `${(cWeightRev * 100).toFixed(2)}%`) : (cWeightVal < 0.8 ? `${(cWeightVal * 100).toFixed(2)}% (低)` : `${(cWeightVal * 100).toFixed(2)}%`),
         'B2权': !isRev ? `${(b2Weight * 100).toFixed(2)}%` : '—',
       };
     });
@@ -283,7 +295,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
               <ProjectStatusBadge resource={resource} />
             </div>
             <p className="text-[10px] text-slate-400 font-medium">
-              四块穿透视图（主档 / 价值创造 / 动态消耗 / 内部交易）· 严控金额与权算法
+              四块穿透视图（主档 / 价值创造 / 动态消耗 / 内部交易）· 严控数值与权算法
             </p>
           </div>
         </div>
@@ -291,7 +303,13 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
         <div className="flex items-center gap-3">
           <button
             onClick={handleExportExcel}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-2"
+            disabled={!canExport}
+            title={getExportButtonTitle(canExport, '导出矿山全景台账 (.xlsx)')}
+            className={`px-4 py-2 font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-2 ${
+              !canExport
+                ? 'bg-slate-700 text-slate-400 border border-slate-600 cursor-not-allowed opacity-60'
+                : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
+            }`}
           >
             <span>📊</span>
             <span>导出矿山全景台账 (.xlsx)</span>
@@ -456,7 +474,10 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
               />
             </div>
             <div className="text-[11px] font-mono font-black text-indigo-950 space-y-0.5 mt-0.5">
-              <div>C权: {(cWeightRev * 100).toFixed(2)}%</div>
+              <div className={`flex items-center gap-1 ${cWeightRev < 0.8 ? 'text-amber-700 font-bold bg-amber-100/80 px-1.5 py-0.5 rounded' : ''}`} title={cWeightRev < 0.8 ? "当前 C 权低于 0.8，请确认风险。" : undefined}>
+                <span>C权: {(cWeightRev * 100).toFixed(2)}%</span>
+                {cWeightRev < 0.8 && <span className="px-1 py-0.2 text-[9px] bg-amber-500 text-white rounded font-black">⚠️低</span>}
+              </div>
               <div>B2权: {(b2Weight * 100).toFixed(2)}%</div>
             </div>
           </div>
@@ -534,7 +555,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
             <div>
               <h4 className="text-base font-black text-slate-900 tracking-tight">价值创造流水 (jzcz)</h4>
               <p className="text-[10px] text-slate-400 font-medium">
-                收款仅含已确权 · 产值含已确权及待确权联动 · 金额为整数
+                收款仅含已确权 · 产值含已确权及待确权联动 · 数值为整数
               </p>
             </div>
           </div>
@@ -566,7 +587,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
                 <th className="py-2.5 px-3">确权类型</th>
                 <th className="py-2.5 px-3">业务日期</th>
                 <th className="py-2.5 px-3">采集主体</th>
-                <th className="py-2.5 px-3 text-right">输入金额</th>
+                <th className="py-2.5 px-3 text-right">输入数值</th>
                 <th className="py-2.5 px-3 text-right">注入积分</th>
                 <th className="py-2.5 px-3 text-right">收款包</th>
                 <th className="py-2.5 px-3 text-right">产兑包</th>
@@ -622,8 +643,15 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
                       <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">
                         {!isRev ? formatMoney(pkgNet) : '—'}
                       </td>
-                      <td className="py-2 px-3 text-right font-mono text-slate-600">
-                        {isRev ? `${(cWeightRev * 100).toFixed(2)}%` : `${(cWeightVal * 100).toFixed(2)}%`}
+                      <td className={`py-2 px-3 text-right font-mono ${(isRev ? cWeightRev : cWeightVal) < 0.8 ? 'bg-amber-100/60 text-amber-900 font-bold' : 'text-slate-600'}`} title={(isRev ? cWeightRev : cWeightVal) < 0.8 ? "当前 C 权低于 0.8，请确认风险。" : undefined}>
+                        <span className="inline-flex items-center justify-end gap-1">
+                          {isRev ? `${(cWeightRev * 100).toFixed(2)}%` : `${(cWeightVal * 100).toFixed(2)}%`}
+                          {(isRev ? cWeightRev : cWeightVal) < 0.8 && (
+                            <span className="px-1 py-0.2 text-[9px] bg-amber-500 text-white rounded font-black shadow-sm" title="当前 C 权低于 0.8，请确认风险。">
+                              ⚠️ 低
+                            </span>
+                          )}
+                        </span>
                       </td>
                       <td className="py-2 px-3 text-right font-mono text-slate-600">
                         {!isRev ? `${(b2Weight * 100).toFixed(2)}%` : '—'}

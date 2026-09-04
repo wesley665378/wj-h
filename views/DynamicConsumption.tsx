@@ -1,11 +1,12 @@
 import { UI_TOKENS } from '../src/constants/uiTokens';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { User, MiningResource, ValueCreationLog, RefineCategory, AuditStatus, Role, RefineType, ProjectStatus } from '../types';
+import { User, MiningResource, ValueCreationLog, RefineCategory, AuditStatus, Role, RefineType, ProjectStatus, SystemConfig } from '../types';
 import { Card, Badge, ProjectStatusBadge } from '../src/components/UI';
 import { CostPrivacyToggle } from '../src/components/CostPrivacyToggle';
 import { useCostPrivacy } from '../src/hooks/useCostPrivacy';
 import { XLSX, exportWorkbook, buildExcelFilename } from '../src/utils/excelIo';
+import { canExportExcel, getExportButtonTitle, EXPORT_DISABLED_TOOLTIP } from '../src/utils/accessControl';
 import { UI_LABELS } from '../src/constants/uiLabels';
 import { TERMINOLOGY } from '../src/constants/terminology';
 import { useDedupe } from '../src/hooks/useDedupe';
@@ -91,6 +92,7 @@ interface DynamicConsumptionProps {
   onLogSubmit: (log: ValueCreationLog | ValueCreationLog[]) => void;
   persistWorkspaceWithOverrides?: (overrides?: { logs?: ValueCreationLog[] }, options?: { silent?: boolean; successMessage?: string; loadingMessage?: string; toastId?: string | number }) => Promise<void>;
   updateLastSyncedFingerprint?: () => void;
+  systemConfig?: SystemConfig;
 }
 
 const CostTooltipIcon: React.FC<{ tooltip: string }> = ({ tooltip }) => {
@@ -179,8 +181,9 @@ const CardHeader: React.FC<{ title: string; extra?: React.ReactNode }> = ({ titl
 );
 
 const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({ 
-  user, users, resources, logs, jzczLogs, dtcbLogs, onLogSubmit, persistWorkspaceWithOverrides, updateLastSyncedFingerprint 
+  user, users, resources, logs, jzczLogs, dtcbLogs, onLogSubmit, persistWorkspaceWithOverrides, updateLastSyncedFingerprint, systemConfig 
 }) => {
+  const canExport = useMemo(() => canExportExcel(user, systemConfig), [user, systemConfig]);
   const { isCostVisible, toggleCostVisible, maskMoney, maskText } = useCostPrivacy();
   const { isLocked } = useDedupe(500);
   const { isBroken, retryAfter, recordFailure, recordSuccess } = useCircuitBreaker();
@@ -385,7 +388,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
     }
 
     if ((!isD && !selectedMiningId) || !selectedType || (!recordedCollectorId && !isB2 && !isD) || dynamicCost <= 0) {
-      showAlert('请确保“采集主体”、“消耗类型”及“关联信息”已完整填写且金额大于0。');
+      showAlert('请确保“采集主体”、“消耗类型”及“关联信息”已完整填写且数值大于0。');
       return;
     }
 
@@ -393,7 +396,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
     const mineNotice = isD ? '【归属】经营单元公摊（无项目列支）' : `【矿山】${selectedMiningId}`;
 
     showConfirm(
-      `确定提报动态消耗申请？\n\n【类别】${categoryLabel}类消耗\n${mineNotice}\n【金额】${Math.round(dynamicCost).toLocaleString()}\n【归属月份】${businessMonth}`,
+      `确定提报动态消耗申请？\n\n【类别】${categoryLabel}类消耗\n${mineNotice}\n【数值】${Math.round(dynamicCost).toLocaleString()}\n【归属月份】${businessMonth}`,
       async () => {
         const status = AuditStatus.Pending;
         const confirmationType = '手动确权';
@@ -473,7 +476,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
     }
 
     showConfirm(
-      `确定提交非有效工时对冲申请？\n\n【对冲金额】${Math.round(deductionAmount).toLocaleString()}\n【归属月份】${businessMonth}`,
+      `确定提交非有效工时对冲申请？\n\n【对冲数值】${Math.round(deductionAmount).toLocaleString()}\n【归属月份】${businessMonth}`,
       async () => {
         const deductionLog: ValueCreationLog = {
           id: `J${(Date.now() % 100000000).toString().padStart(8, '0')}`,
@@ -516,11 +519,15 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
   };
 
   const exportToExcel = () => {
+    if (!canExport) {
+      toast.error(EXPORT_DISABLED_TOOLTIP);
+      return;
+    }
     const dataToExport = consumptionLogs.map(log => {
       const { cWeightValue, b2WeightValue, revLimitStr, valLimitCStr, valLimitB2Str } = calculateConsumptionMirrorFields(log, resources, logs);
 
       return {
-        '申报编号': log.id,
+        '申报编号': log.id.startsWith('#') ? log.id : `#${log.id}`,
         '业务日期': resolveLogBusinessDate(log),
         '经营单元': users.find(u => u.id === log.rankId)?.center || '-',
         '提报时间': formatSubmissionTime(log.timestamp),
@@ -529,7 +536,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
         '非效对冲': (log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? Math.round(getNonEffectiveHoursDeduction(log)) : 0,
         'A': log.costCategory === 'A' ? Math.round(log.dynamicCost) : 0,
         'C': log.costCategory === 'C' ? Math.round(log.dynamicCost) : 0,
-        'C权': cWeightValue,
+        'C权': Number(cWeightValue) < 0.8 ? `${cWeightValue} (低)` : cWeightValue,
         '款初/款当': revLimitStr,
         '产初/产当': valLimitCStr,
         'B1': (log.costCategory === 'B' && log.valueConsumptionMode === 'B1') ? Math.round(log.dynamicCost) : 0,
@@ -581,8 +588,165 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
     <div className="w-full max-w-7xl mx-auto space-y-6 font-sans text-[13px] text-[#1f2933] animate-in fade-in duration-300 pb-12">
       
       {/* 申报表单卡片 */}
-      <Card title="动态消耗申报" noPadding>
-        <form onSubmit={handleSubmit} className="p-4 md:p-6 space-y-6">
+      <Card 
+        title="动态消耗申报" 
+        noPadding
+        headerAction={
+          <div className="flex items-center gap-1.5 bg-slate-100/80 p-1 rounded-md border border-slate-200/60">
+            <button
+              type="button"
+              onClick={() => setShowDeductionChannel(false)}
+              className={`px-3 py-1.5 text-xs font-bold rounded transition-all cursor-pointer ${
+                !showDeductionChannel 
+                  ? 'bg-white text-blue-600 shadow-xs border border-slate-200/50' 
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              常规动态消耗
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowDeductionChannel(true)}
+              className={`px-3 py-1.5 text-xs font-bold rounded transition-all cursor-pointer flex items-center gap-1.5 ${
+                showDeductionChannel 
+                  ? 'bg-rose-600 text-white shadow-xs' 
+                  : 'text-rose-600 hover:bg-rose-50'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-rose-400 animate-pulse"></span>
+              非有效工时对冲 (FXDC)
+            </button>
+          </div>
+        }
+      >
+        {showDeductionChannel ? (
+          <form onSubmit={handleDeductionSubmit} className="p-4 md:p-6 space-y-6">
+            <div className="bg-rose-50/70 border border-rose-200/80 p-4 rounded-md space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-rose-800 flex items-center gap-1.5">
+                  <span className="inline-block w-2 h-2 rounded-full bg-rose-500"></span>
+                  非有效工时对冲申报通道（FXDC）
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-200/80 text-rose-800">
+                  冲抵刚性工资包
+                </span>
+              </div>
+              <p className="text-xs text-rose-700/90 leading-relaxed">
+                用于离职或非有效工时等场景的刚性工资包冲减。提交后生成待确权单据（矿山编号：FXDC），审核通过后自动从对应经营单元和采集主体刚性中扣减。
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
+              {/* 1. 经营单元 */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
+                  经营单元 <span className="text-rose-500 ml-1 font-bold">*</span>
+                </label>
+                <select
+                  value={deductionOperatorId}
+                  onChange={(e) => setDeductionOperatorId(e.target.value)}
+                  disabled={!canSelectOthers}
+                  className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer h-10 placeholder:text-[#94a3b8]"
+                  required
+                >
+                  {(() => {
+                    const seenCenters = new Set<string>();
+                    const options: { id: string, center: string }[] = [];
+                    const managers = users.filter(u => isCenterManagerUser(u));
+                    const sortedManagers = sortCenterManagers(managers);
+                    sortedManagers.forEach(u => {
+                      if (u.center && !seenCenters.has(u.center)) {
+                        seenCenters.add(u.center);
+                        options.push({ id: u.id, center: u.center });
+                      }
+                    });
+                    return options.sort((a,b) => a.center.localeCompare(b.center)).map(opt => (
+                      <option key={opt.id} value={opt.id}>{opt.center}</option>
+                    ));
+                  })()}
+                </select>
+              </div>
+
+              {/* 2. 采集主体 */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
+                  采集主体 <span className="text-rose-500 ml-1 font-bold">*</span>
+                </label>
+                <select
+                  value={deductionCollectorId}
+                  onChange={(e) => setDeductionCollectorId(e.target.value)}
+                  className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all cursor-pointer h-10 placeholder:text-[#94a3b8]"
+                  required
+                >
+                  <option value="">选择采集主体...</option>
+                  {collectorPool.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {formatCollectorDisplay(u)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 3. 业务日期 */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
+                  业务日期 <span className="text-rose-500 ml-1 font-bold">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={businessDate}
+                  onChange={(e) => {
+                    const date = e.target.value;
+                    setBusinessDate(date);
+                    if (date) setBusinessMonth(date.slice(0, 7));
+                  }}
+                  className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-mono font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all cursor-pointer h-10"
+                  required
+                />
+              </div>
+
+              {/* 4. 矿山编号 (固定为 FXDC) */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
+                  冲抵矿山编号
+                </label>
+                <div className="flex items-center bg-rose-50 border border-rose-200 rounded-[4px] px-3 py-2 h-10 text-[13px] font-mono font-bold text-rose-700">
+                  FXDC (非有效工时对冲)
+                </div>
+              </div>
+            </div>
+
+            {/* 对冲积分与提交 */}
+            <div className="border-t border-slate-100 pt-5 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
+                    对冲积分数值 <span className="text-rose-500 ml-1 font-bold">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    value={deductionAmount || ''}
+                    onChange={(e) => setDeductionAmount(Number(e.target.value))}
+                    className="w-full text-right text-base font-bold font-mono [font-variant-numeric:tabular-nums] text-rose-600 bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 h-10 focus:outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/10 transition-all placeholder:text-[#94a3b8]"
+                    placeholder="0"
+                    min="1"
+                    required
+                  />
+                </div>
+
+                <div className="flex items-end sm:pt-5.5">
+                  <button
+                    type="submit"
+                    className="w-full h-10 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-black text-xs uppercase tracking-widest rounded-[4px] shadow-sm transition-all cursor-pointer flex items-center justify-center"
+                  >
+                    提交对冲申请 (FXDC)
+                  </button>
+                </div>
+              </div>
+            </div>
+          </form>
+        ) : (
+          <form onSubmit={handleSubmit} className="p-4 md:p-6 space-y-6">
           
           {/* 基本信息栅格 */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
@@ -895,62 +1059,12 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
             </div>
 
             <div className="bg-slate-50 border-l-2 border-[#1a56db] p-3 rounded-[4px] text-xs text-slate-500 leading-relaxed">
-              该操作将直接从采集人的刚性工资包中扣除对应金额，用于对冲组织运营成本。
+              该操作将直接从采集人的刚性工资包中扣除对应数值，用于对冲组织运营成本。
             </div>
           </div>
 
         </form>
-      </Card>
-
-      {/* 统一审计记录表格 */}
-      <Card title="成本审计记录" noPadding headerAction={
-        <div className="flex items-center gap-2">
-          {([
-            { id: 'all', label: '全部' },
-            { id: 'pending', label: '待确权' },
-            { id: 'approved', label: '已确权' },
-            { id: 'rejected', label: '已驳回' }
-          ] as const).map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-3 py-1.5 text-[10px] font-black rounded-[4px] transition-all ${
-                activeTab === tab.id 
-                  ? 'bg-blue-600 text-white shadow-sm' 
-                  : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      }>
-        <div className="overflow-x-auto">
-          <table id="cost-audit-records-table" className="w-full text-left min-w-[1500px] border-collapse">
-            <thead className="bg-slate-50/90 text-slate-400 text-[9px] font-bold uppercase tracking-wider border-b border-slate-200">
-              <tr>
-                <th className="px-3 py-3 border-r border-slate-200/60">申报编号</th>
-                <th className="px-2.5 py-3 text-center border-r border-slate-200/60">业务日期</th>
-                <th className="px-2.5 py-3 text-center border-r border-slate-200/60">{TERMINOLOGY.BUSINESS_UNIT}</th>
-                <th className="px-2.5 py-3 text-center border-r border-slate-200/60">{TERMINOLOGY.MINING_RESOURCE_ID}</th>
-                <th className="px-3 py-3 border-r border-slate-200/60 whitespace-nowrap min-w-[130px]">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">FXDC</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">A</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">C积分</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">C权</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">款初/款当</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">产初/产当</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">B1</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">B2积分</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">B2权</th>
-                <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">D积分</th>
-                <th className="px-2.5 py-3 text-center border-r border-slate-200/60 whitespace-nowrap">确权日期</th>
-                <th className="px-3 py-3 text-center whitespace-nowrap min-w-[90px]">确权状态</th>
-                <th className="px-3 py-3 text-center whitespace-nowrap min-w-[80px]">操作控制</th>
-              </tr>
-            </thead>
-          </table>
-        </div>
+        )}
       </Card>
 
       {/* 成本审计记录表格卡片 */}
@@ -980,7 +1094,13 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
             <button 
               id="export-excel-btn"
               onClick={exportToExcel}
-              className="px-3 py-1 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-sm text-[10px] font-bold hover:bg-emerald-100 transition-colors flex items-center shadow-xs cursor-pointer"
+              disabled={!canExport}
+              title={getExportButtonTitle(canExport, '导出 EXCEL')}
+              className={`px-3 py-1 border rounded-sm text-[10px] font-bold transition-colors flex items-center shadow-xs ${
+                !canExport
+                  ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+                  : 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100 cursor-pointer'
+              }`}
             >
               导出 EXCEL
             </button>
@@ -1029,7 +1149,6 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                 <th className="px-2.5 py-3 text-right border-r border-slate-200/60 whitespace-nowrap">D积分</th>
                 <th className="px-2.5 py-3 text-center border-r border-slate-200/60 whitespace-nowrap">确权日期</th>
                 <th className="px-3 py-3 text-center whitespace-nowrap min-w-[90px]">确权状态</th>
-                <th className="px-3 py-3 text-center whitespace-nowrap min-w-[80px]">操作控制</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white text-[10px]">
@@ -1039,8 +1158,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                 return (
                   <tr key={log.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-3 py-3 border-r border-slate-100 font-mono text-[10px]">
-                      <span className="font-bold text-slate-700 block">#{log.id}</span>
-                      <span className="text-[9px] text-slate-400">{formatSubmissionTime(log.timestamp)}</span>
+                      <span className="font-bold text-slate-700 block">{log.id.startsWith('#') ? log.id : `#${log.id}`}</span>
                     </td>
                     <td className="px-2.5 py-3 text-center font-mono text-slate-700 border-r border-slate-100">
                       {resolveLogBusinessDate(log)}
@@ -1088,7 +1206,16 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                           {log.costCategory === 'A' ? <TieredValueDisplay value={log.dynamicCost} /> : '—'}
                         </td>
                         <td className="px-2.5 py-3 text-right font-mono font-bold text-slate-700 border-r border-slate-100 whitespace-nowrap">{log.costCategory === 'C' ? maskMoney(Math.round(log.dynamicCost)) : '—'}</td>
-                        <td className="px-2.5 py-3 text-right font-mono text-slate-600 border-r border-slate-100 whitespace-nowrap">{cWeightValue || '—'}</td>
+                        <td className={`px-2.5 py-3 text-right font-mono border-r border-slate-100 whitespace-nowrap ${Number(cWeightValue) < 0.8 ? 'bg-amber-100/60 text-amber-900 font-bold' : 'text-slate-600'}`} title={Number(cWeightValue) < 0.8 ? "当前 C 权低于 0.8，请确认风险。" : undefined}>
+                          <span className="inline-flex items-center justify-end gap-1">
+                            {cWeightValue || '—'}
+                            {Number(cWeightValue) < 0.8 && (
+                              <span className="px-1 py-0.2 text-[9px] bg-amber-500 text-white rounded font-black shadow-sm" title="当前 C 权低于 0.8，请确认风险。">
+                                ⚠️ 低
+                              </span>
+                            )}
+                          </span>
+                        </td>
                         <td className="px-2.5 py-3 text-right font-mono text-slate-600 border-r border-slate-100 whitespace-nowrap">{revLimitStr || '—'}</td>
                         <td className="px-2.5 py-3 text-right font-mono text-slate-600 border-r border-slate-100 whitespace-nowrap">{valLimitCStr || '—'}</td>
                         <td className="px-2.5 py-3 text-right font-mono font-bold text-slate-700 border-r border-slate-100 whitespace-nowrap">{(log.costCategory === 'B' && log.valueConsumptionMode === 'B1') ? maskMoney(Math.round(log.dynamicCost)) : '—'}</td>
@@ -1106,18 +1233,12 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                         {formatAuditStatusLabel(log.status)}
                       </Badge>
                     </td>
-                    <td className="px-2 py-2 text-center border-l border-slate-100">
-                      <div className="flex flex-col gap-1">
-                        <button className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-bold rounded-sm border border-emerald-200">确权</button>
-                        <button className="px-2 py-0.5 bg-rose-50 text-rose-600 text-[10px] font-bold rounded-sm border border-rose-200">驳回</button>
-                      </div>
-                    </td>
                   </tr>
                 );
               })}
               {consumptionLogs.length === 0 && (
                 <tr>
-                  <td colSpan={18} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">
+                  <td colSpan={17} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">
                     {UI_LABELS.EMPTY_DEFAULT}
                   </td>
                 </tr>

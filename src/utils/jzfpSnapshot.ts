@@ -7,7 +7,8 @@ export interface JzfpSnapshot {
   category: string;
   month: string;
   totalIncome: number;
-  totalCost: number;
+  costPackage: number; // 成本包
+  totalCost?: number; // 兼容字段
   netBonus: number;
   historyDebt: number;
   timestamp: number;
@@ -109,6 +110,7 @@ export function buildJzfpSnapshot(
       category: user.category || '',
       month: targetMonth,
       totalIncome: Math.round(currentIncome),
+      costPackage: Math.round(currentCost),
       totalCost: Math.round(currentCost),
       netBonus: theoreticalBonus,
       historyDebt,

@@ -1,7 +1,7 @@
 
 import { UI_TOKENS } from '../src/constants/uiTokens';
 import React, { useState, useMemo, useEffect } from 'react';
-import { User, Role, MiningResource, InternalTransaction, TransactionType, TransactionStatus, CircuitBreaker, TransactionFailure, RefineCategory, RefineType, AuditStatus, ValueCreationLog } from '../types';
+import { User, Role, MiningResource, InternalTransaction, TransactionType, TransactionStatus, CircuitBreaker, TransactionFailure, RefineCategory, RefineType, AuditStatus, ValueCreationLog, SystemConfig } from '../types';
 import { parseCenterList, centerMatch, isResourceAssignedToCenter } from '../src/utils/centerScope';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
@@ -12,7 +12,7 @@ import { useDedupe } from '../src/hooks/useDedupe';
 import { XLSX, exportWorkbook } from '../src/utils/excelIo';
 import { formatMoney } from '../src/utils/formatMoney';
 import { UI_LABELS } from '../src/constants/uiLabels';
-import { isSystemAdmin } from '../src/utils/accessControl';
+import { isSystemAdmin, canExportExcel, getExportButtonTitle, EXPORT_DISABLED_TOOLTIP } from '../src/utils/accessControl';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
 import { getInitialRevenueCapacity, getInitialValueCapacity, getCurrentRevenueCapacity, getCurrentValueCapacity } from '../src/utils/miningCapacity';
 import {
@@ -62,6 +62,7 @@ interface InternalTransactionsProps {
   units: string[];
   persistWorkspaceNow?: () => Promise<void>;
   persistWorkspaceWithOverrides?: (overrides?: any) => Promise<void>;
+  systemConfig?: SystemConfig;
 }
 
 const FAILURE_THRESHOLD = 3; // 3 failures within 1 minute
@@ -86,8 +87,10 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   onRecoverCircuitBreaker,
   units,
   persistWorkspaceNow,
-  persistWorkspaceWithOverrides
+  persistWorkspaceWithOverrides,
+  systemConfig
 }) => {
+  const canExport = useMemo(() => canExportExcel(currentUser, systemConfig), [currentUser, systemConfig]);
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const { isLocked } = useDedupe(500);
   const [type, setType] = useState<TransactionType>(TransactionType.Resource);
@@ -710,6 +713,10 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   };
 
   const exportToExcel = () => {
+    if (!canExport) {
+      toast.error(EXPORT_DISABLED_TOOLTIP);
+      return;
+    }
     let dataToExport = [];
     let fileName = "";
     
@@ -1541,7 +1548,13 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                 />
                 <button 
                   onClick={exportToExcel}
-                  className="px-4 py-2 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all flex items-center"
+                  disabled={!canExport}
+                  title={getExportButtonTitle(canExport, '导出 Excel')}
+                  className={`px-4 py-2 border rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center ${
+                    !canExport
+                      ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+                      : 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100 cursor-pointer'
+                  }`}
                 >
                   <svg className="w-3 h-3 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                   导出 Excel

@@ -6,18 +6,47 @@ export const resolveLogPackageNet = (log: ValueCreationLog, resources: MiningRes
   return calculateHistoricalNetValue(log, resources, users);
 };
 
+const isRevenueCategory = (cat: any) =>
+  cat === RefineCategory.Revenue || cat === '收款' || cat === 'Revenue' || cat === 'revenue';
+
+const isValueCategory = (cat: any) =>
+  cat === RefineCategory.Value || cat === '产值' || cat === 'Value' || cat === 'value';
+
+const isConfirmedOrApproved = (status: any) =>
+  status === AuditStatus.Confirmed ||
+  status === AuditStatus.Approved ||
+  status === '已确权' ||
+  status === '入库' ||
+  status === 'Confirmed' ||
+  status === 'Approved' ||
+  status === 'confirmed' ||
+  status === 'approved';
+
+const isPendingStatus = (status: any) =>
+  status === AuditStatus.Pending ||
+  status === '待确权' ||
+  status === 'Pending' ||
+  status === 'pending';
+
+const isLinkageType = (confType: any, logObj: any) =>
+  confType === '联动确权' ||
+  confType === '联动' ||
+  confType === 'Linkage' ||
+  logObj?.isLinkage === true;
+
 export const sumConfirmedRevenuePackage = (logs: ValueCreationLog[], resources: MiningResource[], users: User[]) => {
   return logs
-    .filter(l => l.category === RefineCategory.Revenue && l.status === AuditStatus.Confirmed)
+    .filter(l => isRevenueCategory(l.category) && isConfirmedOrApproved(l.status) && !l.costCategory)
     .reduce((sum, l) => sum + resolveLogPackageNet(l, resources, users), 0);
 };
 
 export const sumValueConversionPackage = (logs: ValueCreationLog[], resources: MiningResource[], users: User[]) => {
   return logs
-    .filter(l => l.category === RefineCategory.Value && (
-      l.status === AuditStatus.Confirmed || 
-      (l.status === AuditStatus.Pending && l.confirmationType === '联动确权')
-    ))
+    .filter(l => 
+      isValueCategory(l.category) && 
+      !l.costCategory &&
+      (isConfirmedOrApproved(l.status) || (isPendingStatus(l.status) && isLinkageType(l.confirmationType, l)))
+    )
     .reduce((sum, l) => sum + resolveLogPackageNet(l, resources, users), 0);
 };
 

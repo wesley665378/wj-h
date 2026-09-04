@@ -42,6 +42,17 @@ export interface User {
   resignDate?: string; // 离职日期 YYYY-MM-DD
 }
 
+export interface SystemConfig {
+  /**
+   * 系统级导出权限开关：是否允许普通账号导出 Excel (默认 true)
+   * 仅系统管理员 (Admin) 可控制。
+   * 当设为 false 时，普通账号（非 Admin/npcxie）在全系统所有页面的“导出 EXCEL”按钮变灰禁用并提示。
+   * 预留后端接入点：可对应后端的 systemConfig.exportEnabled 或 exportEnabled 字段
+   */
+  exportEnabled?: boolean;
+  [key: string]: any;
+}
+
 export interface JydyUnit {
   id: string;
   name: string;
@@ -342,7 +353,8 @@ export interface PersonalEvaluation {
   userId: string;
   userName: string;
   totalIncome: number; // 收入包
-  totalCost: number; // 个人成本 (工资+五险一金+差旅等)
+  costPackage: number; // 成本包 (工资+五险一金+差旅等)
+  totalCost?: number; // 兼容字段
   contribution: number;
   bonusEligibility: boolean;
   tier: string;
