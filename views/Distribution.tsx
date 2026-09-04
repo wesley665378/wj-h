@@ -1278,10 +1278,10 @@ const Distribution: React.FC<DistributionProps> = ({
                 {/* 1. 采集主体 (Dimension) */}
                 <th 
                   onClick={() => handleSort('userName')}
-                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-left text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[140px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none"
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-left text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[140px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none whitespace-nowrap"
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="inline-flex items-center">
+                  <div className="flex items-center justify-between whitespace-nowrap">
+                    <span className="inline-flex items-center whitespace-nowrap">
                       采集主体 {renderSortIcon('userName')}
                     </span>
                   </div>
@@ -1289,10 +1289,10 @@ const Distribution: React.FC<DistributionProps> = ({
                 {/* 2. 收产包 (Measure) */}
                 <th 
                   onClick={() => handleSort('incomePackage')}
-                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[110px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none"
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[110px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none whitespace-nowrap"
                 >
-                  <div className="flex items-center justify-end gap-1">
-                    <span className="inline-flex items-center">
+                  <div className="flex items-center justify-end gap-1 whitespace-nowrap">
+                    <span className="inline-flex items-center whitespace-nowrap">
                       收产包 {renderSortIcon('incomePackage')}
                     </span>
                   </div>
@@ -1300,11 +1300,11 @@ const Distribution: React.FC<DistributionProps> = ({
                 {/* 3. 成本包 */}
                 <th 
                   onClick={() => handleSort('costPackage')}
-                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[120px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none"
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[120px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none whitespace-nowrap"
                   title="点击按成本包排序"
                 >
-                  <div className="flex items-center justify-end gap-1.5">
-                    <span className="inline-flex items-center">
+                  <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                    <span className="inline-flex items-center whitespace-nowrap">
                       成本包 {renderSortIcon('costPackage')}
                     </span>
                     <CostPrivacyToggle size="sm" showLabel={false} />
@@ -1314,11 +1314,11 @@ const Distribution: React.FC<DistributionProps> = ({
                 {/* 4. 历史欠产包 */}
                 <th 
                   onClick={() => handleSort('historyDebt')}
-                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[105px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none"
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[105px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none whitespace-nowrap"
                   title="点击按历史欠产包排序"
                 >
-                  <div className="flex items-center justify-end gap-1.5">
-                    <span className="inline-flex items-center">
+                  <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                    <span className="inline-flex items-center whitespace-nowrap">
                       历史欠产包 {renderSortIcon('historyDebt')}
                     </span>
                     <InfoTip title="历史欠产包口径" content="当年 1~M-1 全量滚动，无流水仍计工资，不含当月，负数展示。" />
@@ -1327,11 +1327,11 @@ const Distribution: React.FC<DistributionProps> = ({
                 {/* 5. 分配额度（月） */}
                 <th 
                   onClick={() => handleSort('netRedundancy')}
-                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-indigo-700 bg-indigo-50/40 uppercase tracking-wider min-w-[115px] cursor-pointer hover:bg-indigo-100/60 transition-colors select-none"
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-indigo-700 bg-indigo-50/40 uppercase tracking-wider min-w-[115px] cursor-pointer hover:bg-indigo-100/60 transition-colors select-none whitespace-nowrap"
                   title="点击按分配额度排序"
                 >
-                  <div className="flex items-center justify-end gap-1.5">
-                    <span className="inline-flex items-center">
+                  <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                    <span className="inline-flex items-center whitespace-nowrap">
                       分配额度（月） {renderSortIcon('netRedundancy')}
                     </span>
                     <InfoTip title="分配额度口径" content="净额度 = max(0, (收产包 + 成本包) + 历史欠产包)（≥0）。" />
@@ -1340,11 +1340,11 @@ const Distribution: React.FC<DistributionProps> = ({
                 {/* 6. 理论（额度） */}
                 <th 
                   onClick={() => handleSort('theoreticalBonus')}
-                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-amber-700 bg-amber-50/50 uppercase tracking-wider min-w-[135px] cursor-pointer hover:bg-amber-100/60 transition-colors select-none"
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-amber-700 bg-amber-50/50 uppercase tracking-wider min-w-[135px] cursor-pointer hover:bg-amber-100/60 transition-colors select-none whitespace-nowrap"
                   title="点击按理论额度排序"
                 >
-                  <div className="flex items-center justify-end gap-1.5">
-                    <span className="inline-flex items-center">
+                  <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                    <span className="inline-flex items-center whitespace-nowrap">
                       理论（额度） {renderSortIcon('theoreticalBonus')}
                     </span>
                     <InfoTip title="理论（额度）口径" content="基数 = max(0, 收产包 + 成本包)，支持 60% / 80% / 100% 三档管理调节测算切换。" />
@@ -1353,11 +1353,11 @@ const Distribution: React.FC<DistributionProps> = ({
                 {/* 7. 当月承兑实发 */}
                 <th 
                   onClick={() => handleSort('currentCdtz')}
-                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-emerald-800 bg-emerald-50/50 uppercase tracking-wider min-w-[110px] cursor-pointer hover:bg-emerald-100/60 transition-colors select-none"
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-emerald-800 bg-emerald-50/50 uppercase tracking-wider min-w-[110px] cursor-pointer hover:bg-emerald-100/60 transition-colors select-none whitespace-nowrap"
                   title="点击按当月承兑实发排序"
                 >
-                  <div className="flex items-center justify-end gap-1.5">
-                    <span className="inline-flex items-center">
+                  <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                    <span className="inline-flex items-center whitespace-nowrap">
                       当月承兑实发 {renderSortIcon('currentCdtz')}
                     </span>
                     <InfoTip title="当月承兑实发口径" content="当月在承兑台账 cdtz 中实际已发放的总额。" />
@@ -1366,18 +1366,18 @@ const Distribution: React.FC<DistributionProps> = ({
                 {/* 8. 年度累计承兑 */}
                 <th 
                   onClick={() => handleSort('yearlyCdtz')}
-                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[110px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none"
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[110px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none whitespace-nowrap"
                   title="点击按年度累计承兑排序"
                 >
-                  <div className="flex items-center justify-end gap-1.5">
-                    <span className="inline-flex items-center">
+                  <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                    <span className="inline-flex items-center whitespace-nowrap">
                       年度累计承兑 {renderSortIcon('yearlyCdtz')}
                     </span>
                     <InfoTip title="年度累计承兑口径" content="自然年内累计已承兑实发总额。" />
                   </div>
                 </th>
                 {/* 9. 操作控制 */}
-                <th className="border-b border-slate-300 py-1.5 px-3 text-center text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[100px]">
+                <th className="border-b border-slate-300 py-1.5 px-3 text-center text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[100px] whitespace-nowrap">
                   操作控制
                 </th>
               </tr>
@@ -1766,12 +1766,12 @@ const Distribution: React.FC<DistributionProps> = ({
                                       <table className="min-w-full text-slate-700 text-[10px] text-left font-mono border-separate border-spacing-0">
                                         <thead className="bg-slate-100 sticky top-0 z-10">
                                           <tr>
-                                            <th className="px-2 py-1 border-r border-b border-slate-200 text-center font-bold">周期</th>
-                                            <th className="px-2 py-1 border-r border-b border-slate-200 text-right text-rose-500 font-bold">期初欠产</th>
-                                            <th className="px-2 py-1 border-r border-b border-slate-200 text-right font-bold">收入总计</th>
-                                            <th className="px-2 py-1 border-r border-b border-slate-200 text-right text-slate-400 font-bold">成本包</th>
-                                            <th className="px-2 py-1 border-r border-b border-slate-200 text-right text-blue-600 font-bold">分配额度</th>
-                                            <th className="px-2 py-1 border-b border-slate-200 text-right text-rose-600 font-black">期末欠产</th>
+                                            <th className="px-2 py-1 border-r border-b border-slate-200 text-center font-bold whitespace-nowrap">周期</th>
+                                            <th className="px-2 py-1 border-r border-b border-slate-200 text-right text-rose-500 font-bold whitespace-nowrap">期初欠产</th>
+                                            <th className="px-2 py-1 border-r border-b border-slate-200 text-right font-bold whitespace-nowrap">收入总计</th>
+                                            <th className="px-2 py-1 border-r border-b border-slate-200 text-right text-slate-400 font-bold whitespace-nowrap">成本包</th>
+                                            <th className="px-2 py-1 border-r border-b border-slate-200 text-right text-blue-600 font-bold whitespace-nowrap">分配额度</th>
+                                            <th className="px-2 py-1 border-b border-slate-200 text-right text-rose-600 font-black whitespace-nowrap">期末欠产</th>
                                           </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100 bg-white">
@@ -2008,23 +2008,6 @@ const Distribution: React.FC<DistributionProps> = ({
               );
             })}
           </AnimatePresence>
-        </div>
-      </div>
-
-      {/* Footer Info */}
-      <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} p-8 border border-slate-300 shadow-sm flex items-center justify-between`}>
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl">
-            <ShieldCheck size={18} />
-          </div>
-          <div>
-            <h5 className="text-xs font-black text-slate-900 uppercase tracking-widest">
-              城市守护者：价值核算与分配原则
-            </h5>
-            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
-              理论与承兑独立核算 ｜ 历史欠产包动态抵扣 ｜ 数值精确到整数
-            </p>
-          </div>
         </div>
       </div>
 

@@ -29,6 +29,7 @@ import ChangePasswordModal from './src/components/ChangePasswordModal';
 import SystemAnnouncement from './src/components/SystemAnnouncement';
 import SiteFooter from './components/SiteFooter';
 import LegalOverlay from './components/LegalOverlay';
+import { Watermark } from './src/components/Watermark';
 import { Toaster, toast } from 'sonner';
 import { 
   fetchWorkspaceData, 
@@ -1369,13 +1370,21 @@ const App: React.FC = () => {
   }, []);
 
   if (!currentUser) {
-    return <Login onLogin={handleLoginSuccess} onAuthenticate={onAuthenticate} />;
+    return (
+      <>
+        <Watermark user={null} fallbackText="内部资料，请勿外传" fontSize={16} rotate={-30} opacity={0.12} />
+        <Login onLogin={handleLoginSuccess} onAuthenticate={onAuthenticate} />
+      </>
+    );
   }
 
   return (
     <div className="flex h-screen bg-slate-900 text-white overflow-hidden font-sans relative">
       <Toaster position="top-center" richColors />
       
+      {/* 全局底层水印 */}
+      <Watermark user={currentUser} fontSize={16} rotate={-30} opacity={0.14} />
+
       {/* Mobile Overlay */}
       {isMobileMenuOpen && (
         <div 
@@ -1401,20 +1410,6 @@ const App: React.FC = () => {
       </div>
 
       <main className="flex-1 flex flex-col overflow-hidden bg-slate-50 text-slate-900 relative">
-        {/* 背景水印 */}
-        <div className="absolute inset-0 pointer-events-none z-0 overflow-hidden select-none">
-          <div className="flex flex-wrap justify-around content-around p-10 opacity-[0.03]" style={{ gap: '250px', minHeight: '100%' }}>
-            {Array.from({ length: 16 }).map((_, i) => (
-              <div 
-                key={i} 
-                className="text-slate-900 font-black whitespace-nowrap transform -rotate-12 text-[68px] md:text-[108px]"
-              >
-                {currentUser.name} {currentTime.getFullYear()}/{currentTime.getMonth() + 1}/{currentTime.getDate()}
-              </div>
-            ))}
-          </div>
-        </div>
-
         <header className="h-16 border-b bg-white/80 backdrop-blur-md flex items-center justify-between px-4 md:px-8 sticky top-0 z-40 shadow-sm">
           <div className="flex items-center space-x-3 md:space-x-4">
              <button 
