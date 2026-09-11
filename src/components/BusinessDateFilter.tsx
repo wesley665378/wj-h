@@ -119,10 +119,10 @@ export const BusinessDateFilter: React.FC<BusinessDateFilterProps> = ({
           <button
             type="button"
             onClick={handleToggleCustom}
-            className={`flex items-center gap-1.5 px-3 h-10 rounded-[4px] text-[13px] font-bold transition-all whitespace-nowrap cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 h-10 rounded-md text-[13px] font-bold transition-all whitespace-nowrap cursor-pointer ${
               isCustomRange
-                ? 'bg-[#1a56db] text-white shadow-xs font-black'
-                : 'bg-white hover:bg-slate-50 text-slate-700 border border-[#b8d0f7]'
+                ? 'bg-blue-600 text-white shadow-xs font-black'
+                : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200'
             }`}
           >
             <Search size={14} />
@@ -131,7 +131,7 @@ export const BusinessDateFilter: React.FC<BusinessDateFilterProps> = ({
 
           {/* 激活自定义时显示的起止日 */}
           {isCustomRange && (
-            <div className="flex items-center gap-2 bg-white border border-[#b8d0f7] rounded-[4px] px-3 h-10 text-[13px] shadow-xs">
+            <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-md px-3 h-10 text-[13px] shadow-xs">
               <input
                 type="date"
                 value={localStartDate || ''}
@@ -154,7 +154,7 @@ export const BusinessDateFilter: React.FC<BusinessDateFilterProps> = ({
             <button
               type="button"
               onClick={handleApplyDateRange}
-              className="px-4 h-10 bg-[#1a56db] hover:bg-blue-600 active:scale-95 text-white font-bold text-[13px] rounded-[4px] shadow-sm transition-all cursor-pointer flex items-center justify-center whitespace-nowrap"
+              className="px-4 h-10 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-[13px] rounded-md shadow-sm transition-all cursor-pointer flex items-center justify-center whitespace-nowrap"
             >
               查 询
             </button>
@@ -164,7 +164,7 @@ export const BusinessDateFilter: React.FC<BusinessDateFilterProps> = ({
             <button
               type="button"
               onClick={handleClear}
-              className="flex items-center gap-1 text-[12px] font-bold text-slate-500 hover:text-rose-600 bg-slate-100 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 px-2.5 h-10 rounded-[4px] transition-all whitespace-nowrap shadow-2xs cursor-pointer"
+              className="flex items-center gap-1 text-[12px] font-bold text-slate-500 hover:text-rose-600 bg-slate-100 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 px-2.5 h-10 rounded-md transition-all whitespace-nowrap shadow-2xs cursor-pointer"
               title="清除自定义区间并返回按月"
             >
               <RotateCcw size={12} />
@@ -185,9 +185,9 @@ export const BusinessDateFilter: React.FC<BusinessDateFilterProps> = ({
           <select
             value={isCustomRange ? '' : (month || getLocalMonthString())}
             onChange={(e) => handleSelectMonth(e.target.value)}
-            className={`h-10 rounded-[4px] px-3 py-2 text-[13px] font-bold outline-none transition-all cursor-pointer shadow-xs border ${
+            className={`h-10 rounded-md px-3 py-2 text-[13px] font-bold outline-none transition-all cursor-pointer shadow-xs border ${
               !isCustomRange
-                ? 'bg-white border-[#b8d0f7] text-slate-800 focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10'
+                ? 'bg-white border-slate-200 text-slate-800 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10'
                 : 'bg-slate-100 border-slate-200 text-slate-400 hover:text-slate-600'
             }`}
           >

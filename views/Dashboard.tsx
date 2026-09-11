@@ -1864,7 +1864,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
         </div>
       </div>
 
-      <Card className={`lg:col-span-12 rounded-[2rem] md:${UI_TOKENS.RADIUS_PANEL} p-3 md:p-4 overflow-hidden relative border-none shadow-2xl bg-white`}>
+      <Card className={`lg:col-span-12 ${UI_TOKENS.RADIUS_PANEL} p-3 md:p-4 overflow-hidden relative border-none shadow-2xl bg-white`}>
         {/* Background decoration */}
         <div className="absolute -right-20 -top-20 w-80 h-80 bg-blue-50 rounded-full blur-3xl opacity-50"></div>
         <div className="absolute -left-20 -bottom-20 w-80 h-80 bg-rose-50 rounded-full blur-3xl opacity-50"></div>
@@ -1940,7 +1940,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
 
               {/* 资产状态监控 (收款/产值价值流) */}
       <div className="lg:col-span-12">
-        <div className={`bg-white rounded-[2rem] md:${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-xl p-4 md:p-6`}>
+        <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-xl p-4 md:p-6`}>
           <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 md:mb-10 gap-6">
             <div className="flex flex-col md:flex-row md:items-center gap-4">
               <h3 className="text-xl md:text-2xl font-black text-slate-900 tracking-tighter flex items-center">
@@ -1960,7 +1960,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                   <select 
                     value={selectedMiningId}
                     onChange={(e) => setSelectedMiningId(e.target.value)}
-                    className="appearance-none bg-white border border-[#b8d0f7] rounded-[4px] pl-3 pr-9 py-2 text-[13px] font-bold text-slate-800 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all cursor-pointer h-10 min-w-[160px]"
+                    className="appearance-none bg-white border border-slate-200 rounded-md pl-3 pr-9 py-2 text-[13px] font-bold text-slate-800 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all cursor-pointer h-10 min-w-[160px]"
                   >
                     <option value="">🎯 全盘资产流转</option>
                     {filteredResources.map(r => (
@@ -2170,7 +2170,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
               })}
             </div>
           ) : (
-            <div className="overflow-x-auto bg-slate-50 rounded-[2rem] border border-slate-100">
+            <div className={`overflow-x-auto bg-slate-50 ${UI_TOKENS.RADIUS_CARD} border border-slate-100`}>
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-slate-200">

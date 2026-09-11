@@ -1,4 +1,4 @@
-import { TERMINOLOGY } from './terminology';
+export const GUARDIAN_MODAL_TITLE = '城市守护者';
 
 export const UI_LABELS = {
   VALUE_FLOW: '价值动态流',
@@ -19,18 +19,8 @@ export const UI_LABELS = {
 
   BTN_CONFIRM: '确认',
   BTN_CANCEL: '取消',
-  BTN_SUBMIT: '提交',
-
-  COLLECTOR: TERMINOLOGY.LOG_OPERATOR_ID,
-  RANK: TERMINOLOGY.USER_RANK,
-  BUSINESS_UNIT: TERMINOLOGY.BUSINESS_UNIT,
-  EFFICIENCY_TIER: '评价等级',
-
-  LOGIN_ACCOUNT: TERMINOLOGY.LOGIN_ID,
-  MY_ACCOUNT_PAGE: '我的帐户',
 
   EMPTY_DEFAULT: '暂无数据',
-  EMPTY_LIST: '暂无记录',
   EMPTY_MEMBERS: '暂无成员数据',
   EMPTY_MINING: '暂无矿山资源',
 } as const;

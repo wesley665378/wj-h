@@ -598,7 +598,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {jzczRows.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_LIST}</td>
+                  <td colSpan={11} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
                 </tr>
               ) : (
                 jzczRows.map(l => {
@@ -703,7 +703,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {dtcbRows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_LIST}</td>
+                  <td colSpan={9} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
                 </tr>
               ) : (
                 dtcbRows.map(l => {
@@ -803,7 +803,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {nbjyRows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_LIST}</td>
+                  <td colSpan={9} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
                 </tr>
               ) : (
                 nbjyRows.map(t => {

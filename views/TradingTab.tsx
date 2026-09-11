@@ -16,6 +16,7 @@ export interface TradingTabProps {
   onAuditTransaction?: (txIdOrList: string | string[], status: TransactionStatus, updatedResource?: MiningResource | MiningResource[]) => void;
   onHandleAudit?: (tx: InternalTransaction, action: 'approve' | 'modify' | 'reject' | 'agree' | 'return' | 'withdraw') => void;
   onStartModify?: (tx: InternalTransaction) => void;
+  onNavigateToApply?: () => void;
 }
 
 export const TradingTab: React.FC<TradingTabProps> = ({
@@ -29,6 +30,7 @@ export const TradingTab: React.FC<TradingTabProps> = ({
   onAuditTransaction,
   onHandleAudit,
   onStartModify,
+  onNavigateToApply,
 }) => {
   const effectiveUser = currentUser || users.find(u => u.id === currentUserId) || { id: currentUserId, name: '', center: '' } as User;
   const managers = managerSource.length > 0 ? managerSource : (managerCandidates.length > 0 ? managerCandidates : users);
@@ -60,27 +62,27 @@ export const TradingTab: React.FC<TradingTabProps> = ({
   };
 
   return (
-    <div className="w-full space-y-6">
-      <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} shadow-xl border border-slate-100 overflow-hidden`}>
-        <div className="bg-slate-900 p-8 text-white flex justify-between items-center">
-          <h4 className="text-xl font-black flex items-center tracking-tighter uppercase">
-            <span className="w-10 h-10 bg-indigo-500 rounded-xl flex items-center justify-center mr-4 shadow-lg">⚖️</span>
-            待验证流转指令 ({pendingTransactions.length})
+    <div className="w-full space-y-4">
+      <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} shadow-sm border border-slate-200 overflow-hidden`}>
+        <div className="bg-slate-900 px-6 py-4 text-white flex justify-between items-center">
+          <h4 className="text-base font-bold flex items-center tracking-tight">
+            <span className="w-8 h-8 bg-indigo-500/20 text-indigo-400 rounded-lg flex items-center justify-center mr-3 text-sm">⚖️</span>
+            待办验证流转指令 ({pendingTransactions.length})
           </h4>
         </div>
         
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
-                <th className="px-10 py-6">指令编号/时间</th>
-                <th className="px-6 py-6">类型/关联资产</th>
-                <th className="px-6 py-6">路由节点</th>
-                <th className="px-6 py-6 text-right">流转度</th>
-                <th className="px-10 py-6 text-center">操作区</th>
+        <div className="max-h-[calc(100vh-14rem)] overflow-auto">
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 z-20 bg-slate-100 text-xs font-bold text-slate-700 border-b border-slate-200 whitespace-nowrap shadow-xs">
+              <tr>
+                <th className="px-4 py-2.5 sticky left-0 z-40 bg-slate-100 border-r border-slate-200/80 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.08)] min-w-[120px]">指令编号/时间</th>
+                <th className="px-4 py-2.5 min-w-[130px]">类型/关联资产</th>
+                <th className="px-4 py-2.5 min-w-[200px]">路由节点</th>
+                <th className="px-4 py-2.5 text-right min-w-[100px]">流转度</th>
+                <th className="px-4 py-2.5 text-center min-w-[180px]">操作区</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50">
+            <tbody className="divide-y divide-slate-100 text-xs">
               {pendingTransactions.map(tx => {
                 const sender = managers.find(u => u.id === tx.senderId) || users.find(u => u.id === tx.senderId);
                 const receiver = managers.find(u => u.id === tx.receiverId) || users.find(u => u.id === tx.receiverId);
@@ -96,44 +98,44 @@ export const TradingTab: React.FC<TradingTabProps> = ({
                   userCenterMatchesBusinessUnit(effectiveUser.center, tx.senderId);
 
                 return (
-                  <tr key={tx.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-10 py-6">
-                      <span className="font-mono text-[10px] font-black text-slate-300 block mb-1">#{tx.id}</span>
-                      <span className="text-[9px] font-bold text-slate-500">{new Date(tx.timestamp).toLocaleString()}</span>
+                  <tr key={tx.id} className="hover:bg-slate-50/80 transition-colors group">
+                    <td className="px-4 py-2.5 sticky left-0 z-30 bg-white group-hover:bg-slate-50 border-r border-slate-200/80 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.08)]">
+                      <span className="font-mono text-xs font-bold text-slate-900 block">#{tx.id}</span>
+                      <span className="text-[11px] font-mono text-slate-500">{new Date(tx.timestamp).toLocaleString()}</span>
                     </td>
-                    <td className="px-6 py-6">
-                      <span className="text-[9px] font-black px-3 py-1 rounded-lg uppercase tracking-widest bg-indigo-50 text-indigo-600">{tx.type}</span>
-                      {tx.miningId && <p className="text-[9px] font-black text-slate-400 mt-2">矿山: {tx.miningId}</p>}
+                    <td className="px-4 py-2.5">
+                      <span className="inline-block text-[11px] font-bold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">{tx.type}</span>
+                      {tx.miningId && <p className="text-[11px] font-medium text-slate-500 mt-0.5">矿山: {tx.miningId}</p>}
                     </td>
-                    <td className="px-6 py-6">
-                      <div className="flex items-center space-x-3 text-xs font-bold text-slate-800">
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center space-x-2 text-xs font-medium text-slate-800">
                         <span>{sender?.center || sender?.name || tx.senderId}</span>
-                        <span className="text-slate-300">→</span>
-                        <span className="text-indigo-600 font-black">{receiver?.center || receiver?.name || tx.receiverId}</span>
+                        <span className="text-slate-400">→</span>
+                        <span className="text-indigo-600 font-bold">{receiver?.center || receiver?.name || tx.receiverId}</span>
                       </div>
                     </td>
-                    <td className="px-6 py-6 text-right font-mono font-black text-slate-900">
+                    <td className="px-4 py-2.5 text-right font-mono font-bold text-slate-900">
                       {Math.round((tx.revenueAmount || 0) + (tx.valueAmount || 0) || tx.amount).toLocaleString()}
                     </td>
-                    <td className="px-10 py-6">
+                    <td className="px-4 py-2.5">
                       <div className="flex items-center justify-center space-x-2">
                         {tx.status === TransactionStatus.PendingTarget && isReceiver && (
                           <>
                             <button
                               onClick={() => handleAudit(tx, 'approve')}
-                              className="px-4 py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 active:scale-95 transition-all"
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs active:scale-95"
                             >
                               确认接收
                             </button>
                             <button
                               onClick={() => startModify(tx)}
-                              className="px-4 py-2 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-100 transition-all"
+                              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-medium transition-all"
                             >
                               修正
                             </button>
                             <button
                               onClick={() => handleAudit(tx, 'return')}
-                              className="px-4 py-2 bg-rose-50 text-rose-600 border border-rose-200 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-100 transition-all"
+                              className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-medium transition-all"
                             >
                               退回
                             </button>
@@ -143,13 +145,13 @@ export const TradingTab: React.FC<TradingTabProps> = ({
                           <>
                             <button
                               onClick={() => handleAudit(tx, 'agree')}
-                              className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 shadow-lg shadow-indigo-500/20 active:scale-95 transition-all"
+                              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs active:scale-95"
                             >
                               同意变更
                             </button>
                             <button
                               onClick={() => handleAudit(tx, 'reject')}
-                              className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all"
+                              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-medium transition-all"
                             >
                               拒绝变更
                             </button>
@@ -158,7 +160,7 @@ export const TradingTab: React.FC<TradingTabProps> = ({
                         {tx.status === TransactionStatus.Returned && isSender && (
                           <button
                             onClick={() => handleAudit(tx, 'approve')}
-                            className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 shadow-lg shadow-indigo-500/20 active:scale-95 transition-all"
+                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs active:scale-95"
                           >
                             重新提交
                           </button>
@@ -166,7 +168,7 @@ export const TradingTab: React.FC<TradingTabProps> = ({
                         {tx.status === TransactionStatus.PendingAdmin && isAdmin && (
                           <button
                             onClick={() => handleAudit(tx, 'approve')}
-                            className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 shadow-lg shadow-indigo-500/20 active:scale-95 transition-all"
+                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs active:scale-95"
                           >
                             终审确权
                           </button>
@@ -174,7 +176,7 @@ export const TradingTab: React.FC<TradingTabProps> = ({
                         {isSender && tx.status === TransactionStatus.PendingTarget && (
                           <button
                             onClick={() => handleAudit(tx, 'withdraw')}
-                            className="px-4 py-2 bg-slate-100 text-slate-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 hover:text-slate-600 transition-all"
+                            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 rounded-lg text-xs font-medium transition-all"
                           >
                             撤回
                           </button>
@@ -186,7 +188,20 @@ export const TradingTab: React.FC<TradingTabProps> = ({
               })}
               {pendingTransactions.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
+                  <td colSpan={5} className="px-6 py-10 text-center">
+                    <div className="flex flex-col items-center justify-center space-y-3 text-slate-500">
+                      <span className="text-xs font-bold">暂无待验证的内部交易指令</span>
+                      {onNavigateToApply && (
+                        <button
+                          onClick={onNavigateToApply}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center space-x-1"
+                        >
+                          <span>去发起交易</span>
+                          <span>→</span>
+                        </button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               )}
             </tbody>

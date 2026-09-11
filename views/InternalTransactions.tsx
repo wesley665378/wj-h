@@ -3,11 +3,7 @@ import { UI_TOKENS } from '../src/constants/uiTokens';
 import React, { useState, useMemo, useEffect } from 'react';
 import { User, Role, MiningResource, InternalTransaction, TransactionType, TransactionStatus, CircuitBreaker, TransactionFailure, RefineCategory, RefineType, AuditStatus, ValueCreationLog, SystemConfig } from '../types';
 import { parseCenterList, centerMatch, isResourceAssignedToCenter } from '../src/utils/centerScope';
-import { 
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
-  Cell, Legend, CartesianGrid, PieChart, Pie 
-} from 'recharts';
-import { Card, ProgressBar } from '../src/components/UI';
+import { ProgressBar } from '../src/components/UI';
 import { useDedupe } from '../src/hooks/useDedupe';
 import { XLSX, exportWorkbook } from '../src/utils/excelIo';
 import { formatMoney } from '../src/utils/formatMoney';
@@ -134,7 +130,10 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   const [description, setDescription] = useState('');
   const [valueQuadrants, setValueQuadrants] = useState({ q1: 0, q2: 0, q3: 0, q4: 0 });
   const [revenueQuadrants, setRevenueQuadrants] = useState({ q1: 0, q2: 0, q3: 0 });
-  const [activeTab, setActiveTab] = useState<'apply' | 'trading' | 'history' | 'exchange' | 'breakers'>('apply');
+  const [activeTab, setActiveTab] = useState<'trading' | 'apply' | 'history'>('apply');
+  const [showBreakersPanel, setShowBreakersPanel] = useState(false);
+  const [showAdvancedAllocation, setShowAdvancedAllocation] = useState(false);
+  const [hasInitializedTab, setHasInitializedTab] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(() => getLocalMonthString());
   const [currentTime, setCurrentTime] = useState(Date.now());
   useEffect(() => {
@@ -145,9 +144,6 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   const [filterMonth, setFilterMonth] = useState<string>(() => getLocalMonthString());
   const [filterStartDate, setFilterStartDate] = useState<string>('');
   const [filterEndDate, setFilterEndDate] = useState<string>('');
-  const [filterMiningId, setFilterMiningId] = useState('');
-  const [filterType, setFilterType] = useState('');
-  const [filterDateRange, setFilterDateRange] = useState({ start: '', end: '' });
   const [selectedTx, setSelectedTx] = useState<InternalTransaction | null>(null);
   const [selectedTxIds, setSelectedTxIds] = useState<string[]>([]);
   
@@ -161,7 +157,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab, filterMonth, filterStartDate, filterEndDate, filterMiningId, filterType]);
+  }, [activeTab, filterMonth, filterStartDate, filterEndDate]);
   const [modReceiverId, setModReceiverId] = useState<string>('');
   const selectedMine = useMemo(() => resources.find(r => r.id === miningId), [resources, miningId]);
 
@@ -299,6 +295,19 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
       return false;
     });
   }, [transactions, currentUser.id, isAdmin, managerSource, currentUser.center]);
+
+  const activeBreakers = useMemo(() => {
+    return circuitBreakers.filter(cb => cb.status === 'active' && cb.expiresAt > Date.now());
+  }, [circuitBreakers, currentTime]);
+
+  useEffect(() => {
+    if (!hasInitializedTab && transactions && transactions.length > 0) {
+      if (pendingTransactions.length > 0) {
+        setActiveTab('trading');
+      }
+      setHasInitializedTab(true);
+    }
+  }, [pendingTransactions, hasInitializedTab, transactions]);
 
   const availableMiningResources = useMemo(() => {
     const base = isAdmin ? (allResources || resources) : resources.filter(r => isResourceAssignedToCenter(r, currentUser.center));
@@ -482,28 +491,10 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     return list;
   }, [transactions, currentUser.center, isAdmin, managerSource, filterMonth, filterStartDate, filterEndDate]);
 
-  const filteredExchangeTransactions = useMemo(() => {
-    return transactions.filter(t => {
-      if (t.type !== TransactionType.Resource) return false;
-      const matchesMiningId = !filterMiningId || t.miningId === filterMiningId;
-      const matchesType = !filterType || (filterType === '收款' ? (t.revenueAmount || 0) > 0 : (t.valueAmount || 0) > 0);
-      const matchesRangeAndMonth = isLogInFilter(t, filterMonth, filterStartDate, filterEndDate);
-      const matchesDate = (!filterDateRange.start || t.timestamp >= new Date(filterDateRange.start).getTime()) &&
-                          (!filterDateRange.end || t.timestamp <= new Date(filterDateRange.end).getTime());
-      const isRelated = isAdmin || t.senderId === currentUser.id || t.receiverId === currentUser.id;
-      return matchesMiningId && matchesType && matchesRangeAndMonth && matchesDate && isRelated && t.status === TransactionStatus.Verified;
-    }).sort((a, b) => b.timestamp - a.timestamp);
-  }, [transactions, filterMiningId, filterType, filterDateRange, currentUser.id, isAdmin, filterMonth, filterStartDate, filterEndDate]);
-
   const paginatedTransactions = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
     return filteredTransactions.slice().reverse().slice(start, start + PAGE_SIZE);
   }, [filteredTransactions, currentPage]);
-
-  const paginatedExchangeTransactions = useMemo(() => {
-    const start = (currentPage - 1) * PAGE_SIZE;
-    return filteredExchangeTransactions.slice(start, start + PAGE_SIZE);
-  }, [filteredExchangeTransactions, currentPage]);
 
   const handleAudit = async (tx: InternalTransaction, action: 'approve' | 'reject' | 'return' | 'modify' | 'withdraw' | 'agree') => {
     let nextStatus = tx.status;
@@ -747,28 +738,6 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
     exportWorkbook(workbook, fileName);
   };
 
-  const transactionStats = useMemo(() => {
-    const typeCounts = transactions.reduce((acc, t) => {
-      acc[t.type] = (acc[t.type] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    const typeData = Object.entries(typeCounts).map(([name, value]) => ({ 
-      name: name === TransactionType.Resource ? '资源流转' : '其它', 
-      value,
-      color: '#10B981'
-    }));
-
-    const statusCounts = transactions.reduce((acc, t) => {
-      acc[t.status] = (acc[t.status] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    const statusData = Object.entries(statusCounts).map(([name, value]) => ({ name, value }));
-
-    return { typeData, statusData };
-  }, [transactions]);
-
   if (isNpcxie) {
     return (
       <div className="w-full flex flex-col items-center justify-center p-16 bg-white rounded-3xl border border-slate-200 shadow-sm text-center space-y-4 animate-in fade-in duration-500">
@@ -785,115 +754,188 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
 
   return (
     <div className="w-full space-y-8 animate-in fade-in duration-500 pb-6 text-[14px]">
-      {/* 交易统计看板 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        <Card title="交易类型分布" className={`bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} shadow-xl`}>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie 
-                  data={transactionStats.typeData} 
-                  dataKey="value" 
-                  cx="50%" 
-                  cy="50%" 
-                  innerRadius={60} 
-                  outerRadius={90} 
-                  paddingAngle={8} 
-                  stroke="none"
-                >
-                  {transactionStats.typeData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
-                </Pie>
-                <Tooltip contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 'bold' }} />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase' }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-
-        <Card title="交易状态透视" className={`lg:col-span-2 bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} shadow-xl`}>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={transactionStats.statusData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 'bold' }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 'bold' }} />
-                <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '15px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
-                <Bar dataKey="value" fill="#3b82f6" radius={[10, 10, 0, 0]} barSize={40}>
-                  {transactionStats.statusData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={['#3b82f6', '#10B981', '#f43f5e', '#FBBF24', '#8b5cf6'][index % 5]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-      </div>
-
       {/* 顶部控制栏 */}
-      <div className={`flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} shadow-sm border border-slate-100`}>
-        <div>
-          <h3 className="text-2xl font-black text-slate-800 tracking-tighter uppercase flex items-center">
-            <span className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white mr-4 shadow-lg">🤝</span>
-            内部交易流转中心
-          </h3>
-          <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest mt-1 ml-14">
-            路由：发起经营单元 - 接收经营单元 - 确认
-          </p>
+      <div className={`flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 ${UI_TOKENS.RADIUS_PANEL} shadow-xs border border-slate-200`}>
+        <div className="flex items-center space-x-3">
+          <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-base font-bold shadow-xs">
+            🔄
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-slate-900 tracking-tight">
+              内部交易划转工作台
+            </h3>
+            <p className="text-xs text-slate-500">
+              跨经营单元资源流转、确权指令验证与划转统计
+            </p>
+          </div>
         </div>
         
-        <div className="flex items-center space-x-4">
+        <div className="flex flex-wrap items-center gap-2">
           {persistWorkspaceNow && (
             <button
               onClick={async () => {
                 await persistWorkspaceNow();
                 toast.success('工作区数据已保存');
               }}
-              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-[10px] font-black tracking-widest shadow-lg active:scale-95 transition-all flex items-center"
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center space-x-1"
             >
-              💾 保存数据
+              <span>💾</span>
+              <span>保存数据</span>
             </button>
           )}
 
-           <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-inner">
-             <button 
-              onClick={() => setActiveTab('apply')}
-              className={`px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all ${activeTab === 'apply' ? 'bg-white text-slate-900 shadow-xl scale-105' : 'text-slate-400 hover:text-slate-600'}`}
-             >
-               发起申请
-             </button>
-             <button 
+          <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+            <button 
               onClick={() => setActiveTab('trading')}
-              className={`px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all flex items-center space-x-2 ${activeTab === 'trading' ? 'bg-white text-slate-900 shadow-xl scale-105' : 'text-slate-400 hover:text-slate-600'}`}
-             >
-               <span>待验证 ({pendingTransactions.length})</span>
-             </button>
-             <button 
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
+                activeTab === 'trading' 
+                  ? 'bg-white text-indigo-600 shadow-xs border-b-2 border-indigo-600' 
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>待办</span>
+              {pendingTransactions.length > 0 && (
+                <span className="bg-rose-500 text-white text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-full">
+                  {pendingTransactions.length}
+                </span>
+              )}
+            </button>
+
+            <button 
+              onClick={() => setActiveTab('apply')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'apply' 
+                  ? 'bg-white text-indigo-600 shadow-xs border-b-2 border-indigo-600' 
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              发起
+            </button>
+
+            <button 
               onClick={() => setActiveTab('history')}
-              className={`px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all ${activeTab === 'history' ? 'bg-white text-slate-900 shadow-xl scale-105' : 'text-slate-400 hover:text-slate-600'}`}
-             >
-               交易记录
-             </button>
-             <button 
-              onClick={() => setActiveTab('breakers')}
-              className={`px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all flex items-center space-x-2 ${activeTab === 'breakers' ? 'bg-white text-slate-900 shadow-xl scale-105' : 'text-slate-400 hover:text-slate-600'}`}
-             >
-               <span>熔断监控 ({circuitBreakers.filter(cb => cb.status === 'active').length})</span>
-             </button>
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'history' 
+                  ? 'bg-white text-indigo-600 shadow-xs border-b-2 border-indigo-600' 
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              记录
+            </button>
           </div>
+
+          <button 
+            onClick={() => setShowBreakersPanel(!showBreakersPanel)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center space-x-1 border ${
+              activeBreakers.length > 0 
+                ? 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100' 
+                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            <span>⚡ 熔断</span>
+            {activeBreakers.length > 0 && (
+              <span className="bg-amber-500 text-white text-[10px] font-mono px-1.5 py-0.2 rounded-full">
+                {activeBreakers.length}
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
+      {/* 熔断状态横幅 / 展开列表 */}
+      {activeBreakers.length > 0 && !showBreakersPanel && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center justify-between text-xs text-amber-900">
+          <div className="flex items-center space-x-2">
+            <span className="text-amber-500 font-bold">⚠️</span>
+            <span>当前有 <strong className="text-amber-700 font-bold">{activeBreakers.length}</strong> 个经营单元处于熔断控制中，对应方向交易已被暂停。</span>
+          </div>
+          <button
+            onClick={() => setShowBreakersPanel(true)}
+            className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition-all shadow-xs"
+          >
+            查看熔断详情
+          </button>
+        </div>
+      )}
+
+      {showBreakersPanel && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-3 animate-in fade-in duration-200">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center space-x-2">
+              <span className="text-base">⚡</span>
+              <h3 className="text-sm font-bold text-slate-900">熔断保护状态与恢复清单</h3>
+            </div>
+            <button
+              onClick={() => setShowBreakersPanel(false)}
+              className="text-xs text-slate-400 hover:text-slate-600 font-bold px-2 py-1"
+            >
+              ✕ 关闭
+            </button>
+          </div>
+
+          <div className="max-h-60 overflow-auto border border-slate-100 rounded-lg">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead className="sticky top-0 bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                <tr>
+                  <th className="px-3 py-2">目标单元</th>
+                  <th className="px-3 py-2">熔断原因</th>
+                  <th className="px-3 py-2">类型</th>
+                  <th className="px-3 py-2">触发时间</th>
+                  <th className="px-3 py-2">状态</th>
+                  <th className="px-3 py-2 text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {circuitBreakers.slice().reverse().map(cb => (
+                  <tr key={cb.id} className="hover:bg-slate-50">
+                    <td className="px-3 py-2 font-bold text-slate-800">
+                      {cb.targetName}
+                      <span className="block text-[10px] text-slate-400 font-mono font-normal">ID: {cb.targetId}</span>
+                    </td>
+                    <td className="px-3 py-2 text-rose-600">{cb.reason}</td>
+                    <td className="px-3 py-2 uppercase text-slate-500">{cb.type}</td>
+                    <td className="px-3 py-2 text-slate-500 font-mono">{new Date(cb.createdAt).toLocaleString()}</td>
+                    <td className="px-3 py-2">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        cb.status === 'active' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
+                      }`}>
+                        {cb.status === 'active' ? '熔断中' : '已恢复'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {cb.status === 'active' && isAdmin && (
+                        <button
+                          onClick={() => onRecoverCircuitBreaker(cb.id)}
+                          className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[11px] rounded transition-all"
+                        >
+                          手动恢复
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {circuitBreakers.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-slate-400 text-xs">暂无熔断记录</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {activeTab === 'apply' && (
         <div className="w-full">
-           <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} shadow-xl border border-slate-100 overflow-hidden`}>
-             <div className="bg-slate-900 p-8 text-white flex justify-between items-center">
-                <h4 className="text-xl font-black flex items-center tracking-tighter uppercase">
-                  <span className="w-10 h-10 bg-indigo-500 rounded-xl flex items-center justify-center mr-4 shadow-lg">⚡</span>
+           <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} shadow-sm border border-slate-200 overflow-hidden`}>
+             <div className="bg-slate-900 px-6 py-4 text-white flex justify-between items-center">
+                <h4 className="text-base font-bold flex items-center tracking-tight">
+                  <span className="w-8 h-8 bg-indigo-500/20 text-indigo-400 rounded-lg flex items-center justify-center mr-3 text-sm">⚡</span>
                   创建流转指令
                 </h4>
              </div>
              
-             <form onSubmit={handleSubmit} className="p-10 space-y-8">
+             <form onSubmit={handleSubmit} className="p-6 space-y-5">
                 <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
                   <button
                     type="button"
@@ -904,13 +946,13 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1.5 md:col-span-2">
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">矿山编号 (唯一定量)</label>
                     <select
                       value={miningId}
                       onChange={(e) => setMiningId(e.target.value)}
-                      className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all cursor-pointer h-10"
+                      className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-800 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all cursor-pointer h-10"
                       required
                     >
                       <option value="">选择关联矿山编号...</option>
@@ -928,7 +970,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                       <button
                         type="button"
                         onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                        className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 text-left flex justify-between items-center outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all h-10 cursor-pointer"
+                        className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-800 text-left flex justify-between items-center outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all h-10 cursor-pointer"
                       >
                         <span className="truncate">
                           {selectedUnitSummary}
@@ -946,7 +988,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                               placeholder="搜索经营单元名称或负责人..."
                               value={receiverSearch}
                               onChange={(e) => setReceiverSearch(e.target.value)}
-                              className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 h-10"
+                              className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 h-10"
                             />
                           </div>
                           <div className="p-2 divide-y divide-slate-50">
@@ -1025,226 +1067,248 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                   </div>
                 </div>
 
-                {selectedResource && (
-                  <div className={`space-y-6 bg-white p-8 ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-sm animate-in slide-in-from-left-2 duration-300`}>
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h4 className="text-xl font-black text-slate-800 tracking-tighter">{selectedResource.id}</h4>
-                        <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-1">
-                          {selectedResource.types?.join(' / ') || '矿山项目'}
-                        </p>
-                      </div>
-                      <span className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest ${
-                        selectedResource.status === '勘探中' ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'
-                      }`}>
-                        {selectedResource.status}
+                {/* 高级分配折叠面板 */}
+                {(selectedResource || (miningId && receiverIds.length > 0)) && (
+                  <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50">
+                    <button
+                      type="button"
+                      onClick={() => setShowAdvancedAllocation(!showAdvancedAllocation)}
+                      className="w-full px-4 py-3 bg-slate-100 hover:bg-slate-200/80 flex items-center justify-between text-xs font-bold text-slate-700 transition-all border-b border-slate-200 cursor-pointer"
+                    >
+                      <span className="flex items-center space-x-2">
+                        <span>⚙️</span>
+                        <span>高级分配与容量摘要 (四象限/共享分配/未确权分布)</span>
                       </span>
-                    </div>
+                      <span className="text-slate-500 font-mono text-[11px]">
+                        {showAdvancedAllocation ? '▲ 收起' : '▼ 展开'}
+                      </span>
+                    </button>
 
-                    {/* 未确权产值分布 */}
-                    <div className="space-y-4">
-                      <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">未确权产值分布</div>
-                      {(() => {
-                        const unconfirmedValueByReceiver: Record<string, number> = {};
-                        
-                        // 1. 还在流转中的产值 (待接收方验证)
-                        const pendingTxs = (transactions || []).filter(t => 
-                          t.type === TransactionType.Resource && 
-                          t.status === TransactionStatus.PendingTarget && 
-                          t.miningId === selectedResource.id
-                        );
-                        pendingTxs.forEach(t => {
-                          const receiver = managerSource.find(u => u.id === t.receiverId);
-                          const receiverName = receiver?.center || receiver?.name || '未知';
-                          const shortName = receiverName.replace('中心', '');
-                          unconfirmedValueByReceiver[shortName] = (unconfirmedValueByReceiver[shortName] || 0) + (t.valueAmount || 0);
-                        });
+                    {showAdvancedAllocation && (
+                      <div className="p-4 space-y-4 bg-white animate-in fade-in duration-200">
+                        {selectedResource && (
+                          <div className={`space-y-4 bg-white p-4 rounded-xl border border-slate-200 shadow-xs`}>
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <h4 className="text-base font-bold text-slate-800 tracking-tight">{selectedResource.id}</h4>
+                                <p className="text-slate-400 text-xs font-medium mt-0.5">
+                                  {selectedResource.types?.join(' / ') || '矿山项目'}
+                                </p>
+                              </div>
+                              <span className={`px-3 py-1 rounded-lg text-xs font-bold ${
+                                selectedResource.status === '勘探中' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+                              }`}>
+                                {selectedResource.status}
+                              </span>
+                            </div>
 
-                        // 2. 已接收 but 处于“待确权”状态的产值 (联动确权注入的积分)
-                        const pendingLogs = logs.filter(l => 
-                          l.miningId === selectedResource.id && 
-                          l.category === RefineCategory.Value && 
-                          l.status === AuditStatus.Pending
-                        );
-                        pendingLogs.forEach(l => {
-                          const collector = users.find(u => u.id === l.recordedCollectorId);
-                          const centerName = collector?.center || collector?.name || '未知';
-                          const shortName = centerName.replace('中心', '');
-                          unconfirmedValueByReceiver[shortName] = (unconfirmedValueByReceiver[shortName] || 0) + (l.amount || 0);
-                        });
+                            {/* 未确权产值分布 */}
+                            <div className="space-y-3">
+                              <div className="text-xs font-bold text-slate-500 border-b border-slate-100 pb-2">未确权产值分布</div>
+                              {(() => {
+                                const unconfirmedValueByReceiver: Record<string, number> = {};
+                                
+                                const pendingTxs = (transactions || []).filter(t => 
+                                  t.type === TransactionType.Resource && 
+                                  t.status === TransactionStatus.PendingTarget && 
+                                  t.miningId === selectedResource.id
+                                );
+                                pendingTxs.forEach(t => {
+                                  const receiver = managerSource.find(u => u.id === t.receiverId);
+                                  const receiverName = receiver?.center || receiver?.name || '未知';
+                                  const shortName = receiverName.replace('中心', '');
+                                  unconfirmedValueByReceiver[shortName] = (unconfirmedValueByReceiver[shortName] || 0) + (t.valueAmount || 0);
+                                });
 
-                        const entries = Object.entries(unconfirmedValueByReceiver);
-                        if (entries.length === 0) {
-                          return <div className="text-[10px] text-slate-400 italic">暂无未确权产值</div>;
-                        }
+                                const pendingLogs = logs.filter(l => 
+                                  l.miningId === selectedResource.id && 
+                                  l.category === RefineCategory.Value && 
+                                  l.status === AuditStatus.Pending
+                                );
+                                pendingLogs.forEach(l => {
+                                  const collector = users.find(u => u.id === l.recordedCollectorId);
+                                  const centerName = collector?.center || collector?.name || '未知';
+                                  const shortName = centerName.replace('中心', '');
+                                  unconfirmedValueByReceiver[shortName] = (unconfirmedValueByReceiver[shortName] || 0) + (l.amount || 0);
+                                });
 
-                        return entries.map(([receiver, amount]) => (
-                          <div key={receiver} className="flex justify-between text-[10px] font-bold">
-                            <span className="text-slate-600">{receiver}</span>
-                            <span className="text-rose-600">{amount.toLocaleString()}</span>
+                                const entries = Object.entries(unconfirmedValueByReceiver);
+                                if (entries.length === 0) {
+                                  return <div className="text-xs text-slate-400 italic">暂无未确权产值</div>;
+                                }
+
+                                return entries.map(([receiver, amount]) => (
+                                  <div key={receiver} className="flex justify-between text-xs font-medium">
+                                    <span className="text-slate-600">{receiver}</span>
+                                    <span className="text-rose-600 font-bold">{amount.toLocaleString()}</span>
+                                  </div>
+                                ));
+                              })()}
+                            </div>
+
+                            {(() => {
+                              const q = selectedResourceQuadrants || {
+                                value: { pending: 0, confirmed: 0, unconfirmed: 0, mined: 0 },
+                                revenue: { pending: 0, confirmed: 0, unconfirmed: 0, mined: 0 }
+                              };
+                              return (
+                                <>
+                                  <div className="space-y-3">
+                                    <div className="flex justify-between items-center">
+                                      <h5 className="text-xs font-bold text-emerald-600 flex items-center">
+                                        {UI_LABELS.VALUE}
+                                      </h5>
+                                      <span className="text-xs text-slate-400">产初: {getInitialValueCapacity(selectedResource).toLocaleString()} | 产当: {getCurrentValueCapacity(selectedResource, valueLogs).toLocaleString()}</span>
+                                    </div>
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                      {[
+                                        { label: UI_LABELS.PENDING, value: q.value.pending, color: 'text-amber-600' },
+                                        { label: UI_LABELS.CONFIRMED, value: q.value.confirmed, color: 'text-emerald-600' },
+                                        { label: UI_LABELS.UNCONFIRMED, value: q.value.unconfirmed, color: 'text-rose-600' },
+                                        { label: UI_LABELS.MINED, value: q.value.mined, color: 'text-blue-600' }
+                                      ].map((box, i) => (
+                                        <div key={i} className="bg-slate-50 border border-slate-100 rounded-lg p-3 flex flex-col items-center justify-center space-y-0.5">
+                                          <span className="text-[10px] font-bold text-slate-400 text-center leading-tight">{box.label}</span>
+                                          <span className={`text-xs font-bold font-mono ${box.color}`}>{Math.round(box.value).toLocaleString()}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+
+                                  <div className="space-y-3">
+                                    <div className="flex justify-between items-center">
+                                      <h5 className="text-xs font-bold text-amber-600 flex items-center">
+                                        {UI_LABELS.REVENUE}
+                                      </h5>
+                                      <span className="text-xs text-slate-400">款初: {getInitialRevenueCapacity(selectedResource).toLocaleString()} | 款当: {getCurrentRevenueCapacity(selectedResource, valueLogs).toLocaleString()}</span>
+                                    </div>
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                      {[
+                                        { label: UI_LABELS.PENDING, value: q.revenue.pending, color: 'text-amber-600' },
+                                        { label: UI_LABELS.CONFIRMED, value: q.revenue.confirmed, color: 'text-emerald-600' },
+                                        { label: UI_LABELS.UNCONFIRMED, value: q.revenue.unconfirmed, color: 'text-rose-600' },
+                                        { label: UI_LABELS.MINED, value: q.revenue.mined, color: 'text-blue-600' }
+                                      ].map((box, i) => (
+                                        <div key={i} className="bg-slate-50 border border-slate-100 rounded-lg p-3 flex flex-col items-center justify-center space-y-0.5">
+                                          <span className="text-[10px] font-bold text-slate-400 text-center leading-tight">{box.label}</span>
+                                          <span className={`text-xs font-bold font-mono ${box.color}`}>{Math.round(box.value || 0).toLocaleString()}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </>
+                              );
+                            })()}
                           </div>
-                        ));
-                      })()}
-                    </div>
+                        )}
 
-                    {(() => {
-                      const q = selectedResourceQuadrants || {
-                        value: { pending: 0, confirmed: 0, unconfirmed: 0, mined: 0 },
-                        revenue: { pending: 0, confirmed: 0, unconfirmed: 0, mined: 0 }
-                      };
-                      return (
-                        <>
-                          <div className="space-y-4">
-                            <div className="flex justify-between items-center">
-                              <h5 className="text-[11px] font-black text-emerald-600 uppercase tracking-widest flex items-center">
-                                <span className="mr-2"></span> {UI_LABELS.VALUE}
-                              </h5>
-                              <span className="text-[10px] font-bold text-slate-400">产初: {getInitialValueCapacity(selectedResource).toLocaleString()} | 产当: {getCurrentValueCapacity(selectedResource, valueLogs).toLocaleString()}</span>
+                        {miningId && receiverIds.length > 0 && (
+                          <div className="space-y-4 pt-2 border-t border-slate-100">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-bold text-slate-700">共享提炼分配 (多部门)</label>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!miningId || receiverIds.length === 0) return;
+                                  const q = aggregateMiningQuadrantsFromLogs(valueLogs, availableMiningResources, miningId, currentUser.center, users);
+                                  const count = receiverIds.length;
+                                  const newAllocations: Record<string, any> = {};
+                                  receiverIds.forEach((rid) => {
+                                    const factor = 1 / count;
+                                    newAllocations[rid] = {
+                                      confirmedRevenue: Math.round((q.revenue.confirmed || 0) * factor),
+                                      unconfirmedRevenue: Math.round((q.revenue.unconfirmed || 0) * factor),
+                                      pendingValue: Math.round((q.value.pending || 0) * factor),
+                                      confirmedValue: Math.round((q.value.confirmed || 0) * factor),
+                                      unconfirmedValue: Math.round((q.value.unconfirmed || 0) * factor),
+                                    };
+                                  });
+                                  setSharedAllocations(newAllocations);
+                                  toast.success("已成功同步 价值动态流 内容至多部门共享分配");
+                                }}
+                                className="px-3 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold transition-all flex items-center space-x-1 border border-indigo-200/60"
+                              >
+                                <span>同步价值动态流内容</span>
+                              </button>
                             </div>
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                              {[
-                                { label: UI_LABELS.PENDING, value: q.value.pending, color: 'text-amber-500' },
-                                { label: UI_LABELS.CONFIRMED, value: q.value.confirmed, color: 'text-emerald-500' },
-                                { label: UI_LABELS.UNCONFIRMED, value: q.value.unconfirmed, color: 'text-rose-500' },
-                                { label: UI_LABELS.MINED, value: q.value.mined, color: 'text-blue-500' }
-                              ].map((box, i) => (
-                                <div key={i} className="bg-slate-50/50 border border-slate-100 rounded-2xl p-4 flex flex-col items-center justify-center space-y-1">
-                                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter text-center leading-tight">{box.label}</span>
-                                  <span className={`text-sm font-black font-mono ${box.color}`}>{Math.round(box.value).toLocaleString()}</span>
-                                </div>
-                              ))}
+
+                            <div className="space-y-3">
+                              {receiverIds.map(rid => {
+                                const unitItem = unitSelectionList.find(u => u.manager?.id === rid);
+                                const receiver = managerSource.find(u => u.id === rid);
+                                const unitTitle = unitItem ? `${unitItem.unitName} (${unitItem.manager?.name || '经管员'})` : (receiver?.center ? `${receiver.center} (${receiver.name})` : (receiver?.name || rid));
+                                return (
+                                  <div key={rid} className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                                    <div className="flex items-center justify-between border-b border-slate-200/80 pb-2">
+                                      <span className="text-xs font-bold text-slate-800">{unitTitle}</span>
+                                      <span className="text-[10px] text-slate-400 font-mono">ID: {rid}</span>
+                                    </div>
+                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                                      <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-slate-500">已确权收款</label>
+                                        <input
+                                          type="number"
+                                          value={sharedAllocations[rid]?.confirmedRevenue || ''}
+                                          onChange={(e) => setSharedAllocations({...sharedAllocations, [rid]: {...sharedAllocations[rid], confirmedRevenue: Number(e.target.value)}})}
+                                          className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-xs outline-none focus:ring-2 focus:ring-indigo-500/20"
+                                          placeholder="0"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-slate-500">未确权收款</label>
+                                        <input
+                                          type="number"
+                                          value={sharedAllocations[rid]?.unconfirmedRevenue || ''}
+                                          onChange={(e) => setSharedAllocations({...sharedAllocations, [rid]: {...sharedAllocations[rid], unconfirmedRevenue: Number(e.target.value)}})}
+                                          className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-xs outline-none focus:ring-2 focus:ring-indigo-500/20"
+                                          placeholder="0"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-slate-500">待确权产值</label>
+                                        <input
+                                          type="number"
+                                          value={sharedAllocations[rid]?.pendingValue || ''}
+                                          onChange={(e) => setSharedAllocations({...sharedAllocations, [rid]: {...sharedAllocations[rid], pendingValue: Number(e.target.value)}})}
+                                          className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-xs outline-none focus:ring-2 focus:ring-indigo-500/20"
+                                          placeholder="0"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-slate-500">已确权产值</label>
+                                        <input
+                                          type="number"
+                                          value={sharedAllocations[rid]?.confirmedValue || ''}
+                                          onChange={(e) => setSharedAllocations({...sharedAllocations, [rid]: {...sharedAllocations[rid], confirmedValue: Number(e.target.value)}})}
+                                          className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-xs outline-none focus:ring-2 focus:ring-indigo-500/20"
+                                          placeholder="0"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-slate-500">未确权产值</label>
+                                        <input
+                                          type="number"
+                                          value={sharedAllocations[rid]?.unconfirmedValue || ''}
+                                          onChange={(e) => setSharedAllocations({...sharedAllocations, [rid]: {...sharedAllocations[rid], unconfirmedValue: Number(e.target.value)}})}
+                                          className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-xs outline-none focus:ring-2 focus:ring-indigo-500/20"
+                                          placeholder="0"
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
-
-                          <div className="space-y-4">
-                            <div className="flex justify-between items-center">
-                              <h5 className="text-[11px] font-black text-amber-600 uppercase tracking-widest flex items-center">
-                                <span className="mr-2"></span> {UI_LABELS.REVENUE}
-                              </h5>
-                              <span className="text-[10px] font-bold text-slate-400">款初: {getInitialRevenueCapacity(selectedResource).toLocaleString()} | 款当: {getCurrentRevenueCapacity(selectedResource, valueLogs).toLocaleString()}</span>
-                            </div>
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                              {[
-                                { label: UI_LABELS.PENDING, value: q.revenue.pending, color: 'text-amber-500' },
-                                { label: UI_LABELS.CONFIRMED, value: q.revenue.confirmed, color: 'text-emerald-500' },
-                                { label: UI_LABELS.UNCONFIRMED, value: q.revenue.unconfirmed, color: 'text-rose-500' },
-                                { label: UI_LABELS.MINED, value: q.revenue.mined, color: 'text-blue-500' }
-                              ].map((box, i) => (
-                                <div key={i} className="bg-slate-50/50 border border-slate-100 rounded-2xl p-4 flex flex-col items-center justify-center space-y-1">
-                                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter text-center leading-tight">{box.label}</span>
-                                  <span className={`text-sm font-black font-mono ${box.color}`}>{Math.round(box.value || 0).toLocaleString()}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </>
-                      );
-                    })()}
-                  </div>
-                )}
-
-                {miningId && receiverIds.length > 0 && (
-                  <div className="space-y-6 mt-6">
-                    <div className="flex items-center justify-between ml-1 mr-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">共享提炼分配 (多部门)</label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!miningId || receiverIds.length === 0) return;
-                          const q = aggregateMiningQuadrantsFromLogs(valueLogs, availableMiningResources, miningId, currentUser.center, users);
-                          const count = receiverIds.length;
-                          const newAllocations: Record<string, any> = {};
-                          receiverIds.forEach((rid) => {
-                            const factor = 1 / count;
-                            newAllocations[rid] = {
-                              confirmedRevenue: Math.round((q.revenue.confirmed || 0) * factor),
-                              unconfirmedRevenue: Math.round((q.revenue.unconfirmed || 0) * factor),
-                              pendingValue: Math.round((q.value.pending || 0) * factor),
-                              confirmedValue: Math.round((q.value.confirmed || 0) * factor),
-                              unconfirmedValue: Math.round((q.value.unconfirmed || 0) * factor),
-                            };
-                          });
-                          setSharedAllocations(newAllocations);
-                          toast.success("已成功同步 价值动态流 内容至多部门共享分配");
-                        }}
-                        className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center space-x-1 shadow-sm"
-                      >
-                        <span>同步价值动态流内容</span>
-                      </button>
-                    </div>
-                    <div className="space-y-4">
-                      {receiverIds.map(rid => {
-                        const unitItem = unitSelectionList.find(u => u.manager?.id === rid);
-                        const receiver = managerSource.find(u => u.id === rid);
-                        const unitTitle = unitItem ? `${unitItem.unitName} (${unitItem.manager?.name || '经管员'})` : (receiver?.center ? `${receiver.center} (${receiver.name})` : (receiver?.name || rid));
-                        return (
-                          <div key={rid} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                              <span className="text-sm font-black text-slate-700">{unitTitle}</span>
-                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">分配详情</span>
-                            </div>
-                            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">已确权收款</label>
-                                <input
-                                  type="number"
-                                  value={sharedAllocations[rid]?.confirmedRevenue || ''}
-                                  onChange={(e) => setSharedAllocations({...sharedAllocations, [rid]: {...sharedAllocations[rid], confirmedRevenue: Number(e.target.value)}})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono text-xs outline-none focus:ring-2 focus:ring-indigo-500/20"
-                                  placeholder="0"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">未确权收款</label>
-                                <input
-                                  type="number"
-                                  value={sharedAllocations[rid]?.unconfirmedRevenue || ''}
-                                  onChange={(e) => setSharedAllocations({...sharedAllocations, [rid]: {...sharedAllocations[rid], unconfirmedRevenue: Number(e.target.value)}})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono text-xs outline-none focus:ring-2 focus:ring-indigo-500/20"
-                                  placeholder="0"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">待确权产值</label>
-                                <input
-                                  type="number"
-                                  value={sharedAllocations[rid]?.pendingValue || ''}
-                                  onChange={(e) => setSharedAllocations({...sharedAllocations, [rid]: {...sharedAllocations[rid], pendingValue: Number(e.target.value)}})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono text-xs outline-none focus:ring-2 focus:ring-indigo-500/20"
-                                  placeholder="0"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">已确权产值</label>
-                                <input
-                                  type="number"
-                                  value={sharedAllocations[rid]?.confirmedValue || ''}
-                                  onChange={(e) => setSharedAllocations({...sharedAllocations, [rid]: {...sharedAllocations[rid], confirmedValue: Number(e.target.value)}})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono text-xs outline-none focus:ring-2 focus:ring-indigo-500/20"
-                                  placeholder="0"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">未确权产值</label>
-                                <input
-                                  type="number"
-                                  value={sharedAllocations[rid]?.unconfirmedValue || ''}
-                                  onChange={(e) => setSharedAllocations({...sharedAllocations, [rid]: {...sharedAllocations[rid], unconfirmedValue: Number(e.target.value)}})}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono text-xs outline-none focus:ring-2 focus:ring-indigo-500/20"
-                                  placeholder="0"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">业务日期</label>
+                    <label className="text-xs font-bold text-slate-500">业务日期</label>
                     <input 
                       type="date" 
                       value={selectedDate} 
@@ -1255,21 +1319,21 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                           setSelectedMonth(date.slice(0, 7));
                         }
                       }} 
-                      className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all cursor-pointer h-10"
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all cursor-pointer h-10"
                     />
                   </div>
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between h-4">
-                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                      <label className="text-xs font-bold text-slate-500">
                         执行类型
                       </label>
                       {selectedResource && (
-                        <span className="text-[9px] text-slate-400 font-medium truncate max-w-[120px]" title={`当前视角: ${currentUser.center || '无'}`}>
+                        <span className="text-xs text-slate-400 font-medium truncate max-w-[120px]" title={`当前视角: ${currentUser.center || '无'}`}>
                           视角: {currentUser.center || '无'}
                         </span>
                       )}
                     </div>
-                    <div className="w-full bg-slate-50 border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold flex items-center justify-between h-10 shadow-xs">
+                    <div className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-bold flex items-center justify-between h-10 shadow-xs">
                       {selectedResource ? (() => {
                         const currentUnit = currentUser.center || '';
                         const et = getExecutionType(selectedResource, currentUnit);
@@ -1278,7 +1342,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                           <div className="flex items-center w-full">
                             <span 
                               title={EXECUTION_TYPE_EXPLANATIONS[et]}
-                              className={`px-3 py-1 rounded-xl text-xs font-black border ${col.bg} ${col.text} ${col.border} cursor-help shadow-sm whitespace-nowrap`}
+                              className={`px-3 py-1 rounded-lg text-xs font-bold border ${col.bg} ${col.text} ${col.border} cursor-help whitespace-nowrap`}
                             >
                               {et}
                             </span>
@@ -1291,22 +1355,22 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">指令详情与备注</label>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500">指令详情与备注</label>
                   <textarea
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 min-h-[120px]"
+                    className="w-full bg-white border border-slate-300 rounded-xl p-3 font-medium text-xs text-slate-800 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 min-h-[90px]"
                     placeholder="请输入确权配方调整说明或交易备注..."
                   />
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full bg-indigo-600 text-white py-6 rounded-[2rem] font-black uppercase tracking-[0.4em] shadow-2xl hover:bg-indigo-700 transition-all flex items-center justify-center space-x-4"
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl font-bold text-sm shadow-sm transition-all flex items-center justify-center space-x-2 active:scale-98 cursor-pointer"
                 >
                   <span>发起交易</span>
-                  <span className="text-xl">🚀</span>
+                  <span>🚀</span>
                 </button>
              </form>
            </div>
@@ -1325,206 +1389,14 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
           onAuditTransaction={onAuditTransaction}
           onHandleAudit={handleAudit}
           onStartModify={startModify}
+          onNavigateToApply={() => setActiveTab('apply')}
         />
       )}
 
-
-      {activeTab === 'breakers' && (
-        <div className="space-y-8 animate-in slide-in-from-bottom-4">
-           <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} p-10 shadow-xl border border-slate-100`}>
-              <div className="flex items-center justify-between mb-10">
-                 <h4 className="text-xl font-black text-slate-800 tracking-tighter uppercase">熔断保护监控中心</h4>
-                 <div className="flex items-center space-x-2">
-                    <span className="w-3 h-3 bg-rose-500 rounded-full animate-pulse"></span>
-                    <span className="text-[10px] font-black text-rose-500 uppercase tracking-widest">实时监控中</span>
-                 </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-                 <div className="bg-rose-50 p-6 rounded-3xl border border-rose-100">
-                    <p className="text-[10px] font-black text-rose-400 uppercase tracking-widest mb-2">当前活跃熔断</p>
-                    <p className="text-4xl font-black text-rose-600">{circuitBreakers.filter(cb => cb.status === 'active').length}</p>
-                 </div>
-                 <div className="bg-emerald-50 p-6 rounded-3xl border border-emerald-100">
-                    <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-2">已恢复单元</p>
-                    <p className="text-4xl font-black text-emerald-600">{circuitBreakers.filter(cb => cb.status === 'recovered').length}</p>
-                 </div>
-                 <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">失败记录 (60s)</p>
-                    <p className="text-4xl font-black text-slate-600">{failureLogs.length}</p>
-                 </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                 <table className="w-full text-left">
-                    <thead>
-                       <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b">
-                          <th className="py-4">目标单元</th>
-                          <th className="py-4">熔断原因</th>
-                          <th className="py-4">类型</th>
-                          <th className="py-4">触发时间</th>
-                          <th className="py-4">预计恢复</th>
-                          <th className="py-4">状态</th>
-                          <th className="py-4 text-right">操作</th>
-                       </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                       {circuitBreakers.slice().reverse().map(cb => (
-                          <tr key={cb.id} className="text-xs font-bold">
-                             <td className="py-6">
-                                <span className="text-slate-900">{cb.targetName}</span>
-                                <p className="text-[9px] text-slate-400 font-mono">ID: {cb.targetId}</p>
-                             </td>
-                             <td className="py-6 text-rose-500">{cb.reason}</td>
-                             <td className="py-6 uppercase tracking-tighter text-[10px]">{cb.type}</td>
-                             <td className="py-6 text-slate-500">{new Date(cb.createdAt).toLocaleString()}</td>
-                             <td className="py-6 text-slate-500">
-                                {cb.status === 'active' ? (
-                                   <div className="w-32">
-                                     <ProgressBar 
-                                       value={currentTime - cb.createdAt} 
-                                       max={cb.expiresAt - cb.createdAt} 
-                                       color="bg-rose-500" 
-                                       className="h-1.5"
-                                     />
-                                     <p className="text-[8px] font-mono mt-1 text-slate-400">预计 {new Date(cb.expiresAt).toLocaleTimeString()}</p>
-                                   </div>
-                                ) : '-'}
-                              </td>
-                             <td className="py-6">
-                                <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${cb.status === 'active' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                                   {cb.status === 'active' ? '熔断中' : '已恢复'}
-                                </span>
-                             </td>
-                             <td className="py-6 text-right">
-                                {cb.status === 'active' && isAdmin && (
-                                   <button 
-                                    onClick={() => onRecoverCircuitBreaker(cb.id)}
-                                    className="text-indigo-600 hover:underline uppercase text-[10px] font-black"
-                                   >
-                                     手动恢复
-                                   </button>
-                                )}
-                             </td>
-                          </tr>
-                       ))}
-                       {circuitBreakers.length === 0 && (
-                         <tr>
-                           <td colSpan={7} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
-                         </tr>
-                       )}
-                    </tbody>
-                 </table>
-              </div>
-           </div>
-        </div>
-      )}
-
-      {activeTab === 'exchange' && (
-        <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-xl overflow-hidden animate-in slide-in-from-bottom-4`}>
-           <div className="p-8 border-b border-slate-50 flex flex-wrap items-center justify-between gap-4">
-              <h4 className="text-xs font-black text-slate-900 uppercase tracking-[0.3em]">内部资源实时交易</h4>
-              <BusinessDateFilter
-                month={filterStartDate || filterEndDate ? '' : filterMonth}
-                onMonthChange={(m) => {
-                  setFilterMonth(m);
-                  setFilterStartDate('');
-                  setFilterEndDate('');
-                }}
-                startDate={filterStartDate}
-                endDate={filterEndDate}
-                onDateRangeChange={(s, e) => {
-                  setFilterStartDate(s);
-                  setFilterEndDate(e);
-                  setFilterMonth('');
-                }}
-                onClear={() => {
-                  setFilterMonth(getLocalMonthString());
-                  setFilterStartDate('');
-                  setFilterEndDate('');
-                }}
-              />
-           </div>
-           <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                 <thead>
-                    <tr className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
-                       <th className="px-10 py-6">交易ID</th>
-                       <th className="px-6 py-6">资源类型</th>
-                       <th className="px-6 py-6">数量</th>
-                       <th className="px-6 py-6">接收经营单元</th>
-                       <th className="px-10 py-6 text-right">操作</th>
-                    </tr>
-                 </thead>
-                 <tbody className="divide-y divide-slate-50">
-                    {paginatedExchangeTransactions.map(tx => (
-                       <tr key={tx.id} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="px-10 py-6 font-mono text-[10px] font-black text-slate-400">#{tx.id}</td>
-                          <td className="px-6 py-6">
-                             <span className="text-[9px] font-black px-3 py-1 bg-indigo-50 text-indigo-600 rounded-lg uppercase tracking-widest">
-                                {tx.type}
-                             </span>
-                          </td>
-                          <td className="px-6 py-6 font-mono font-black text-slate-900">{tx.amount}</td>
-                          <td className="px-6 py-6 text-xs font-bold text-slate-800">
-                             {managerSource.find(u => u.id === tx.receiverId)?.center || managerSource.find(u => u.id === tx.receiverId)?.name || tx.receiverId}
-                          </td>
-                          <td className="px-10 py-6 text-right">
-                             <button onClick={() => setSelectedTx(tx)} className="text-indigo-600 hover:underline text-[10px] font-black uppercase">详情</button>
-                          </td>
-                       </tr>
-                    ))}
-                    {filteredExchangeTransactions.length === 0 && (
-                      <tr>
-                        <td colSpan={5} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
-                      </tr>
-                    )}
-                 </tbody>
-              </table>
-           </div>
-
-           {/* Pagination Controls */}
-           {(() => {
-             const currentTasksLength = filteredExchangeTransactions.length;
-             if (currentTasksLength <= PAGE_SIZE) return null;
-             return (
-               <div className="flex items-center justify-between px-6 py-4 bg-white border-t border-slate-100">
-                 <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                   显示 {Math.min(currentTasksLength, (currentPage - 1) * PAGE_SIZE + 1)}-{Math.min(currentTasksLength, currentPage * PAGE_SIZE)} / 共 {currentTasksLength} 条
-                 </div>
-                 <div className="flex items-center gap-4">
-                   <div className="flex items-center gap-1">
-                     <button 
-                       disabled={currentPage === 1}
-                       onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                       className="p-2 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                     >
-                       <ChevronLeft size={18} className="text-slate-600" />
-                     </button>
-                     <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-50 rounded-lg border border-slate-200">
-                       <span className="text-xs font-black text-slate-900">{currentPage}</span>
-                       <span className="text-[10px] font-bold text-slate-400">/</span>
-                       <span className="text-[10px] font-bold text-slate-400">{Math.ceil(currentTasksLength / PAGE_SIZE)}</span>
-                     </div>
-                     <button 
-                       disabled={currentPage === Math.ceil(currentTasksLength / PAGE_SIZE)}
-                       onClick={() => setCurrentPage(prev => Math.min(Math.ceil(currentTasksLength / PAGE_SIZE), prev + 1))}
-                       className="p-2 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                     >
-                       <ChevronRight size={18} className="text-slate-600" />
-                     </button>
-                   </div>
-                 </div>
-               </div>
-             );
-           })()}
-        </div>
-      )}
-
       {activeTab === 'history' && (
-        <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-xl overflow-hidden animate-in slide-in-from-bottom-4`}>
-           <div className="p-8 border-b border-slate-50 flex flex-wrap items-center justify-between gap-4">
-              <h4 className="text-xs font-black text-slate-900 uppercase tracking-[0.3em]">全量流转审计记录</h4>
+        <div className={`bg-white ${UI_TOKENS.RADIUS_PANEL} border border-slate-200 shadow-sm overflow-hidden animate-in fade-in duration-200`}>
+           <div className="p-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
+              <h4 className="text-sm font-bold text-slate-900">全量流转审计记录</h4>
               <div className="flex flex-wrap items-center gap-3">
                 <BusinessDateFilter
                   month={filterStartDate || filterEndDate ? '' : filterMonth}
@@ -1550,53 +1422,54 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                   onClick={exportToExcel}
                   disabled={!canExport}
                   title={getExportButtonTitle(canExport, '导出 Excel')}
-                  className={`px-4 py-2 border rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center ${
+                  className={`px-3 py-1.5 border rounded-lg text-xs font-bold transition-all flex items-center ${
                     !canExport
                       ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
-                      : 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100 cursor-pointer'
+                      : 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100 cursor-pointer'
                   }`}
                 >
-                  <svg className="w-3 h-3 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                  <svg className="w-3.5 h-3.5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                   导出 Excel
                 </button>
               </div>
            </div>
-           <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                 <thead>
-                    <tr className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
-                       <th className="px-10 py-6">指令编号/时间</th>
-                       <th className="px-6 py-6">类别/关联资产</th>
-                       <th className="px-6 py-6">路由节点</th>
-                       <th className="px-6 py-6 text-right">流转度</th>
-                       <th className="px-10 py-6 text-right">入库</th>
+
+           <div className="relative max-h-[calc(100vh-14rem)] overflow-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                 <thead className="sticky top-0 z-20 bg-slate-100 border-b border-slate-200 text-slate-700 font-bold whitespace-nowrap shadow-xs">
+                    <tr>
+                       <th className="sticky left-0 bg-slate-100 z-40 border-r border-slate-200/80 px-4 py-2.5 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.08)]">指令编号/时间</th>
+                       <th className="px-4 py-2.5">类别/关联资产</th>
+                       <th className="px-4 py-2.5">路由节点</th>
+                       <th className="px-4 py-2.5 text-right">流转额度</th>
+                       <th className="px-4 py-2.5 text-right">状态</th>
                     </tr>
                  </thead>
-                 <tbody className="divide-y divide-slate-50">
+                 <tbody className="divide-y divide-slate-100">
                     {paginatedTransactions.map(tx => (
-                       <tr key={tx.id} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="px-10 py-6">
-                             <span className="font-mono text-[10px] font-black text-slate-300 block mb-1">#{tx.id}</span>
-                             <span className="text-[9px] font-bold text-slate-500">{tx.businessDate} ({tx.month})</span>
+                       <tr key={tx.id} className="hover:bg-slate-50/80 transition-colors group">
+                          <td className="sticky left-0 bg-white group-hover:bg-slate-50 z-30 border-r border-slate-200/80 px-4 py-2.5 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.08)]">
+                             <span className="font-mono text-xs font-bold text-slate-700 block">#{tx.id}</span>
+                             <span className="text-[10px] text-slate-400 font-mono">{tx.businessDate} ({tx.month})</span>
                           </td>
-                          <td className="px-6 py-6">
-                             <span className={`text-[9px] font-black px-3 py-1 rounded-lg uppercase tracking-widest bg-indigo-50 text-indigo-600`}>
+                          <td className="px-4 py-2.5">
+                             <span className="text-xs font-bold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">
                                 {tx.type}
                              </span>
-                             {tx.miningId && <p className="text-[9px] font-black text-slate-400 mt-2">矿山: {tx.miningId}</p>}
+                             {tx.miningId && <span className="text-xs text-slate-500 font-medium ml-2">矿山: {tx.miningId}</span>}
                           </td>
-                          <td className="px-6 py-6">
-                             <div className="flex items-center space-x-3 text-xs font-bold text-slate-800">
-                                <span>{managerSource.find(u => u.id === tx.senderId)?.center || managerSource.find(u => u.id === tx.senderId)?.name || tx.senderId}</span>
-                                <span className="text-slate-300">→</span>
-                                <span>{managerSource.find(u => u.id === tx.receiverId)?.center || managerSource.find(u => u.id === tx.receiverId)?.name || tx.receiverId}</span>
-                             </div>
+                          <td className="px-4 py-2.5">
+                             <div className="flex items-center space-x-2 text-xs font-medium text-slate-800">
+                                <span className="font-bold">{managerSource.find(u => u.id === tx.senderId)?.center || managerSource.find(u => u.id === tx.senderId)?.name || tx.senderId}</span>
+                                <span className="text-slate-400">→</span>
+                                <span className="font-bold">{managerSource.find(u => u.id === tx.receiverId)?.center || managerSource.find(u => u.id === tx.receiverId)?.name || tx.receiverId}</span>
+                              </div>
                           </td>
-                          <td className="px-6 py-6 text-right font-mono font-black text-slate-900">
+                          <td className="px-4 py-2.5 text-right font-mono font-bold text-slate-900">
                              {`${Math.round(tx.amount).toLocaleString()}`}
                           </td>
-                          <td className="px-10 py-6 text-right">
-                             <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${
+                          <td className="px-4 py-2.5 text-right">
+                             <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
                                 tx.status === TransactionStatus.Verified ? 'bg-emerald-100 text-emerald-700' :
                                 tx.status === TransactionStatus.Rejected ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'
                              }`}>
@@ -1607,7 +1480,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
                     ))}
                     {paginatedTransactions.length === 0 && (
                        <tr>
-                          <td colSpan={5} className="px-6 py-20 text-center text-slate-300 font-bold uppercase text-[10px] tracking-widest">{UI_LABELS.EMPTY_DEFAULT}</td>
+                          <td colSpan={5} className="px-4 py-12 text-center text-slate-400 text-xs">暂无历史流转记录</td>
                        </tr>
                     )}
                  </tbody>
@@ -1619,32 +1492,26 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
              const currentTasksLength = filteredTransactions.length;
              if (currentTasksLength <= PAGE_SIZE) return null;
              return (
-               <div className="flex items-center justify-between px-6 py-4 bg-white border-t border-slate-100">
-                 <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+               <div className="flex items-center justify-between px-4 py-3 bg-white border-t border-slate-100 text-xs">
+                 <div className="text-xs text-slate-500">
                    显示 {Math.min(currentTasksLength, (currentPage - 1) * PAGE_SIZE + 1)}-{Math.min(currentTasksLength, currentPage * PAGE_SIZE)} / 共 {currentTasksLength} 条
                  </div>
-                 <div className="flex items-center gap-4">
-                   <div className="flex items-center gap-1">
-                     <button 
-                       disabled={currentPage === 1}
-                       onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                       className="p-2 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                     >
-                       <ChevronLeft size={18} className="text-slate-600" />
-                     </button>
-                     <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-50 rounded-lg border border-slate-200">
-                       <span className="text-xs font-black text-slate-900">{currentPage}</span>
-                       <span className="text-[10px] font-bold text-slate-400">/</span>
-                       <span className="text-[10px] font-bold text-slate-400">{Math.ceil(currentTasksLength / PAGE_SIZE)}</span>
-                     </div>
-                     <button 
-                       disabled={currentPage === Math.ceil(currentTasksLength / PAGE_SIZE)}
-                       onClick={() => setCurrentPage(prev => Math.min(Math.ceil(currentTasksLength / PAGE_SIZE), prev + 1))}
-                       className="p-2 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                     >
-                       <ChevronRight size={18} className="text-slate-600" />
-                     </button>
-                   </div>
+                 <div className="flex items-center gap-2">
+                   <button 
+                     disabled={currentPage === 1}
+                     onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                     className="px-2 py-1 rounded hover:bg-slate-100 border border-slate-200 disabled:opacity-30 disabled:cursor-not-allowed font-bold"
+                   >
+                     上一页
+                   </button>
+                   <span className="font-mono font-bold text-slate-700">{currentPage} / {Math.ceil(currentTasksLength / PAGE_SIZE)}</span>
+                   <button 
+                     disabled={currentPage === Math.ceil(currentTasksLength / PAGE_SIZE)}
+                     onClick={() => setCurrentPage(prev => Math.min(Math.ceil(currentTasksLength / PAGE_SIZE), prev + 1))}
+                     className="px-2 py-1 rounded hover:bg-slate-100 border border-slate-200 disabled:opacity-30 disabled:cursor-not-allowed font-bold"
+                   >
+                     下一页
+                   </button>
                  </div>
                </div>
              );

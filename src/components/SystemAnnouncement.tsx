@@ -6,6 +6,7 @@ import { useCityGuardianModal, CityGuardianModal } from './CityGuardianModal';
 import { isSystemAdmin } from '../utils/accessControl';
 import { safeGetItem, safeSetItem } from '../utils/safeLocalStorage';
 import { UI_LABELS } from '../constants/uiLabels';
+import { UI_TOKENS } from '../constants/uiTokens';
 
 interface SystemAnnouncementProps {
   currentUser: User;
@@ -452,7 +453,7 @@ export const SystemAnnouncement: React.FC<SystemAnnouncementProps> = ({ currentU
       {/* Admin Publish Modal */}
       {isPublishModalOpen && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white text-slate-900 rounded-[2.5rem] p-6 md:p-8 max-w-xl w-full shadow-2xl border border-slate-100 space-y-6 animate-in fade-in zoom-in-95">
+          <div className={`bg-white text-slate-900 ${UI_TOKENS.RADIUS_PANEL} p-6 md:p-8 max-w-xl w-full shadow-2xl border border-slate-100 space-y-6 animate-in fade-in zoom-in-95`}>
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-black">

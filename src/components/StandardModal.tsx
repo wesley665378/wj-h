@@ -1,7 +1,9 @@
 import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
+import { UI_TOKENS } from '../constants/uiTokens';
+import { GUARDIAN_MODAL_TITLE } from '../constants/uiLabels';
 
-interface StandardModalProps {
+export interface StandardModalProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string | React.ReactNode;
@@ -10,11 +12,12 @@ interface StandardModalProps {
   footer?: React.ReactNode;
   children: React.ReactNode;
   maxWidthClassName?: string; // e.g., 'max-w-md', 'max-w-lg', 'max-w-2xl', etc.
+  zIndexClassName?: string;
   id?: string;
 }
 
 export const StandardModal: React.FC<StandardModalProps> & {
-  Header: React.FC<{ title: string | React.ReactNode; subtitle?: string | React.ReactNode; icon?: React.ReactNode; onClose: () => void }>;
+  Header: React.FC<{ title?: string | React.ReactNode; subtitle?: string | React.ReactNode; icon?: React.ReactNode; onClose: () => void }>;
   Body: React.FC<{ children: React.ReactNode; className?: string }>;
   Footer: React.FC<{ children: React.ReactNode; className?: string }>;
 } = ({
@@ -26,6 +29,7 @@ export const StandardModal: React.FC<StandardModalProps> & {
   footer,
   children,
   maxWidthClassName = 'max-w-lg',
+  zIndexClassName = 'z-[100]',
   id,
 }) => {
   useEffect(() => {
@@ -52,6 +56,8 @@ export const StandardModal: React.FC<StandardModalProps> & {
     }
   };
 
+  const resolvedTitle = title ?? GUARDIAN_MODAL_TITLE;
+
   // Inspect children to see if they are using Subcomponents
   let hasSubComponents = false;
   React.Children.forEach(children, (child) => {
@@ -67,10 +73,10 @@ export const StandardModal: React.FC<StandardModalProps> & {
     <div
       id={id}
       onClick={handleOverlayClick}
-      className="fixed inset-0 wrongs z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300"
+      className={`fixed inset-0 ${zIndexClassName} flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300`}
     >
       <div
-        className={`bg-white w-full ${maxWidthClassName} rounded-[2rem] md:rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh]`}
+        className={`bg-white w-full ${maxWidthClassName} rounded-2xl shadow-2xl overflow-hidden border border-slate-200 animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh]`}
         onClick={(e) => e.stopPropagation()}
       >
         {hasSubComponents ? (
@@ -78,22 +84,22 @@ export const StandardModal: React.FC<StandardModalProps> & {
         ) : (
           <>
             {/* Sticky Header */}
-            <div className="sticky top-0 bg-white border-b border-slate-100 px-6 py-5 md:px-8 flex items-center justify-between z-10 flex-shrink-0">
-              <div className="flex items-center space-x-4">
+            <div className="sticky top-0 bg-white border-b border-slate-100 px-5 py-4 md:px-6 flex items-center justify-between z-10 flex-shrink-0">
+              <div className="flex items-center space-x-3.5">
                 {icon && (
-                  <div className="w-12 h-12 bg-slate-950 text-white rounded-2xl flex items-center justify-center shadow-xl flex-shrink-0">
+                  <div className="w-10 h-10 bg-slate-950 text-white rounded-xl flex items-center justify-center shadow-lg flex-shrink-0">
                     {icon}
                   </div>
                 )}
                 <div>
-                  {typeof title === 'string' ? (
-                    <h3 className="text-base md:text-lg font-black text-slate-800 tracking-tight leading-snug">{title}</h3>
+                  {typeof resolvedTitle === 'string' ? (
+                    <h3 className="text-base font-bold text-slate-900 tracking-tight leading-snug">{resolvedTitle}</h3>
                   ) : (
-                    title
+                    resolvedTitle
                   )}
                   {subtitle && (
                     typeof subtitle === 'string' ? (
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">{subtitle}</p>
+                      <p className="text-xs font-medium text-slate-500 mt-0.5">{subtitle}</p>
                     ) : (
                       subtitle
                     )
@@ -102,21 +108,21 @@ export const StandardModal: React.FC<StandardModalProps> & {
               </div>
               <button
                 onClick={onClose}
-                className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400 hover:text-slate-600 focus:outline-none flex-shrink-0"
+                className="p-1.5 hover:bg-slate-100 rounded-full transition-colors text-slate-400 hover:text-slate-600 focus:outline-none flex-shrink-0"
                 aria-label="Close"
               >
-                <X className="w-5 h-5 md:w-6 md:h-6" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Non-scrollable Body by default */}
-            <div className="flex-1 p-6 md:p-8">
+            <div className="flex-1 p-5 md:p-6 overflow-y-auto">
               {children}
             </div>
 
             {/* Fixed Footer */}
             {footer && (
-              <div className="sticky bottom-0 bg-slate-50 border-t border-slate-100 px-6 py-5 md:px-8 z-10 flex-shrink-0">
+              <div className="sticky bottom-0 bg-slate-50 border-t border-slate-100 px-5 py-3.5 md:px-6 z-10 flex-shrink-0">
                 {footer}
               </div>
             )}
@@ -128,47 +134,50 @@ export const StandardModal: React.FC<StandardModalProps> & {
 };
 
 // Subcomponent implementations
-StandardModal.Header = ({ title, subtitle, icon, onClose }) => (
-  <div className="sticky top-0 bg-white border-b border-slate-100 px-6 py-5 md:px-8 flex items-center justify-between z-10 w-full flex-shrink-0">
-    <div className="flex items-center space-x-4">
-      {icon && (
-        <div className="w-12 h-12 bg-slate-950 text-white rounded-2xl flex items-center justify-center shadow-xl flex-shrink-0">
-          {icon}
-        </div>
-      )}
-      <div>
-        {typeof title === 'string' ? (
-          <h3 className="text-base md:text-lg font-black text-slate-800 tracking-tight leading-snug">{title}</h3>
-        ) : (
-          title
+StandardModal.Header = ({ title, subtitle, icon, onClose }) => {
+  const resolvedTitle = title ?? GUARDIAN_MODAL_TITLE;
+  return (
+    <div className="sticky top-0 bg-white border-b border-slate-100 px-5 py-4 md:px-6 flex items-center justify-between z-10 w-full flex-shrink-0">
+      <div className="flex items-center space-x-3.5">
+        {icon && (
+          <div className="w-10 h-10 bg-slate-950 text-white rounded-xl flex items-center justify-center shadow-lg flex-shrink-0">
+            {icon}
+          </div>
         )}
-        {subtitle && (
-          typeof subtitle === 'string' ? (
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">{subtitle}</p>
+        <div>
+          {typeof resolvedTitle === 'string' ? (
+            <h3 className="text-base font-bold text-slate-900 tracking-tight leading-snug">{resolvedTitle}</h3>
           ) : (
-            subtitle
-          )
-        )}
+            resolvedTitle
+          )}
+          {subtitle && (
+            typeof subtitle === 'string' ? (
+              <p className="text-xs font-medium text-slate-500 mt-0.5">{subtitle}</p>
+            ) : (
+              subtitle
+            )
+          )}
+        </div>
       </div>
+      <button
+        onClick={onClose}
+        className="p-1.5 hover:bg-slate-100 rounded-full transition-colors text-slate-400 hover:text-slate-600 focus:outline-none flex-shrink-0"
+        aria-label="Close"
+      >
+        <X className="w-5 h-5" />
+      </button>
     </div>
-    <button
-      onClick={onClose}
-      className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400 hover:text-slate-600 focus:outline-none flex-shrink-0"
-      aria-label="Close"
-    >
-      <X className="w-5 h-5 md:w-6 md:h-6" />
-    </button>
-  </div>
-);
+  );
+};
 
 StandardModal.Body = ({ children, className = '' }) => (
-  <div className={`flex-1 p-6 md:p-8 ${className}`}>
+  <div className={`flex-1 p-5 md:p-6 overflow-y-auto ${className}`}>
     {children}
   </div>
 );
 
 StandardModal.Footer = ({ children, className = '' }) => (
-  <div className={`sticky bottom-0 bg-slate-50 border-t border-slate-100 px-6 py-5 md:px-8 z-10 flex-shrink-0 ${className}`}>
+  <div className={`sticky bottom-0 bg-slate-50 border-t border-slate-100 px-5 py-3.5 md:px-6 z-10 flex-shrink-0 ${className}`}>
     {children}
   </div>
 );

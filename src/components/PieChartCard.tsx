@@ -1,5 +1,6 @@
 import React from 'react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from 'recharts';
+import { UI_TOKENS } from '../constants/uiTokens';
 
 interface PieChartData {
   name: string;
@@ -33,7 +34,7 @@ export const PieChartCard: React.FC<PieChartCardProps> = ({
   showLegend = false,
 }) => {
   return (
-    <div className="bg-white p-6 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-xl">
+    <div className={`bg-white p-6 md:p-10 ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-xl`}>
       <h4 className="text-xs font-black text-slate-900 uppercase tracking-[0.2em] mb-10 flex items-center">
         <span className={`w-8 h-8 ${iconBgColor} rounded-lg flex items-center justify-center ${iconTextColor} mr-3`}>
           {icon}

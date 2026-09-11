@@ -10,10 +10,10 @@ interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   onUpdateAvatar?: (avatarUrl: string) => void;
-  auditBadgeCount?: number;
+  auditPendingBadgeCount?: number;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab, onUpdateAvatar, auditBadgeCount = 0 }) => {
+const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab, onUpdateAvatar, auditPendingBadgeCount }) => {
   const menuItems = MENU_ITEMS.map(item => {
     return { ...item, show: checkUserPermission(user, item.id) };
   });
@@ -89,9 +89,9 @@ const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab, onUpda
               <span className="text-xl">{item.icon}</span>
               <span className="font-bold text-sm">{item.label}</span>
             </div>
-            {item.id === 'audit' && auditBadgeCount > 0 && (
-              <span className="px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded-full animate-pulse">
-                {auditBadgeCount}
+            {item.id === 'audit' && auditPendingBadgeCount !== undefined && auditPendingBadgeCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full text-xs font-black bg-rose-500 text-white shadow-sm">
+                {auditPendingBadgeCount}
               </span>
             )}
           </button>

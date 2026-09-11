@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { formatMoney } from '../utils/formatMoney';
 import { useCostPrivacy } from '../hooks/useCostPrivacy';
 import { CityGuardianModal, useCityGuardianModal } from './CityGuardianModal';
+import { GUARDIAN_MODAL_TITLE } from '../constants/uiLabels';
 
 /**
  * Backend/API Raw Data Model representation
@@ -153,7 +154,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
             <form onSubmit={handleSubmit} className="p-6 space-y-5">
             
             {/* 1. Metadata Grid Layout - Requirement: grid-cols-2 */}
-            <div className="bg-slate-50/50 p-4 rounded-[4px] border border-[#b8d0f7] space-y-4">
+            <div className="bg-slate-50/50 p-4 rounded-md border border-slate-200 space-y-4">
               <div className="flex items-center gap-1.5 px-1 border-b border-slate-100 pb-2">
                 <ShieldCheck className="w-4 h-4 text-slate-600" />
                 <span className="text-xs font-black text-slate-700 tracking-wider">申报元数据校验 (只读)</span>
@@ -169,7 +170,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     readOnly
                     id="meta-opunit"
                     value={formData.operatingUnit}
-                    className="w-full px-3 py-2 bg-slate-100 border border-[#b8d0f7] rounded-[4px] text-slate-800 font-semibold text-xs font-mono tabular-nums outline-none"
+                    className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-md text-slate-800 font-semibold text-xs font-mono tabular-nums outline-none"
                   />
                 </div>
                 
@@ -182,7 +183,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     readOnly
                     id="meta-id"
                     value={`#${formData.id}`}
-                    className="w-full px-3 py-2 bg-slate-100 border border-[#b8d0f7] rounded-[4px] text-slate-800 font-mono tabular-nums text-xs outline-none"
+                    className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-md text-slate-800 font-mono tabular-nums text-xs outline-none"
                   />
                 </div>
 
@@ -195,7 +196,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     readOnly
                     id="meta-mining-id"
                     value={formData.miningId}
-                    className="w-full px-3 py-2 bg-slate-100 border border-[#b8d0f7] rounded-[4px] text-slate-800 font-mono tabular-nums text-xs outline-none"
+                    className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-md text-slate-800 font-mono tabular-nums text-xs outline-none"
                   />
                 </div>
 
@@ -203,7 +204,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                   <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
                     匹配确权范式
                   </label>
-                  <div className="w-full px-3 py-1.5 bg-slate-900 border border-slate-900 rounded-[4px] text-white font-bold text-center text-xs flex items-center justify-center gap-1">
+                  <div className="w-full px-3 py-1.5 bg-slate-900 border border-slate-900 rounded-md text-white font-bold text-center text-xs flex items-center justify-center gap-1">
                     <Coins className="w-3.5 h-3.5" />
                     <span className="tracking-widest">{formData.type} 级确权核算流</span>
                   </div>
@@ -221,7 +222,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     readOnly
                     id="meta-base-points"
                     value={formatMoney(formData.basePoints)}
-                    className="w-full px-3 py-2 bg-slate-100/80 border border-[#b8d0f7] rounded-[4px] text-slate-700 font-mono tabular-nums text-xs font-black outline-none"
+                    className="w-full px-3 py-2 bg-slate-100/80 border border-slate-200 rounded-md text-slate-700 font-mono tabular-nums text-xs font-black outline-none"
                   />
                 </div>
                 
@@ -234,7 +235,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     readOnly
                     id="meta-calc-val"
                     value={formatMoney(targetValue)}
-                    className="w-full px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-[4px] text-emerald-800 font-mono tabular-nums text-xs font-black outline-none"
+                    className="w-full px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-md text-emerald-800 font-mono tabular-nums text-xs font-black outline-none"
                   />
                 </div>
               </div>
@@ -247,7 +248,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                 <span className="text-[10px] text-slate-400 font-semibold uppercase font-mono">已映射数值</span>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 p-2 bg-slate-50/20 border border-[#b8d0f7] rounded-[4px]">
+              <div className="grid grid-cols-2 gap-4 p-2 bg-slate-50/20 border border-slate-200 rounded-md">
                 
                 {/* Field A */}
                 <div id="field-block-a" className="space-y-1">
@@ -262,10 +263,10 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     readOnly
                     id="input-field-a"
                     value={formData.aValue > 0 ? formatMoney(formData.aValue) : '—'}
-                    className={`w-full p-2.5 rounded-[4px] border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
+                    className={`w-full p-2.5 rounded-md border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
                       formData.type === 'A'
                         ? 'bg-emerald-50 border-emerald-200 text-slate-800 font-black'
-                        : 'bg-slate-50 border-[#b8d0f7]/40 text-gray-300 cursor-not-allowed outline-none select-none'
+                        : 'bg-slate-50 border-slate-200 text-gray-300 cursor-not-allowed outline-none select-none'
                     }`}
                   />
                 </div>
@@ -283,10 +284,10 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     readOnly
                     id="input-field-b1"
                     value={formData.b1Value > 0 ? formatMoney(formData.b1Value) : '—'}
-                    className={`w-full p-2.5 rounded-[4px] border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
+                    className={`w-full p-2.5 rounded-md border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
                       formData.type === 'B1'
                         ? 'bg-emerald-50 border-emerald-200 text-slate-800 font-black'
-                        : 'bg-slate-50 border-[#b8d0f7]/40 text-gray-300 cursor-not-allowed outline-none select-none'
+                        : 'bg-slate-50 border-slate-200 text-gray-300 cursor-not-allowed outline-none select-none'
                     }`}
                   />
                 </div>
@@ -304,10 +305,10 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     readOnly
                     id="input-field-b2"
                     value={formData.b2Value > 0 ? formatMoney(formData.b2Value) : '—'}
-                    className={`w-full p-2.5 rounded-[4px] border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
+                    className={`w-full p-2.5 rounded-md border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
                       formData.type === 'B2'
                         ? 'bg-emerald-50 border-emerald-200 text-slate-800 font-black'
-                        : 'bg-slate-50 border-[#b8d0f7]/40 text-gray-300 cursor-not-allowed outline-none select-none'
+                        : 'bg-slate-50 border-slate-200 text-gray-300 cursor-not-allowed outline-none select-none'
                     }`}
                   />
                 </div>
@@ -325,10 +326,10 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     readOnly
                     id="input-field-c"
                     value={formData.cValue > 0 ? formatMoney(formData.cValue) : '—'}
-                    className={`w-full p-2.5 rounded-[4px] border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
+                    className={`w-full p-2.5 rounded-md border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
                       formData.type === 'C'
                         ? 'bg-emerald-50 border-emerald-200 text-slate-800 font-black'
-                        : 'bg-slate-50 border-[#b8d0f7]/40 text-gray-300 cursor-not-allowed outline-none select-none'
+                        : 'bg-slate-50 border-slate-200 text-gray-300 cursor-not-allowed outline-none select-none'
                     }`}
                   />
                 </div>
@@ -346,10 +347,10 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     readOnly
                     id="input-field-d"
                     value={formData.dValue > 0 ? formatMoney(formData.dValue) : '—'}
-                    className={`w-full p-2.5 rounded-[4px] border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
+                    className={`w-full p-2.5 rounded-md border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
                       formData.type === 'D'
                         ? 'bg-emerald-50 border-emerald-200 text-slate-800 font-black'
-                        : 'bg-slate-50 border-[#b8d0f7]/40 text-gray-300 cursor-not-allowed outline-none select-none'
+                        : 'bg-slate-50 border-slate-200 text-gray-300 cursor-not-allowed outline-none select-none'
                     }`}
                   />
                 </div>
@@ -367,10 +368,10 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     readOnly
                     id="input-field-fxdc"
                     value={formData.fxdcValue > 0 ? formatMoney(formData.fxdcValue) : '—'}
-                    className={`w-full p-2.5 rounded-[4px] border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
+                    className={`w-full p-2.5 rounded-md border font-mono tabular-nums text-xs tracking-tight transition-all focus:outline-none min-w-48 ${
                       formData.type === 'FXDC'
                         ? 'bg-emerald-50 border-emerald-200 text-slate-800 font-black'
-                        : 'bg-slate-50 border-[#b8d0f7]/40 text-gray-300 cursor-not-allowed outline-none select-none'
+                        : 'bg-slate-50 border-slate-200 text-gray-300 cursor-not-allowed outline-none select-none'
                     }`}
                   />
                 </div>
@@ -378,7 +379,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
             </div>
 
             {/* 3. Interactive Human Audit Input & Logic */}
-            <div className="bg-slate-50 border border-[#b8d0f7] p-4 rounded-[4px] space-y-4">
+            <div className="bg-slate-50 border border-slate-200 p-4 rounded-md space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-700 block">
                   1. 人工稽核校验输入
@@ -393,7 +394,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                     }));
                     toast.info('大区对账：自动对齐结算基准额');
                   }}
-                  className="px-2.5 py-1 text-[10px] font-bold text-slate-600 bg-white border border-[#b8d0f7] hover:bg-slate-100 rounded-[4px] transition-transform active:scale-95 cursor-pointer whitespace-nowrap"
+                  className="px-2.5 py-1 text-[10px] font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-100 rounded-md transition-transform active:scale-95 cursor-pointer whitespace-nowrap"
                 >
                   对齐系统值 [{Math.round(targetValue)}]
                 </button>
@@ -410,7 +411,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                       const val = Math.round(parseFloat(e.target.value) || 0);
                       setFormData(prev => prev ? { ...prev, verifiedAmount: val } : null);
                     }}
-                    className="w-full px-4 py-3 bg-white border border-[#b8d0f7] rounded-[4px] font-mono tabular-nums text-sm font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all min-w-48"
+                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-md font-mono tabular-nums text-sm font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all min-w-48"
                     placeholder="输入实际核定数值 (整数)"
                   />
                 </div>
@@ -459,11 +460,11 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                             const val = Math.round(parseFloat(e.target.value) || 0);
                             setFormData(prev => prev ? { ...prev, adjustmentValue: val } : null);
                           }}
-                          className="w-full px-4 py-2.5 bg-amber-50/20 border border-[#b8d0f7] rounded-[4px] font-mono tabular-nums text-sm font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all min-w-48"
+                          className="w-full px-4 py-2.5 bg-amber-50/20 border border-slate-200 rounded-md font-mono tabular-nums text-sm font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all min-w-48"
                           placeholder="核销增减算数值 (整数，例如：-50)"
                         />
                       </div>
-                      <p className="text-[10px] text-amber-600 font-medium leading-relaxed bg-amber-50/40 p-2 rounded-[4px] border border-amber-100 flex items-start gap-1">
+                      <p className="text-[10px] text-amber-600 font-medium leading-relaxed bg-amber-50/40 p-2 rounded-md border border-amber-100 flex items-start gap-1">
                         <AlertTriangle className="w-3.5 h-3.5 flex-none mt-0.5" />
                         <span>手动调整额将冲减或溢补结余。启用此例外机制必须在下方输入详细说明（不少于3位字元）以备后台审查。</span>
                       </p>
@@ -473,7 +474,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
               </div>
 
               {/* Live Arithmetic Balances */}
-              <div className="flex items-center justify-between bg-slate-100 p-3 rounded-[4px] border border-[#b8d0f7]/60 text-xs font-mono">
+              <div className="flex items-center justify-between bg-slate-100 p-3 rounded-md border border-slate-200 text-xs font-mono">
                 <div className="space-y-0.5">
                   <span className="text-slate-500 block">实时测算大区总额</span>
                   <span className="font-bold text-slate-900 tabular-nums">
@@ -502,7 +503,7 @@ export const ConsumptionAudit: React.FC<ConsumptionAuditProps> = ({
                 value={formData.notes}
                 onChange={(e) => setFormData(prev => prev ? { ...prev, notes: e.target.value } : null)}
                 rows={2}
-                className="w-full p-2.5 border border-[#b8d0f7] rounded-[4px] text-xs text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all min-w-48"
+                className="w-full p-2.5 border border-slate-200 rounded-md text-xs text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all min-w-48"
                 placeholder={formData.enableAdjustment ? "请输入不少于3字元的异常调整核心缘由..." : "系统审核通过，偏差核销在容差范围内，对账相符。"}
                 required={formData.enableAdjustment}
               />

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Lock, ShieldCheck } from 'lucide-react';
 import StandardModal from './StandardModal';
 import { useCityGuardianModal, CityGuardianModal } from './CityGuardianModal';
+import { GUARDIAN_MODAL_TITLE } from '../constants/uiLabels';
 
 import { isWeakPassword, assertAcceptablePassword } from '../utils/security';
 
@@ -65,7 +66,7 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClo
       <StandardModal
         isOpen={isOpen}
         onClose={onClose}
-        title="城市守护者"
+        title={GUARDIAN_MODAL_TITLE}
         subtitle="修改登录密码"
         icon={<Lock className="w-6 h-6" />}
         maxWidthClassName="max-w-md"
@@ -138,7 +139,7 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClo
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full py-5 bg-slate-900 text-white font-black rounded-[2rem] text-xs uppercase tracking-[0.2em] hover:bg-blue-600 shadow-2xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center animate-pulse"
+              className="w-full py-4 bg-slate-900 text-white font-black rounded-xl text-xs uppercase tracking-[0.2em] hover:bg-blue-600 shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center animate-pulse"
             >
               {isSubmitting ? (
                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>

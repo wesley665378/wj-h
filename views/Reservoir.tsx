@@ -663,7 +663,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
 
           {/* 搜索与排序与统计栏 */}
           <div className="flex flex-wrap items-center gap-2">
-            <span className="px-3 py-2 bg-slate-50 border border-[#b8d0f7] rounded-[4px] text-[13px] font-mono font-bold text-slate-600 h-10 flex items-center">
+            <span className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-[13px] font-mono font-bold text-slate-600 h-10 flex items-center">
               共 {sortedAndFilteredMetrics.length} 单元
             </span>
 
@@ -674,14 +674,14 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
                 value={searchUnit}
                 onChange={e => setSearchUnit(e.target.value)}
                 placeholder="搜索经营单元..."
-                className="w-full pl-9 pr-3 py-2 text-[13px] bg-white border border-[#b8d0f7] rounded-[4px] outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-colors h-10 placeholder:text-[#94a3b8]"
+                className="w-full pl-9 pr-3 py-2 text-[13px] bg-white border border-slate-200 rounded-md outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-colors h-10 placeholder:text-[#94a3b8]"
               />
             </div>
 
             <select
               value={sortBy}
               onChange={e => setSortBy(e.target.value as any)}
-              className="px-3 py-2 text-[13px] bg-white border border-[#b8d0f7] rounded-[4px] font-bold text-slate-700 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 cursor-pointer h-10"
+              className="px-3 py-2 text-[13px] bg-white border border-slate-200 rounded-md font-bold text-slate-700 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 cursor-pointer h-10"
             >
               <option value="inflow">按 20% 流入降序</option>
               <option value="supplement">按统筹补足降序</option>

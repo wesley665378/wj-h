@@ -115,7 +115,7 @@ const SystemInstructions: React.FC = () => {
       {/* 核心机制与四大系统运算一致性规范 (四大金刚规则) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* 规则 1 */}
-        <Card className="p-6 bg-white border border-slate-100 rounded-[2rem] shadow-md flex flex-col justify-between">
+        <Card className={`p-6 bg-white border border-slate-100 ${UI_TOKENS.RADIUS_CARD} shadow-md flex flex-col justify-between`}>
           <div className="space-y-4">
             <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 shadow-sm">
               <Zap size={22} />
@@ -137,7 +137,7 @@ const SystemInstructions: React.FC = () => {
         </Card>
 
         {/* 规则 2 */}
-        <Card className="p-6 bg-white border border-slate-100 rounded-[2rem] shadow-md flex flex-col justify-between">
+        <Card className={`p-6 bg-white border border-slate-100 ${UI_TOKENS.RADIUS_CARD} shadow-md flex flex-col justify-between`}>
           <div className="space-y-4">
             <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center text-amber-600 shadow-sm">
               <Layers size={22} />
@@ -159,7 +159,7 @@ const SystemInstructions: React.FC = () => {
         </Card>
 
         {/* 规则 3 */}
-        <Card className="p-6 bg-white border border-slate-100 rounded-[2rem] shadow-md flex flex-col justify-between">
+        <Card className={`p-6 bg-white border border-slate-100 ${UI_TOKENS.RADIUS_CARD} shadow-md flex flex-col justify-between`}>
           <div className="space-y-4">
             <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm">
               <TrendingUp size={22} />
@@ -185,7 +185,7 @@ const SystemInstructions: React.FC = () => {
         </Card>
 
         {/* 规则 4 */}
-        <Card className="p-6 bg-white border border-slate-100 rounded-[2rem] shadow-md flex flex-col justify-between">
+        <Card className={`p-6 bg-white border border-slate-100 ${UI_TOKENS.RADIUS_CARD} shadow-md flex flex-col justify-between`}>
           <div className="space-y-4">
             <div className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center text-rose-600 shadow-sm">
               <ShieldCheck size={22} />

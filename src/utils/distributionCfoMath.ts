@@ -86,9 +86,7 @@ export function computeCfoKuanMetrics(params: ComputeCfoKuanMetricsParams): CfoK
   const userMonthLogs = (logs || []).filter(
     (l) =>
       l.recordedCollectorId === currentUser.id &&
-      (startDate && endDate 
-        ? isDateInRange(resolveLogBusinessDate(l), startDate, endDate)
-        : resolveLogBusinessMonth(l) === effectiveMonth) &&
+      resolveLogBusinessMonth(l) === effectiveMonth &&
       (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved)
   );
 

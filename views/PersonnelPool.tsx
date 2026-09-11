@@ -1,6 +1,8 @@
 import { UI_TOKENS } from '../src/constants/uiTokens';
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { User, Role, ValueCreationLog, JydyUnit } from '../types';
+import StandardModal from '../src/components/StandardModal';
+import { GUARDIAN_MODAL_TITLE } from '../src/constants/uiLabels';
 import { XLSX, exportWorkbook, buildExcelFilename, exportJsonToExcel } from '../src/utils/excelIo';
 import { Card, Badge } from '../src/components/UI';
 import { UserTableRow } from '../src/components/UserTableRow';
@@ -1160,7 +1162,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       placeholder="搜索姓名/工号/单元..."
-                      className="bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 outline-none w-36 md:w-52 transition-all h-10 placeholder:text-[#94a3b8]"
+                      className="bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-800 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 outline-none w-36 md:w-52 transition-all h-10 placeholder:text-[#94a3b8]"
                     />
                     {searchQuery && (
                       <button 
@@ -1303,7 +1305,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                   const collectors = centerUsers.filter(u => u.category?.includes('专') || u.role === Role.RevenueCollector || u.role === Role.ValueCollector);
                   const costPackage = centerUsers.reduce((acc, u) => acc + (u.salaryPackage || 0), 0);
                   return (
-                    <div key={index} className="bg-white p-6 rounded-[2rem] border border-slate-100 group hover:shadow-md transition-all">
+                    <div key={index} className={`bg-white p-6 ${UI_TOKENS.RADIUS_CARD} border border-slate-100 group hover:shadow-md transition-all`}>
                       <div className="flex items-center justify-between">
                         {editingCenter === center ? (
                           <input 
@@ -1503,7 +1505,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                      value={rbacSearch}
                      onChange={e => setRbacSearch(e.target.value)}
                      placeholder="搜索成员姓名 / 工号 / 职级..." 
-                     className="bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all w-60 h-10 placeholder:text-[#94a3b8]"
+                     className="bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all w-60 h-10 placeholder:text-[#94a3b8]"
                    />
                    <div className="flex items-center space-x-1 bg-slate-200/70 p-1 rounded-xl">
                      {(['全部', '管理与VP', 'NPC与经管员', '采集主体'] as const).map(cat => (
@@ -1625,68 +1627,16 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
         
         {/* 离职办理专供弹窗 */}
         {resigningUser && (
-          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden transform transition-all scale-100">
-              {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 bg-slate-900 text-white">
-                <div className="flex items-center gap-2.5">
-                  <span className="text-xl">🛡️</span>
-                  <h3 className="font-bold text-base tracking-wide">城市守护者 · 离职办理</h3>
-                </div>
-                <button 
-                  onClick={() => setResigningUser(null)}
-                  className="text-slate-400 hover:text-white transition-colors p-1 rounded-md"
-                >
-                  <span className="text-lg">×</span>
-                </button>
-              </div>
-
-              {/* Content */}
-              <div className="p-6 space-y-4">
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                  <p className="text-xs text-slate-500 font-bold mb-1">离职人员</p>
-                  <p className="text-sm font-black text-slate-900">{resigningUser.name} ({resigningUser.id})</p>
-                </div>
-                
-                <div className="space-y-1">
-                  <p className="text-[10px] font-bold text-slate-400 ml-1 uppercase">离职日期</p>
-                  <input 
-                    type="date" 
-                    value={resignDate} 
-                    onChange={(e) => {
-                      const newDate = e.target.value;
-                      setResignDate(newDate);
-                      setHedgeAmount(suggestResignHedgeAmount(resigningUser, newDate));
-                    }}
-                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <p className="text-[10px] font-bold text-slate-400 ml-1 uppercase">非有效工时对冲数值 (实际对冲额)</p>
-                  <input 
-                    type="number" 
-                    value={hedgeAmount} 
-                    onChange={(e) => setHedgeAmount(Math.round(Number(e.target.value)))}
-                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <p className="text-[9px] text-blue-600 font-bold mt-1 ml-1 italic">
-                    {getResignHedgeFormulaDesc(resigningUser, resignDate)}
-                  </p>
-                </div>
-
-                <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
-                  <p className="text-[10px] leading-relaxed text-blue-700 font-medium">
-                    业务说明：<br/>
-                    1. 离职当月整月仍计入单元刚性工资包。<br/>
-                    2. 若离职非月末，建议设置对冲数值以冲减当月刚性。<br/>
-                    3. 对冲数值将生成「非有效工时」单据，经确权后在看板生效。
-                  </p>
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="flex items-center justify-end gap-3 px-6 py-4 bg-slate-50 border-t border-slate-100">
+          <StandardModal
+            isOpen={!!resigningUser}
+            onClose={() => setResigningUser(null)}
+            title={GUARDIAN_MODAL_TITLE}
+            subtitle="离职办理"
+            icon={<span className="text-xl">🛡️</span>}
+            maxWidthClassName="max-w-md"
+            zIndexClassName="z-[120]"
+            footer={
+              <>
                 <button
                   onClick={() => setResigningUser(null)}
                   className="px-6 py-2.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-xl hover:bg-slate-100 transition-colors"
@@ -1699,9 +1649,52 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                 >
                   确认办理
                 </button>
+              </>
+            }
+          >
+            <div className="space-y-4">
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                <p className="text-xs text-slate-500 font-bold mb-1">离职人员</p>
+                <p className="text-sm font-black text-slate-900">{resigningUser.name} ({resigningUser.id})</p>
+              </div>
+              
+              <div className="space-y-1">
+                <p className="text-[10px] font-bold text-slate-400 ml-1 uppercase">离职日期</p>
+                <input 
+                  type="date" 
+                  value={resignDate} 
+                  onChange={(e) => {
+                    const newDate = e.target.value;
+                    setResignDate(newDate);
+                    setHedgeAmount(suggestResignHedgeAmount(resigningUser, newDate));
+                  }}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-[10px] font-bold text-slate-400 ml-1 uppercase">非有效工时对冲数值 (实际对冲额)</p>
+                <input 
+                  type="number" 
+                  value={hedgeAmount} 
+                  onChange={(e) => setHedgeAmount(Math.round(Number(e.target.value)))}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-[9px] text-blue-600 font-bold mt-1 ml-1 italic">
+                  {getResignHedgeFormulaDesc(resigningUser, resignDate)}
+                </p>
+              </div>
+
+              <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
+                <p className="text-[10px] leading-relaxed text-blue-700 font-medium">
+                  业务说明：<br/>
+                  1. 离职当月整月仍计入单元刚性工资包。<br/>
+                  2. 若离职非月末，建议设置对冲数值以冲减当月刚性。<br/>
+                  3. 对冲数值将生成「非有效工时」单据，经确权后在看板生效。
+                </p>
               </div>
             </div>
-          </div>
+          </StandardModal>
         )}
       </div>
   );

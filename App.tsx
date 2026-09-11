@@ -1,6 +1,6 @@
 
 import { safeSetItem, safeGetItem, safeRemoveItem } from './src/utils/safeLocalStorage';
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { isAdminOrNpc, isGlobalReader, isSystemAdmin, parseCenterList } from './src/utils/accessControl';
 import { filterUsersByCenter, filterResourcesByCenter, filterLogsByCenter, filterAuditLogsByCenter, filterTransactionsByCenter, isResourceAssignedToCenter, isCenterManagerUser } from './src/utils/centerScope';
 import { isVirtualDeductionMiningId } from './src/utils/virtualDeduction';
@@ -13,6 +13,7 @@ import ValueCreation from './views/ValueCreation';
 import { calculateHistoricalNetValue, checkUserPermission } from './src/utils/business';
 import { applyConsumptionHedgeToLogs } from './src/utils/consumptionHedge';
 import { isDynamicCostLog } from './src/utils/costCategory';
+import { calculateAuditPendingCounts } from './src/utils/auditFilter';
 import Auditing from './views/Auditing';
 import ResourceManagement from './views/ResourceManagement';
 import Reservoir from './views/Reservoir';
@@ -24,12 +25,12 @@ import DynamicConsumption from './views/DynamicConsumption';
 import MyAccount from './views/MyAccount';
 import SystemInstructions from './views/SystemInstructions';
 import Sidebar from './components/Sidebar';
-import Login from './components/Login';
+import Login from './src/components/Login';
 import ErrorBoundary from './components/ErrorBoundary';
 import ChangePasswordModal from './src/components/ChangePasswordModal';
 import SystemAnnouncement from './src/components/SystemAnnouncement';
-import SiteFooter from './components/SiteFooter';
-import LegalOverlay from './components/LegalOverlay';
+import SiteFooter from './src/components/SiteFooter';
+import LegalOverlay from './src/components/LegalOverlay';
 import { Watermark } from './src/components/Watermark';
 import { Toaster, toast } from 'sonner';
 import { 
@@ -283,25 +284,6 @@ const App: React.FC = () => {
   const [processingLogIds, setProcessingLogIds] = useState<Set<string>>(new Set());
   const [quotaSnapshots, setQuotaSnapshots] = useState<Record<string, QuotaSnapshot>>({});
   const [filterMonth, setFilterMonth] = useState<string>(() => getLocalMonthString());
-
-  const auditBadgeCount = useMemo(() => {
-    if (!currentUser || !checkUserPermission(currentUser, 'audit')) return 0;
-    const pendingRev = logs.filter(l => l.category === RefineCategory.Revenue && l.status === AuditStatus.Pending && l.confirmationType === '收款确权').length;
-    const pendingVal = logs.filter(l => l.category === RefineCategory.Value && l.status === AuditStatus.Pending && (l.confirmationType === '联动确权' || (l.confirmationType as any) === '自动确权')).length;
-    const pendingDtcb = logs.filter(l => isDynamicCostLog(l) && l.status === AuditStatus.Pending).length;
-    return pendingRev + pendingVal + pendingDtcb;
-  }, [logs, currentUser]);
-
-  const hasAutoJumpedRef = React.useRef(false);
-  useEffect(() => {
-    if (currentUser && !hasAutoJumpedRef.current) {
-      hasAutoJumpedRef.current = true;
-      const postLoginReturn = localStorage.getItem('shihe_post_login_return');
-      if (!postLoginReturn && auditBadgeCount > 0 && checkUserPermission(currentUser, 'audit')) {
-        setActiveTab('audit');
-      }
-    }
-  }, [currentUser, auditBadgeCount]);
 
   const lastSyncedFingerprintRef = React.useRef<string>('');
   const isAutoSyncPausedRef = React.useRef<boolean>(false);
@@ -1145,6 +1127,29 @@ const App: React.FC = () => {
     return filterAuditLogsByCenter(logs, miningResources, currentUser, managedUsers);
   }, [logs, miningResources, currentUser, managedUsers]);
 
+  const auditPendingCounts = useMemo(() => {
+    if (!currentUser) return { pendingRevenueCount: 0, pendingConsumptionCount: 0, pendingLinkedCount: 0, totalPendingCount: 0 };
+    return calculateAuditPendingCounts(auditLogs, currentUser);
+  }, [auditLogs, currentUser]);
+
+  const hasAutoNavigatedRef = React.useRef(false);
+
+  useEffect(() => {
+    if (workspaceLoaded && currentUser && !hasAutoNavigatedRef.current) {
+      hasAutoNavigatedRef.current = true;
+      const redirectKey = safeGetItem('shihe_redirect_tab') || sessionStorage.getItem('shihe_redirect_tab');
+      if (redirectKey && checkUserPermission(currentUser, redirectKey)) {
+        setActiveTab(redirectKey);
+        safeRemoveItem('shihe_redirect_tab');
+        sessionStorage.removeItem('shihe_redirect_tab');
+      } else {
+        if (auditPendingCounts.totalPendingCount > 0 && checkUserPermission(currentUser, 'audit')) {
+          setActiveTab('audit');
+        }
+      }
+    }
+  }, [workspaceLoaded, currentUser, auditPendingCounts.totalPendingCount]);
+
   const filteredTransactions = useMemo(() => {
     return filterTransactionsByCenter(transactions, currentUser, managedUsers);
   }, [transactions, currentUser, managedUsers]);
@@ -1394,6 +1399,7 @@ const App: React.FC = () => {
   if (!currentUser) {
     return (
       <>
+        <Toaster position="top-center" richColors />
         <Watermark user={null} fallbackText="内部资料，请勿外传" fontSize={16} rotate={-30} opacity={0.12} />
         <Login onLogin={handleLoginSuccess} onAuthenticate={onAuthenticate} />
       </>
@@ -1419,7 +1425,7 @@ const App: React.FC = () => {
         <Sidebar 
           user={currentUser} 
           activeTab={activeTab} 
-          auditBadgeCount={auditBadgeCount}
+          auditPendingBadgeCount={auditPendingCounts.totalPendingCount}
           setActiveTab={(tab) => {
             setActiveTab(tab);
             setIsMobileMenuOpen(false);

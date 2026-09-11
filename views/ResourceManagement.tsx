@@ -25,7 +25,7 @@ interface FailedImportRow {
 }
 import { formatProjectStatusLabel, formatRefineTypeLabel } from '../src/utils/statusDisplay';
 import { TERMINOLOGY } from '../src/constants/terminology';
-import { UI_LABELS } from '../src/constants/uiLabels';
+import { UI_LABELS, GUARDIAN_MODAL_TITLE } from '../src/constants/uiLabels';
 import { UI_TOKENS } from '../src/constants/uiTokens';
 
 interface ResourceManagementProps {
@@ -690,7 +690,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                   value={searchMiningId}
                   onChange={(e) => setSearchMiningId(e.target.value)}
                   placeholder="输入矿山编号，例如 LH26AP00001"
-                  className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all h-10 placeholder:text-[#94a3b8]"
+                  className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all h-10 placeholder:text-[#94a3b8]"
                 />
                 {searchMiningId && (
                   <button
@@ -708,14 +708,14 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
               </div>
               <button
                 type="submit"
-                className="px-6 h-10 bg-slate-900 hover:bg-blue-600 active:scale-95 text-white font-black text-xs uppercase tracking-[2px] rounded-[4px] shadow-sm transition-all shrink-0 cursor-pointer flex items-center justify-center"
+                className="px-6 h-10 bg-slate-900 hover:bg-blue-600 active:scale-95 text-white font-black text-xs uppercase tracking-[2px] rounded-md shadow-sm transition-all shrink-0 cursor-pointer flex items-center justify-center"
               >
                 查 询
               </button>
             </form>
 
             {/* 说明文字 */}
-            <div className="bg-[#fafbfc] border-l-2 border-[#1a56db] p-3 rounded-[4px]">
+            <div className="bg-[#fafbfc] border-l-2 border-blue-600 p-3 rounded-md">
               <p className="text-[12px] text-slate-600 leading-relaxed">
                 输入矿山编号后，将穿透查询以下四块台账：主档、价值创造（jzcz）、动态消耗（dtcb）与内部交易（nbjy）。
               </p>
@@ -725,7 +725,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
             <div className="border-t border-slate-200 pt-1">
               <div
                 onClick={() => setIsCustomQueryOpen(!isCustomQueryOpen)}
-                className="flex items-center justify-between cursor-pointer py-2.5 px-1 text-[13px] font-medium text-slate-700 hover:text-[#1a56db] transition-colors select-none"
+                className="flex items-center justify-between cursor-pointer py-2.5 px-1 text-[13px] font-medium text-slate-700 hover:text-blue-600 transition-colors select-none"
               >
                 <div className="flex items-center space-x-3">
                   <span>自定义查询</span>
@@ -733,7 +733,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                     <button
                       type="button"
                       onClick={handleApplyCustomQuery}
-                      className="px-3 py-0.5 bg-[#1a56db] hover:bg-blue-600 active:scale-95 text-white font-bold text-[11px] rounded shadow-sm transition-all cursor-pointer flex items-center justify-center whitespace-nowrap"
+                      className="px-3 py-0.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-[11px] rounded shadow-sm transition-all cursor-pointer flex items-center justify-center whitespace-nowrap"
                     >
                       查询
                     </button>
@@ -752,7 +752,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                       type="month"
                       value={businessMonth}
                       onChange={(e) => setBusinessMonth(e.target.value)}
-                      className="bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-mono text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all text-right cursor-pointer h-10"
+                      className="bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-mono text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all text-right cursor-pointer h-10"
                     />
                   </div>
                   <div className="flex items-center justify-between py-2 border-b border-dashed border-slate-200">
@@ -762,7 +762,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                       value={selectedUnitFilter}
                       onChange={(e) => setSelectedUnitFilter(e.target.value)}
                       placeholder="全部"
-                      className="bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all placeholder:text-[#94a3b8] w-48 text-right h-10"
+                      className="bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all placeholder:text-[#94a3b8] w-48 text-right h-10"
                     />
                   </div>
                   <div className="flex items-center justify-between py-2">
@@ -772,7 +772,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                       value={customStatusFilter}
                       onChange={(e) => setCustomStatusFilter(e.target.value)}
                       placeholder="全部"
-                      className="bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all placeholder:text-[#94a3b8] w-48 text-right h-10"
+                      className="bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all placeholder:text-[#94a3b8] w-48 text-right h-10"
                     />
                   </div>
                 </div>
@@ -956,14 +956,14 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                   value={newMiningId}
                   onChange={(e) => setNewMiningId(e.target.value)}
                   disabled={!!editingId}
-                  className="flex-1 min-w-0 w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 font-bold text-slate-800 transition-all placeholder:text-[#94a3b8] disabled:opacity-50 text-[13px] h-10"
+                  className="flex-1 min-w-0 w-full bg-white border border-slate-200 rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-800 transition-all placeholder:text-[#94a3b8] disabled:opacity-50 text-[13px] h-10"
                   placeholder="自动匹配矿山编号"
                   required
                 />
                 <button
                   type="button"
                   onClick={handleDownloadTemplate}
-                  className="px-3 bg-slate-50 text-slate-600 border border-slate-200 rounded-[4px] text-[11px] font-black hover:bg-slate-100 transition-all flex items-center shadow-xs whitespace-nowrap h-10 shrink-0 cursor-pointer ml-2"
+                  className="px-3 bg-slate-50 text-slate-600 border border-slate-200 rounded-md text-[11px] font-black hover:bg-slate-100 transition-all flex items-center shadow-xs whitespace-nowrap h-10 shrink-0 cursor-pointer ml-2"
                   title="下载导入模板"
                 >
                   📄 模板
@@ -972,7 +972,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                   type="button"
                   onClick={() => document.getElementById('excel-import-input')?.click()}
                   disabled={importLoading || isPersistingImport || isImportConfirmPending || isImportResultModalOpen}
-                  className="px-3 bg-blue-50 text-blue-600 border border-blue-200 rounded-[4px] text-[11px] font-black hover:bg-blue-100 transition-all flex items-center shadow-xs whitespace-nowrap h-10 shrink-0 cursor-pointer ml-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-3 bg-blue-50 text-blue-600 border border-blue-200 rounded-md text-[11px] font-black hover:bg-blue-100 transition-all flex items-center shadow-xs whitespace-nowrap h-10 shrink-0 cursor-pointer ml-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   title="批量导入矿山资源"
                 >
                   {importLoading ? '解析中...' : isPersistingImport ? '落库中...' : '📥 导入'}
@@ -988,7 +988,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value as '100%' | '据实')}
-                  className="w-20 shrink-0 bg-white border border-[#b8d0f7] rounded-[4px] px-2 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 font-bold text-slate-800 transition-all cursor-pointer text-[13px] h-10"
+                  className="w-20 shrink-0 bg-white border border-slate-200 rounded-md px-2 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-800 transition-all cursor-pointer text-[13px] h-10"
                   required
                 >
                   <option value="100%">100%</option>
@@ -1005,7 +1005,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                 type="number"
                 value={revenueCapacity}
                 onChange={(e) => setRevenueCapacity(Number(e.target.value))}
-                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 font-bold text-slate-900 font-mono transition-all text-[13px] h-10"
+                className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-900 font-mono transition-all text-[13px] h-10"
                 min="0"
                 required
               />
@@ -1019,7 +1019,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                 type="number"
                 value={valueCapacity}
                 onChange={(e) => setValueCapacity(Number(e.target.value))}
-                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 font-bold text-slate-900 font-mono transition-all text-[13px] h-10"
+                className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-900 font-mono transition-all text-[13px] h-10"
                 min="0"
                 required
               />
@@ -1030,7 +1030,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
               <select
                 value={assigneeRevenue}
                 onChange={(e) => setAssigneeRevenue(e.target.value)}
-                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 font-bold text-slate-800 transition-all cursor-pointer text-[13px] h-10"
+                className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-800 transition-all cursor-pointer text-[13px] h-10"
                 required
               >
                 <option value="">选择...</option>
@@ -1045,7 +1045,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
               <select
                 value={assigneeValue}
                 onChange={(e) => setAssigneeValue(e.target.value)}
-                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 font-bold text-slate-800 transition-all cursor-pointer text-[13px] h-10"
+                className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-800 transition-all cursor-pointer text-[13px] h-10"
                 required
               >
                 <option value="">选择...</option>
@@ -1075,7 +1075,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
               };
 
               return selectedType ? (
-                <div className="space-y-4 bg-slate-900/5 p-6 rounded-[2rem] border border-slate-200/60 animate-in slide-in-from-bottom-3 duration-300 col-span-1 sm:col-span-2 lg:col-span-12">
+                <div className={`space-y-4 bg-slate-900/5 p-6 ${UI_TOKENS.RADIUS_PANEL} border border-slate-200/60 animate-in slide-in-from-bottom-3 duration-300 col-span-1 sm:col-span-2 lg:col-span-12`}>
                   <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
                     <div className="flex items-center space-x-2">
                       <span className="text-xs font-black text-slate-800">🎯 {selectedType} 专属核算配方</span>
@@ -1319,7 +1319,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                   <select
                     value={selectedUnitFilter}
                     onChange={(e) => setSelectedUnitFilter(e.target.value)}
-                    className="bg-white border border-[#b8d0f7] text-slate-800 text-[13px] font-bold rounded-[4px] px-3 py-1.5 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all cursor-pointer h-10"
+                    className="bg-white border border-slate-200 text-slate-800 text-[13px] font-bold rounded-md px-3 py-1.5 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all cursor-pointer h-10"
                   >
                     <option value="">默认 ({user.center || '无'})</option>
                     {units.map(u => (
@@ -1363,7 +1363,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
               const valPctText = (((val.confirmed + val.pending + val.mined) / valTotalCap) * 100).toFixed(1);
 
               return (
-                <div key={res.id} className={`bg-slate-50 border border-slate-100 rounded-[2rem] md:${UI_TOKENS.RADIUS_PANEL} p-6 md:p-8 hover:bg-white hover:shadow-2xl transition-all group relative ${res.isPaused ? 'opacity-75 grayscale-[0.5]' : ''}`}>
+                <div key={res.id} className={`bg-slate-50 border border-slate-100 ${UI_TOKENS.RADIUS_PANEL} p-6 md:p-8 hover:bg-white hover:shadow-2xl transition-all group relative ${res.isPaused ? 'opacity-75 grayscale-[0.5]' : ''}`}>
                   {res.isPaused && (
                     <div className="absolute top-4 left-4 z-10">
                       <Badge variant="error" className="animate-pulse shadow-lg">暂停提炼 (熔断)</Badge>
@@ -1535,23 +1535,26 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       <StandardModal
         isOpen={isImportResultModalOpen}
         onClose={() => setIsImportResultModalOpen(false)}
-        title="批量导入解析结果"
+        title={GUARDIAN_MODAL_TITLE}
         subtitle={
-          <div className="flex items-center gap-2 mt-1 text-xs">
-            <span className="font-medium text-slate-600">总数据: {pendingImportResources.length + failedImportRows.length} 条</span>
-            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-200">
-              校验通过 {pendingImportResources.length} 条
-            </span>
-            {failedImportRows.length > 0 && (
-              <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 font-bold border border-rose-200">
-                失败 {failedImportRows.length} 条
+          <div className="space-y-1">
+            <div className="text-xs font-bold text-slate-700">批量导入解析结果</div>
+            <div className="flex items-center gap-2 mt-0.5 text-xs">
+              <span className="font-medium text-slate-600">总数据: {pendingImportResources.length + failedImportRows.length} 条</span>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-200">
+                校验通过 {pendingImportResources.length} 条
               </span>
-            )}
-            {failedImportRows.some(r => r.reason.includes('重复')) && (
-              <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-bold border border-amber-200">
-                重复 {failedImportRows.filter(r => r.reason.includes('重复')).length} 条
-              </span>
-            )}
+              {failedImportRows.length > 0 && (
+                <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 font-bold border border-rose-200">
+                  失败 {failedImportRows.length} 条
+                </span>
+              )}
+              {failedImportRows.some(r => r.reason.includes('重复')) && (
+                <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-bold border border-amber-200">
+                  重复 {failedImportRows.filter(r => r.reason.includes('重复')).length} 条
+                </span>
+              )}
+            </div>
           </div>
         }
         maxWidthClassName="max-w-3xl"

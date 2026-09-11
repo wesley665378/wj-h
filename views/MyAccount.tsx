@@ -122,6 +122,19 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
     return getLocalMonthString();
   }, [selectedMonth, startDate]);
 
+  // 当月有效月份 (effectiveMonth) 的包汇总计算（用于 CFO 当月结余、额度与历史欠产计算，禁止跨年/多月污染当月主卡片）
+  const effectiveMonthCollectionPackage = useMemo(() => {
+    return myUnifiedLogs
+      .filter(l => l.resolvedMonth === effectiveMonth && l.category === RefineCategory.Revenue && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved))
+      .reduce((sum, l) => sum + l.calculatedNetValue, 0);
+  }, [myUnifiedLogs, effectiveMonth]);
+
+  const effectiveMonthProductionPackage = useMemo(() => {
+    return myUnifiedLogs
+      .filter(l => l.resolvedMonth === effectiveMonth && l.category === RefineCategory.Value && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved))
+      .reduce((sum, l) => sum + l.calculatedNetValue, 0);
+  }, [myUnifiedLogs, effectiveMonth]);
+
   // 经营月度看板指标（始终按 effectiveMonth）
   const monthMetrics = useMemo(() => {
     return aggregateUserMonthMetrics(logs, currentUser, effectiveMonth, resources, users, [AuditStatus.Confirmed, AuditStatus.Approved]);
@@ -133,15 +146,13 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
     return computeCfoKuanMetrics({
       currentUser,
       effectiveMonth,
-      collectionPackage,
-      productionPackage,
+      collectionPackage: effectiveMonthCollectionPackage,
+      productionPackage: effectiveMonthProductionPackage,
       logs,
       resources,
       users,
-      startDate: startDate || undefined,
-      endDate: endDate || undefined,
     });
-  }, [currentUser, effectiveMonth, collectionPackage, productionPackage, logs, resources, users, startDate, endDate]);
+  }, [currentUser, effectiveMonth, effectiveMonthCollectionPackage, effectiveMonthProductionPackage, logs, resources, users]);
 
   // 当月结余 rawSurplus (可负，禁止 floor 成 0；与顶部收款包同源)
   const currentBalance = cfoMetrics.rawSurplus;
@@ -420,9 +431,9 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
                 formatAmount(historicalDebt)
               )}
             </h3>
-            <div className="text-[10px] text-slate-500 mt-1.5 flex items-center gap-1 truncate" title="1~M-1月累计欠产滚动（每年1月清零）">
+            <div className="text-[10px] text-slate-500 mt-1.5 flex items-center gap-1 truncate" title="当年 1~M-1 月累计欠产滚动（每年 1 月清零，不结转上年度）">
               <span className="font-semibold text-rose-700">口径:</span>
-              <span className="truncate">1~M-1月累计欠产滚动</span>
+              <span className="truncate">当年 1~M-1 累计欠产，每年 1 月清零</span>
             </div>
           </div>
         </div>
@@ -526,7 +537,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               <select
                 value={filterType}
                 onChange={(e) => setFilterType(e.target.value)}
-                className="w-full bg-white border border-[#b8d0f7] text-[13px] text-slate-800 font-bold rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 cursor-pointer h-10 transition-all"
+                className="w-full bg-white border border-slate-200 text-[13px] text-slate-800 font-bold rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 cursor-pointer h-10 transition-all"
               >
                 <option value="all">全部类别</option>
                 <option value="revenue">收款</option>
@@ -540,7 +551,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value)}
-                className="w-full bg-white border border-[#b8d0f7] text-[13px] text-slate-800 font-bold rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 cursor-pointer h-10 transition-all"
+                className="w-full bg-white border border-slate-200 text-[13px] text-slate-800 font-bold rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 cursor-pointer h-10 transition-all"
               >
                 <option value="all">全部状态</option>
                 <option value={AuditStatus.Confirmed}>{AuditStatus.Confirmed}</option>
@@ -560,7 +571,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
                   placeholder="ID / 名称..."
                   value={filterMiningId}
                   onChange={(e) => setFilterMiningId(e.target.value)}
-                  className="w-full bg-white border border-[#b8d0f7] text-[13px] font-bold rounded-[4px] pl-8 pr-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 text-slate-800 h-10 transition-all placeholder:text-[#94a3b8]"
+                  className="w-full bg-white border border-slate-200 text-[13px] font-bold rounded-md pl-8 pr-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 text-slate-800 h-10 transition-all placeholder:text-[#94a3b8]"
                 />
               </div>
             </div>
@@ -571,7 +582,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               <select
                 value={filterDirection}
                 onChange={(e) => setFilterDirection(e.target.value)}
-                className="w-full bg-white border border-[#b8d0f7] text-[13px] text-slate-800 font-bold rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 cursor-pointer h-10 transition-all"
+                className="w-full bg-white border border-slate-200 text-[13px] text-slate-800 font-bold rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 cursor-pointer h-10 transition-all"
               >
                 <option value="all">全部方向</option>
                 <option value="income">收入</option>
@@ -585,7 +596,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
               <select
                 value={filterCostCategory}
                 onChange={(e) => setFilterCostCategory(e.target.value)}
-                className="w-full bg-white border border-[#b8d0f7] text-[13px] text-slate-800 font-bold rounded-[4px] px-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 cursor-pointer h-10 transition-all"
+                className="w-full bg-white border border-slate-200 text-[13px] text-slate-800 font-bold rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 cursor-pointer h-10 transition-all"
               >
                 <option value="all">全部成本类</option>
                 <option value="A">A类 · 款专报销</option>
@@ -607,12 +618,12 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
                     placeholder="单号模糊匹配..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full bg-white border border-[#b8d0f7] text-[13px] font-bold rounded-[4px] pl-8 pr-3 py-2 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 text-slate-800 h-10 transition-all placeholder:text-[#94a3b8]"
+                    className="w-full bg-white border border-slate-200 text-[13px] font-bold rounded-md pl-8 pr-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 text-slate-800 h-10 transition-all placeholder:text-[#94a3b8]"
                   />
                 </div>
                 <button
                   onClick={handleClearFilters}
-                  className="px-3 bg-white border border-[#b8d0f7] text-slate-500 hover:text-[#1a56db] hover:border-[#1a56db] rounded-[4px] transition-all cursor-pointer h-10 flex items-center justify-center"
+                  className="px-3 bg-white border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-600 rounded-md transition-all cursor-pointer h-10 flex items-center justify-center"
                   title="一键清除筛选"
                 >
                   <RefreshCw className="w-4 h-4" />

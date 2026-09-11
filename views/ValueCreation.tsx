@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useDedupe } from '../src/hooks/useDedupe';
 import { useCircuitBreaker } from '../src/hooks/useCircuitBreaker';
-import { TIER_COEFFICIENTS, USER_LIST, UI_LABELS } from '@/constants';
+import { TIER_COEFFICIENTS, USER_LIST, UI_LABELS, GUARDIAN_MODAL_TITLE } from '@/constants';
 import { 
   User, MiningResource, ValueCreationLog, RefineCategory, AuditStatus, Role, RefineType,
   InternalTransaction, TransactionStatus, TransactionType, CircuitBreaker, QuotaSnapshot,
@@ -1817,7 +1817,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       }
     } catch (err) {
       if (toast) toast.error('解析文件失败：' + (err as Error).message);
-      else alert('解析文件失败：' + (err as Error).message);
+      else showAlert('解析文件失败：' + (err as Error).message);
     } finally {
       setImportLoading(false);
     }
@@ -1970,7 +1970,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     setSelectedCollectors([...selectedCollectors, { id, amount: 0, rawAmount: 0 }]);
                   }
                 }} 
-                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all font-bold text-slate-800 h-10 cursor-pointer" 
+                className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all font-bold text-slate-800 h-10 cursor-pointer" 
                 required={selectedCollectors.length === 0}
               >
                 <option value="">请选择采集主体</option>
@@ -2017,11 +2017,11 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 )}
               </label>
               {isCategoryLocked ? (
-                <div className="w-full bg-slate-50 border border-slate-200 rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-500 h-10 flex items-center shadow-inner">
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-500 h-10 flex items-center shadow-inner">
                   {selectedCategory === RefineCategory.Revenue ? "收款类" : "产值类"}
                 </div>
               ) : (
-                <div className="flex border border-[#b8d0f7] rounded-[4px] overflow-hidden h-10 shadow-xs">
+                <div className="flex border border-slate-200 rounded-md overflow-hidden h-10 shadow-xs">
                   <button
                     type="button"
                     onClick={() => setSelectedCategory(RefineCategory.Revenue)}
@@ -2060,7 +2060,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     setSelectedMiningId(e.target.value);
                     setMiningSearchTerm('');
                   }} 
-                  className={`w-full min-w-48 bg-white border ${availableResources.length === 0 ? 'border-rose-300' : 'border-[#b8d0f7]'} rounded-[4px] px-3 py-2 text-[13px] outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all font-bold text-slate-800 h-10 cursor-pointer`}
+                  className={`w-full min-w-48 bg-white border ${availableResources.length === 0 ? 'border-rose-300' : 'border-slate-200'} rounded-md px-3 py-2 text-[13px] outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all font-bold text-slate-800 h-10 cursor-pointer`}
                   required
                 >
                   <option value="">{availableResources.length === 0 ? '暂无可用矿山' : '请选择矿山编号...'}</option>
@@ -2127,7 +2127,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                         }
                       }
                     }}
-                    className="flex-1 w-full min-w-[120px] bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all font-bold text-slate-800 h-10"
+                    className="flex-1 w-full min-w-[120px] bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all font-bold text-slate-800 h-10"
                   />
                   <button 
                     type="button"
@@ -2143,7 +2143,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                         toast.error('未找到对应矿山编号');
                       }
                     }}
-                    className="h-10 px-3 bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 rounded-[4px] text-[12px] font-bold transition-colors whitespace-nowrap flex items-center shrink-0"
+                    className="h-10 px-3 bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 rounded-md text-[12px] font-bold transition-colors whitespace-nowrap flex items-center shrink-0"
                   >
                     搜索
                   </button>
@@ -2164,7 +2164,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                   setSelectedDate(date);
                   if (date) setSelectedMonth(date.slice(0, 7));
                 }} 
-                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all font-bold text-slate-800 h-10 cursor-pointer" 
+                className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all font-bold text-slate-800 h-10 cursor-pointer" 
                 required
               />
             </div>
@@ -2181,12 +2181,12 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                   )
                 )}
               </div>
-              <div className={`w-full border rounded-[4px] px-3 py-2 text-[13px] flex items-center h-10 font-bold ${
+              <div className={`w-full border rounded-md px-3 py-2 text-[13px] flex items-center h-10 font-bold ${
                 !selectedResource 
-                  ? 'bg-slate-50 border-[#b8d0f7] text-slate-400 font-normal'
+                  ? 'bg-slate-50 border-slate-200 text-slate-400 font-normal'
                   : hasCustomFactor 
                     ? 'bg-emerald-50 border-emerald-200 text-emerald-700' 
-                    : 'bg-slate-50 border-[#b8d0f7] text-slate-700'
+                    : 'bg-slate-50 border-slate-200 text-slate-700'
               }`}>
                 {selectedResource ? (
                   <span>{selectedTier || 'T1'}</span>
@@ -2199,7 +2199,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             {/* 第 3 行 - Col 3: 提炼类型 (只读) */}
             <div className="flex flex-col space-y-1.5 col-span-1 sm:col-span-1 lg:col-span-1">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">提炼类型</label>
-              <div className="w-full bg-slate-50 border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] flex items-center h-10 font-bold text-slate-700">
+              <div className="w-full bg-slate-50 border border-slate-200 rounded-md px-3 py-2 text-[13px] flex items-center h-10 font-bold text-slate-700">
                 {selectedResource ? (
                   <span>{selectedRefineType}</span>
                 ) : (
@@ -2220,7 +2220,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                   </span>
                 )}
               </div>
-              <div className="w-full bg-slate-50 border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] flex items-center h-10 shadow-xs">
+              <div className="w-full bg-slate-50 border border-slate-200 rounded-md px-3 py-2 text-[13px] flex items-center h-10 shadow-xs">
                 {selectedResource ? (() => {
                   const currentUnitForVC = selectedOperator?.center || user.center || '';
                   const et = getExecutionType(selectedResource, currentUnitForVC);
@@ -2992,23 +2992,26 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       <StandardModal
         isOpen={isImportResultModalOpen}
         onClose={() => setIsImportResultModalOpen(false)}
-        title="批量导入解析结果"
+        title={GUARDIAN_MODAL_TITLE}
         subtitle={
-          <div className="flex items-center gap-2 mt-1 text-xs">
-            <span className="font-medium text-slate-600">总数据: {pendingImportLogs.length + failedImportRows.length} 条</span>
-            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-200">
-              校验通过 {pendingImportLogs.length} 条
-            </span>
-            {failedImportRows.length > 0 && (
-              <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 font-bold border border-rose-200">
-                失败 {failedImportRows.length} 条
+          <div className="space-y-1">
+            <div className="text-xs font-bold text-slate-700">批量导入解析结果</div>
+            <div className="flex items-center gap-2 mt-0.5 text-xs">
+              <span className="font-medium text-slate-600">总数据: {pendingImportLogs.length + failedImportRows.length} 条</span>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-200">
+                校验通过 {pendingImportLogs.length} 条
               </span>
-            )}
-            {failedImportRows.some(r => r.reason === '重复记录') && (
-              <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-bold border border-amber-200">
-                重复 {failedImportRows.filter(r => r.reason === '重复记录').length} 条
-              </span>
-            )}
+              {failedImportRows.length > 0 && (
+                <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 font-bold border border-rose-200">
+                  失败 {failedImportRows.length} 条
+                </span>
+              )}
+              {failedImportRows.some(r => r.reason === '重复记录') && (
+                <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-bold border border-amber-200">
+                  重复 {failedImportRows.filter(r => r.reason === '重复记录').length} 条
+                </span>
+              )}
+            </div>
           </div>
         }
         maxWidthClassName="max-w-3xl"

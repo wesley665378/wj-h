@@ -5,6 +5,7 @@ import { useCostPrivacy } from '../hooks/useCostPrivacy';
 import { CostPrivacyToggle } from './CostPrivacyToggle';
 import { formatMoney } from '../utils/formatMoney';
 import { Card } from './UI';
+import { UI_TOKENS } from '../constants/uiTokens';
 import { ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 
 export interface BusinessUnitProfitRankingTableProps {
@@ -209,7 +210,7 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
   };
 
   return (
-    <Card className="rounded-[2.5rem] bg-white border border-slate-100 shadow-xl overflow-hidden transition-all duration-300">
+    <Card className={`${UI_TOKENS.RADIUS_PANEL} bg-white border border-slate-100 shadow-xl overflow-hidden transition-all duration-300`}>
       {/* 头部（折叠/展开控制） */}
       <div 
         onClick={() => setIsExpanded(prev => !prev)}
@@ -249,7 +250,7 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
           <select
             value={filterManagerType}
             onChange={e => setFilterManagerType(e.target.value)}
-            className="px-3 py-2 text-[12px] bg-white border border-[#b8d0f7] rounded-[4px] font-bold text-slate-700 outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 cursor-pointer h-9"
+            className="px-3 py-2 text-[12px] bg-white border border-slate-200 rounded-md font-bold text-slate-700 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 cursor-pointer h-9"
           >
             <option value="全部">全部经管分类</option>
             <option value="经管员高款专">经管员高款专</option>

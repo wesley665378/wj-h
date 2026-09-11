@@ -646,7 +646,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                   value={deductionOperatorId}
                   onChange={(e) => setDeductionOperatorId(e.target.value)}
                   disabled={!canSelectOthers}
-                  className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer h-10 placeholder:text-[#94a3b8]"
+                  className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer h-10 placeholder:text-[#94a3b8]"
                   required
                 >
                   {(() => {
@@ -675,7 +675,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                 <select
                   value={deductionCollectorId}
                   onChange={(e) => setDeductionCollectorId(e.target.value)}
-                  className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all cursor-pointer h-10 placeholder:text-[#94a3b8]"
+                  className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all cursor-pointer h-10 placeholder:text-[#94a3b8]"
                   required
                 >
                   <option value="">选择采集主体...</option>
@@ -700,7 +700,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                     setBusinessDate(date);
                     if (date) setBusinessMonth(date.slice(0, 7));
                   }}
-                  className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-mono font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all cursor-pointer h-10"
+                  className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-mono font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all cursor-pointer h-10"
                   required
                 />
               </div>
@@ -710,7 +710,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
                   冲抵矿山编号
                 </label>
-                <div className="flex items-center bg-rose-50 border border-rose-200 rounded-[4px] px-3 py-2 h-10 text-[13px] font-mono font-bold text-rose-700">
+                <div className="flex items-center bg-rose-50 border border-rose-200 rounded-md px-3 py-2 h-10 text-[13px] font-mono font-bold text-rose-700">
                   FXDC (非有效工时对冲)
                 </div>
               </div>
@@ -727,7 +727,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                     type="number"
                     value={deductionAmount || ''}
                     onChange={(e) => setDeductionAmount(Number(e.target.value))}
-                    className="w-full text-right text-base font-bold font-mono [font-variant-numeric:tabular-nums] text-rose-600 bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 h-10 focus:outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/10 transition-all placeholder:text-[#94a3b8]"
+                    className="w-full text-right text-base font-bold font-mono [font-variant-numeric:tabular-nums] text-rose-600 bg-white border border-slate-200 rounded-md px-3 py-2 h-10 focus:outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/10 transition-all placeholder:text-[#94a3b8]"
                     placeholder="0"
                     min="1"
                     required
@@ -759,7 +759,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                 value={selectedOperatorId}
                 onChange={(e) => setSelectedOperatorId(e.target.value)}
                 disabled={!canSelectOthers}
-                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer h-10 placeholder:text-[#94a3b8]"
+                className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer h-10 placeholder:text-[#94a3b8]"
                 required
               >
                 {(() => {
@@ -789,7 +789,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                 value={recordedCollectorId}
                 onChange={(e) => setRecordedCollectorId(e.target.value)}
                 disabled={costCategory === 'B' && valueConsumptionMode === 'B2'}
-                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer h-10 placeholder:text-[#94a3b8]"
+                className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer h-10 placeholder:text-[#94a3b8]"
                 required={!(costCategory === 'B' && valueConsumptionMode === 'B2')}
               >
                 <option value="">选择采集主体...</option>
@@ -822,7 +822,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                   setBusinessDate(date);
                   if (date) setBusinessMonth(date.slice(0, 7));
                 }}
-                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-mono font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all cursor-pointer h-10 placeholder:text-[#94a3b8]"
+                className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-mono font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all cursor-pointer h-10 placeholder:text-[#94a3b8]"
                 required
               />
             </div>
@@ -832,7 +832,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
                 视角
               </label>
-              <div className="flex items-center bg-slate-50 border border-[#b8d0f7] rounded-[4px] px-3 py-2 h-10 text-[13px] font-bold text-slate-800">
+              <div className="flex items-center bg-slate-50 border border-slate-200 rounded-md px-3 py-2 h-10 text-[13px] font-bold text-slate-800">
                 {selectedOperator?.center || user.center || '无'}
               </div>
             </div>
@@ -846,7 +846,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                 value={costCategory === 'D' ? '' : selectedMiningId}
                 onChange={(e) => setSelectedMiningId(e.target.value)}
                 disabled={costCategory === 'D'}
-                className="w-full bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer h-10 placeholder:text-[#94a3b8]"
+                className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer h-10 placeholder:text-[#94a3b8]"
                 required={costCategory !== 'D'}
               >
                 <option value="">{costCategory === 'D' ? 'D类无项目列支（经营单元公摊）' : '匹配 矿山编号...'}</option>
@@ -859,7 +859,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
                 执行类型
               </label>
-              <div className="flex items-center bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 h-10">
+              <div className="flex items-center bg-white border border-slate-200 rounded-md px-3 py-2 h-10">
                 {selectedResource ? (() => {
                   const currentUnitForDC = selectedOperator?.center || user.center || '';
                   const et = getExecutionType(selectedResource, currentUnitForDC);
@@ -883,9 +883,9 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
                 矿山状态
               </label>
-              <div className="flex items-center bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 h-10">
+              <div className="flex items-center bg-white border border-slate-200 rounded-md px-3 py-2 h-10">
                 {costCategory === 'D' ? (
-                  <span className="text-[#1a56db] font-bold text-xs">经营单元公摊 (无需矿山)</span>
+                  <span className="text-blue-600 font-bold text-xs">经营单元公摊 (无需矿山)</span>
                 ) : selectedResource ? (
                   <ProjectStatusBadge resource={selectedResource} />
                 ) : (
@@ -912,17 +912,17 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                 }}
                 className={`p-3 rounded-sm cursor-pointer transition-all flex flex-col items-center justify-between text-center space-y-1.5 border ${
                   costCategory === 'A'
-                    ? 'bg-blue-50/60 border-[#1a56db] ring-1 ring-[#1a56db] shadow-xs'
-                    : 'bg-white border-[#b8d0f7] hover:bg-slate-50'
+                    ? 'bg-blue-50/60 border-blue-600 ring-1 ring-blue-600 shadow-xs'
+                    : 'bg-white border-slate-200 hover:bg-slate-50'
                 }`}
               >
-                <div className={`text-sm font-black ${costCategory === 'A' ? 'text-[#1a56db]' : 'text-slate-800'}`}>
+                <div className={`text-sm font-black ${costCategory === 'A' ? 'text-blue-600' : 'text-slate-800'}`}>
                   A
                 </div>
                 <div className="text-[11px] text-slate-400 font-medium">
                   款专类报销
                 </div>
-                <div className={`w-full font-mono [font-variant-numeric:tabular-nums] text-xs ${costCategory === 'A' ? 'font-black text-[#1a56db]' : 'font-bold text-slate-700'}`}>
+                <div className={`w-full font-mono [font-variant-numeric:tabular-nums] text-xs ${costCategory === 'A' ? 'font-black text-blue-600' : 'font-bold text-slate-700'}`}>
                   {maskMoney(costCategory === 'A' ? Math.round(dynamicCost || 0) : 0)}
                 </div>
               </div>
@@ -936,17 +936,17 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                 }}
                 className={`p-3 rounded-sm cursor-pointer transition-all flex flex-col items-center justify-between text-center space-y-1.5 border ${
                   costCategory === 'B' && valueConsumptionMode === 'B1'
-                    ? 'bg-blue-50/60 border-[#1a56db] ring-1 ring-[#1a56db] shadow-xs'
-                    : 'bg-white border-[#b8d0f7] hover:bg-slate-50'
+                    ? 'bg-blue-50/60 border-blue-600 ring-1 ring-blue-600 shadow-xs'
+                    : 'bg-white border-slate-200 hover:bg-slate-50'
                 }`}
               >
-                <div className={`text-sm font-black ${costCategory === 'B' && valueConsumptionMode === 'B1' ? 'text-[#1a56db]' : 'text-slate-800'}`}>
+                <div className={`text-sm font-black ${costCategory === 'B' && valueConsumptionMode === 'B1' ? 'text-blue-600' : 'text-slate-800'}`}>
                   B1
                 </div>
                 <div className="text-[11px] text-slate-400 font-medium truncate w-full" title="产专类报销 · 精准定位采集主体">
                   产专类报销
                 </div>
-                <div className={`w-full font-mono [font-variant-numeric:tabular-nums] text-xs ${costCategory === 'B' && valueConsumptionMode === 'B1' ? 'font-black text-[#1a56db]' : 'font-bold text-slate-700'}`}>
+                <div className={`w-full font-mono [font-variant-numeric:tabular-nums] text-xs ${costCategory === 'B' && valueConsumptionMode === 'B1' ? 'font-black text-blue-600' : 'font-bold text-slate-700'}`}>
                   {maskMoney(costCategory === 'B' && valueConsumptionMode === 'B1' ? Math.round(dynamicCost || 0) : 0)}
                 </div>
               </div>
@@ -960,17 +960,17 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                 }}
                 className={`p-3 rounded-sm cursor-pointer transition-all flex flex-col items-center justify-between text-center space-y-1.5 border ${
                   costCategory === 'B' && valueConsumptionMode === 'B2'
-                    ? 'bg-blue-50/60 border-[#1a56db] ring-1 ring-[#1a56db] shadow-xs'
-                    : 'bg-white border-[#b8d0f7] hover:bg-slate-50'
+                    ? 'bg-blue-50/60 border-blue-600 ring-1 ring-blue-600 shadow-xs'
+                    : 'bg-white border-slate-200 hover:bg-slate-50'
                 }`}
               >
-                <div className={`text-sm font-black ${costCategory === 'B' && valueConsumptionMode === 'B2' ? 'text-[#1a56db]' : 'text-slate-800'}`}>
+                <div className={`text-sm font-black ${costCategory === 'B' && valueConsumptionMode === 'B2' ? 'text-blue-600' : 'text-slate-800'}`}>
                   B2
                 </div>
                 <div className="text-[11px] text-slate-400 font-medium truncate w-full" title="产专类项目运维消耗 · 自动对冲已确权产值">
                   产专类项目运维消耗
                 </div>
-                <div className={`w-full font-mono [font-variant-numeric:tabular-nums] text-xs ${costCategory === 'B' && valueConsumptionMode === 'B2' ? 'font-black text-[#1a56db]' : 'font-bold text-slate-700'}`}>
+                <div className={`w-full font-mono [font-variant-numeric:tabular-nums] text-xs ${costCategory === 'B' && valueConsumptionMode === 'B2' ? 'font-black text-blue-600' : 'font-bold text-slate-700'}`}>
                   {maskMoney(costCategory === 'B' && valueConsumptionMode === 'B2' ? Math.round(dynamicCost || 0) : 0)}
                 </div>
               </div>
@@ -986,19 +986,19 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                 }}
                 className={`p-3 rounded-sm cursor-pointer transition-all flex flex-col items-center justify-between text-center space-y-1.5 border ${
                   costCategory === 'C'
-                    ? 'bg-blue-50/60 border-[#1a56db] ring-1 ring-[#1a56db] shadow-xs'
+                    ? 'bg-blue-50/60 border-blue-600 ring-1 ring-blue-600 shadow-xs'
                     : selectedResource && selectedOperator && selectedResource.assignedToRevenue !== selectedOperator.center
                     ? 'bg-slate-50 border-slate-200 cursor-not-allowed opacity-50'
-                    : 'bg-white border-[#b8d0f7] hover:bg-slate-50'
+                    : 'bg-white border-slate-200 hover:bg-slate-50'
                 }`}
               >
-                <div className={`text-sm font-black ${costCategory === 'C' ? 'text-[#1a56db]' : 'text-slate-800'}`}>
+                <div className={`text-sm font-black ${costCategory === 'C' ? 'text-blue-600' : 'text-slate-800'}`}>
                   C
                 </div>
                 <div className="text-[11px] text-slate-400 font-medium">
                   C类对冲
                 </div>
-                <div className={`w-full font-mono [font-variant-numeric:tabular-nums] text-xs ${costCategory === 'C' ? 'font-black text-[#1a56db]' : 'font-bold text-slate-700'}`}>
+                <div className={`w-full font-mono [font-variant-numeric:tabular-nums] text-xs ${costCategory === 'C' ? 'font-black text-blue-600' : 'font-bold text-slate-700'}`}>
                   {maskMoney(costCategory === 'C' ? Math.round(dynamicCost || 0) : 0)}
                 </div>
               </div>
@@ -1010,18 +1010,18 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                 }}
                 className={`p-3 rounded-sm cursor-pointer transition-all flex flex-col items-center justify-between text-center space-y-1.5 border ${
                   costCategory === 'D'
-                    ? 'bg-blue-50/60 border-[#1a56db] ring-1 ring-[#1a56db] shadow-xs'
-                    : 'bg-white border-[#b8d0f7] hover:bg-slate-50'
+                    ? 'bg-blue-50/60 border-blue-600 ring-1 ring-blue-600 shadow-xs'
+                    : 'bg-white border-slate-200 hover:bg-slate-50'
                 }`}
               >
-                <div className="text-sm font-black text-[#1a56db]">
+                <div className="text-sm font-black text-blue-600">
                   D
                 </div>
                 <div className="flex items-center justify-center gap-1 text-[11px] text-slate-400 font-medium w-full">
                   <span>经营单元公摊</span>
                   <CostTooltipIcon tooltip="经营单元公摊，无项目列支，按实际发生月人员平均分摊" />
                 </div>
-                <div className={`w-full font-mono [font-variant-numeric:tabular-nums] text-xs ${costCategory === 'D' ? 'font-black text-[#1a56db]' : 'font-bold text-slate-700'}`}>
+                <div className={`w-full font-mono [font-variant-numeric:tabular-nums] text-xs ${costCategory === 'D' ? 'font-black text-blue-600' : 'font-bold text-slate-700'}`}>
                   {maskMoney(costCategory === 'D' ? Math.round(dynamicCost || 0) : 0)}
                 </div>
               </div>
@@ -1042,7 +1042,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                     setDynamicCost(Number(e.target.value)); 
                     if(selectedType === RefineType.NonEffectiveHours) setLeaveDays(0); 
                   }}
-                  className="w-full text-right text-base font-bold font-mono [font-variant-numeric:tabular-nums] text-[#1a56db] bg-white border border-[#b8d0f7] rounded-[4px] px-3 py-2 h-10 focus:outline-none focus:border-[#1a56db] focus:ring-2 focus:ring-[#1a56db]/10 transition-all placeholder:text-[#94a3b8]"
+                  className="w-full text-right text-base font-bold font-mono [font-variant-numeric:tabular-nums] text-blue-600 bg-white border border-slate-200 rounded-md px-3 py-2 h-10 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all placeholder:text-[#94a3b8]"
                   placeholder="0"
                   required={selectedCategory === RefineCategory.Revenue}
                 />
@@ -1051,14 +1051,14 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
               <div className="flex items-end sm:pt-5.5">
                 <button
                   type="submit"
-                  className="w-full h-10 bg-slate-900 hover:bg-blue-600 active:scale-95 text-white font-black text-xs uppercase tracking-widest rounded-[4px] shadow-sm transition-all cursor-pointer flex items-center justify-center"
+                  className="w-full h-10 bg-slate-900 hover:bg-blue-600 active:scale-95 text-white font-black text-xs uppercase tracking-widest rounded-md shadow-sm transition-all cursor-pointer flex items-center justify-center"
                 >
                   提 交
                 </button>
               </div>
             </div>
 
-            <div className="bg-slate-50 border-l-2 border-[#1a56db] p-3 rounded-[4px] text-xs text-slate-500 leading-relaxed">
+            <div className="bg-slate-50 border-l-2 border-blue-600 p-3 rounded-md text-xs text-slate-500 leading-relaxed">
               该操作将直接从采集人的刚性工资包中扣除对应数值，用于对冲组织运营成本。
             </div>
           </div>
@@ -1170,7 +1170,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                       {log.miningId ? (
                         <span className="font-mono font-bold text-slate-800">{log.miningId}</span>
                       ) : (
-                        <span className="text-[#1a56db] font-bold">经营单元公摊</span>
+                        <span className="text-blue-600 font-bold">经营单元公摊</span>
                       )}
                     </td>
                     <td className="px-3 py-3 border-r border-slate-100 whitespace-nowrap min-w-[130px]">

@@ -8,7 +8,7 @@ import { isCenterManagerUser, centerMatch } from "../src/utils/centerScope";
 import { parseCenterList, businessUnitLabelsEqual } from "../src/utils/purification";
 import { getUserSalaryByMonth } from "../src/utils/business";
 import { isSalaryActiveForMonth } from "../src/utils/employmentStatus";
-import { UI_LABELS } from '../src/constants/uiLabels';
+import { UI_LABELS, GUARDIAN_MODAL_TITLE } from '../src/constants/uiLabels';
 import { resolveLogBusinessMonth, getLocalMonthString, getLocalDateString, resolveLogBusinessDate, isDateInRange, getMonthsBetween } from "../src/utils/dateUtils";
 import { formatAmount, formatRatio, formatPercent } from "../src/utils/formatters";
 import { InfoTip } from "../src/components/InfoTip";
@@ -1783,7 +1783,7 @@ const Distribution: React.FC<DistributionProps> = ({
                   layout
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="bg-white rounded-[2rem] border border-slate-300 shadow-sm overflow-hidden"
+                  className={`bg-white ${UI_TOKENS.RADIUS_PANEL} border border-slate-300 shadow-sm overflow-hidden`}
                 >
                   <div className="p-5 flex items-center justify-between border-b border-slate-50">
                     <div className="flex items-center gap-3">
@@ -1956,7 +1956,8 @@ const Distribution: React.FC<DistributionProps> = ({
           state={{
             isOpen: !modalState.isOpen,
             type: 'custom',
-            title: `城市守护者 - 登记承兑发放 (${bonusTarget.userName || ""})`,
+            title: GUARDIAN_MODAL_TITLE,
+            subtitle: `登记承兑发放 (${bonusTarget.userName || ""})`,
             content: (
             <div className="space-y-4">
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
