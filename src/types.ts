@@ -318,7 +318,8 @@ export interface ValueCreationLog {
   recordedCollectorId?: string; // 提炼人员（仅为记录，不参与计算）
   category: RefineCategory;
   type: RefineType;
-  costCategory?: 'A' | 'B' | 'C' | 'D' | 'T1' | 'T2' | 'T3' | string; // 动态消耗计入类别 / 创造侧提炼阶梯
+  refineTier?: 'T1' | 'T2' | 'T3'; // 价值创造提炼成色档位（T1/T2/T3），新写路径专用
+  costCategory?: 'A' | 'B' | 'C' | 'D' | string; // 动态消耗计入类别（A/B/C/D）；写路径仅消耗单写入，历史创造单仅作迁移期兼容读取
   valueConsumptionMode?: 'B1' | 'B2'; // 产值B类消耗模式
   amount: number; // 积分/资源量
   rawAmount: number; // 原始注入总量（用于动态对冲计算基准）
@@ -342,7 +343,7 @@ export interface ValueCreationLog {
    * @condition 只有当 status === 'Confirmed' 时，amount 才会被计入 MiningResource 的 confirmedRevenue 或 confirmedValue
    */
   status: AuditStatus;
-  confirmationType?: '自动确权' | '手动确权' | '联动确权';
+  confirmationType?: '收款确权' | '联动确权' | '手动确权' | string; // 历史数据可能含 '自动确权'，展示层统一映射为 '联动确权'
   confirmedAt?: number; // 确权时间，用于3个月倒计时
   batchId?: string; // 导入批次ID
   deleted?: boolean;

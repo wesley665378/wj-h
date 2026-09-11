@@ -1,6 +1,6 @@
 
 import { safeSetItem, safeGetItem, safeRemoveItem } from './src/utils/safeLocalStorage';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { isAdminOrNpc, isGlobalReader, isSystemAdmin, parseCenterList } from './src/utils/accessControl';
 import { filterUsersByCenter, filterResourcesByCenter, filterLogsByCenter, filterAuditLogsByCenter, filterTransactionsByCenter, isResourceAssignedToCenter, isCenterManagerUser } from './src/utils/centerScope';
 import { isVirtualDeductionMiningId } from './src/utils/virtualDeduction';
@@ -12,6 +12,7 @@ import Dashboard from './views/Dashboard';
 import ValueCreation from './views/ValueCreation';
 import { calculateHistoricalNetValue, checkUserPermission } from './src/utils/business';
 import { applyConsumptionHedgeToLogs } from './src/utils/consumptionHedge';
+import { isDynamicCostLog } from './src/utils/costCategory';
 import Auditing from './views/Auditing';
 import ResourceManagement from './views/ResourceManagement';
 import Reservoir from './views/Reservoir';
@@ -283,6 +284,25 @@ const App: React.FC = () => {
   const [quotaSnapshots, setQuotaSnapshots] = useState<Record<string, QuotaSnapshot>>({});
   const [filterMonth, setFilterMonth] = useState<string>(() => getLocalMonthString());
 
+  const auditBadgeCount = useMemo(() => {
+    if (!currentUser || !checkUserPermission(currentUser, 'audit')) return 0;
+    const pendingRev = logs.filter(l => l.category === RefineCategory.Revenue && l.status === AuditStatus.Pending && l.confirmationType === '收款确权').length;
+    const pendingVal = logs.filter(l => l.category === RefineCategory.Value && l.status === AuditStatus.Pending && (l.confirmationType === '联动确权' || (l.confirmationType as any) === '自动确权')).length;
+    const pendingDtcb = logs.filter(l => isDynamicCostLog(l) && l.status === AuditStatus.Pending).length;
+    return pendingRev + pendingVal + pendingDtcb;
+  }, [logs, currentUser]);
+
+  const hasAutoJumpedRef = React.useRef(false);
+  useEffect(() => {
+    if (currentUser && !hasAutoJumpedRef.current) {
+      hasAutoJumpedRef.current = true;
+      const postLoginReturn = localStorage.getItem('shihe_post_login_return');
+      if (!postLoginReturn && auditBadgeCount > 0 && checkUserPermission(currentUser, 'audit')) {
+        setActiveTab('audit');
+      }
+    }
+  }, [currentUser, auditBadgeCount]);
+
   const lastSyncedFingerprintRef = React.useRef<string>('');
   const isAutoSyncPausedRef = React.useRef<boolean>(false);
 
@@ -432,12 +452,12 @@ const App: React.FC = () => {
         let actualConvertedAmount = 0;
 
         const miningLogs = logsByMiningId.get(res.id) || [];
-        // 过滤口径与后端严格一致：产值 + 待确权 + confirmationType === '联动确权'
+        // 过滤口径与后端严格一致：产值 + 待确权 + 联动确权（兼容历史自动确权）
         const pendingLogs = miningLogs
           .filter(item => 
             item.log.category === RefineCategory.Value && 
             item.log.status === AuditStatus.Pending &&
-            item.log.confirmationType === '联动确权'
+            (item.log.confirmationType === '联动确权' || (item.log.confirmationType as any) === '自动确权')
           )
           .sort((a, b) => (a.log.timestamp || 0) - (b.log.timestamp || 0));
 
@@ -512,8 +532,8 @@ const App: React.FC = () => {
       const affectedMiningIds = Array.from(new Set(newLogs.map(l => l.miningId)));
 
       affectedMiningIds.forEach(miningId => {
-        const dtcbLogs = nextLogs.filter(l => l.confirmationType === '手动确权');
-        const jzczLogs = nextLogs.filter(l => l.confirmationType !== '手动确权');
+        const dtcbLogs = nextLogs.filter(l => isDynamicCostLog(l));
+        const jzczLogs = nextLogs.filter(l => !isDynamicCostLog(l));
         const reHedgedJzcz = applyConsumptionHedgeToLogs(miningId, jzczLogs, dtcbLogs, miningResources, managedUsers);
         const reHedgedMap = new Map(reHedgedJzcz.map(l => [l.id, l]));
         nextLogs = nextLogs.map(l => reHedgedMap.has(l.id) ? reHedgedMap.get(l.id)! : l);
@@ -571,8 +591,8 @@ const App: React.FC = () => {
         } else if (targetLog && targetLog.miningId && !isVirtualDeductionMiningId(targetLog.miningId) && targetLog.miningId !== '统筹池') {
           // 前端对冲补算: 使用 applyConsumptionHedgeToLogs 传入完整的 jzcz 和 dtcb
           const currentResources = [...miningResources.map(r => (resource && r && r.id === resource.id) ? resource : r)];
-          const dtcbLogs = updatedLogs.filter(l => l && l.confirmationType === '手动确权');
-          const jzczLogs = updatedLogs.filter(l => l && l.confirmationType !== '手动确权');
+          const dtcbLogs = updatedLogs.filter(l => l && isDynamicCostLog(l));
+          const jzczLogs = updatedLogs.filter(l => l && !isDynamicCostLog(l));
           const reHedgedJzcz = applyConsumptionHedgeToLogs(
             targetLog.miningId, 
             jzczLogs, 
@@ -632,7 +652,7 @@ const App: React.FC = () => {
     const logsArray = Array.isArray(newLog) ? newLog : [newLog];
     processLogsSubmission(logsArray);
     logsArray.forEach(log => {
-      const isHedge = log.status === AuditStatus.Confirmed && log.costCategory === 'C';
+      const isHedge = log.status === AuditStatus.Confirmed && isDynamicCostLog(log) && log.costCategory === 'C';
       addSystemLog('成本消耗', `提交了 ${log.dynamicCost} 积分 of ${log.costCategory} 成本消耗${isHedge ? ' (并触发动态对冲)' : ''}`);
     });
   }, [processLogsSubmission, addSystemLog]);
@@ -1116,7 +1136,8 @@ const App: React.FC = () => {
 
   // 日志网关 1：${TERM_FILTERED_LOGS} (仅 jzcz 价值创造，供价值动态流 / 收款轨与产值轨展示)
   const filteredLogs = useMemo(() => {
-    return filterLogsByCenter(logs, miningResources, currentUser);
+    const centerLogs = filterLogsByCenter(logs, miningResources, currentUser);
+    return centerLogs.filter(l => !isDynamicCostLog(l));
   }, [logs, miningResources, currentUser]);
 
   // 日志网关 2：${TERM_AUDIT_LOGS} (jzcz ∪ dtcb 动态消耗，供成本确权待办与审计)
@@ -1193,6 +1214,7 @@ const App: React.FC = () => {
       creation: { 
         user: currentUser, 
         users: filteredUsers,
+        managedUsers: managedUsers,
         resources: filteredResources, 
         logs: filteredLogs, 
         onLogSubmit, 
@@ -1211,8 +1233,8 @@ const App: React.FC = () => {
         users: filteredUsers, 
         resources: filteredResources, 
         logs: auditLogs, 
-        jzczLogs: filteredLogs.filter(l => l.confirmationType !== '手动确权'),
-        dtcbLogs: auditLogs.filter(l => l.confirmationType === '手动确权'),
+        jzczLogs: filteredLogs.filter(l => !isDynamicCostLog(l)),
+        dtcbLogs: auditLogs.filter(l => isDynamicCostLog(l)),
         onLogSubmit: onConsumptionSubmit,
         persistWorkspaceWithOverrides,
         updateLastSyncedFingerprint,
@@ -1278,7 +1300,7 @@ const App: React.FC = () => {
         user: currentUser, 
         resources: filteredResources,
         logs: auditLogs,
-        dtcbLogs: auditLogs.filter(l => l.confirmationType === '手动确权' || !!l.costCategory || !!(l as any).consumptionType),
+        dtcbLogs: auditLogs.filter(l => isDynamicCostLog(l)),
         transactions: filteredTransactions,
         managedUsers: managedUsers,
         onAddResource,
@@ -1397,6 +1419,7 @@ const App: React.FC = () => {
         <Sidebar 
           user={currentUser} 
           activeTab={activeTab} 
+          auditBadgeCount={auditBadgeCount}
           setActiveTab={(tab) => {
             setActiveTab(tab);
             setIsMobileMenuOpen(false);
@@ -1452,7 +1475,7 @@ const App: React.FC = () => {
         </header>
 
         <div className="flex-1 overflow-auto custom-scrollbar relative z-10 flex flex-col justify-between">
-          <div className="w-full p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6 lg:space-y-8 flex-1">
+          <div className="w-full px-2.5 py-3 sm:px-3.5 sm:py-4 md:px-4 md:py-4 lg:px-4 lg:py-5 space-y-3 md:space-y-4 flex-1">
             <ErrorBoundary>
               {renderContent()}
             </ErrorBoundary>

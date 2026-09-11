@@ -6,6 +6,8 @@ import { roundMoney } from './formatMoney';
 import { centerMatch } from './centerScope';
 import { businessUnitLabelsEqual } from './businessUnitName';
 import { isSalaryActiveForMonth } from './employmentStatus';
+import { isCreationMiningLog } from './purification';
+import { resolveDynamicCostCategory, getDynamicCostAmount } from './costCategory';
 
 export interface UnitRankingRow {
   unitName: string;
@@ -20,14 +22,14 @@ export interface UnitRankingRow {
   costPackage: number; // 成本包 (工资包 + 承兑实发)
   totalCostOffset?: number; // 兼容字段
   
-  monthlyProfit: number; // 月度盈亏(已确权) = 收产包 - 可控成本 - 直接费用
-  yearlyProfit: number; // 年度盈亏(已确权)
+  monthlyProfit: number; // 月损益(已确权) = 收产包 - 可控成本 - 直接费用
+  yearlyProfit: number; // 年损益(已确权)
   
   // 辅列/在途指标
   inTransitValuePackage: number; // 在途产兑
   inTransitIncomePackage: number; // 含在途收产包
-  inTransitMonthlyProfit: number; // 含在途月度盈亏
-  inTransitYearlyProfit: number; // 含在途年度盈亏
+  inTransitMonthlyProfit: number; // 含在途月损益
+  inTransitYearlyProfit: number; // 含在途年损益
 
   rank: number | string;
   isNoActivity: boolean;
@@ -135,13 +137,13 @@ export function computeUnitSingleMonth(
     return resolveLogBusinessMonth(l) === monthStr;
   });
 
-  // 排除：非有效工时、有 costCategory 的消耗；不要用 confirmationType==='手动确权' 一刀切剔除创造流水
+  // 排除：非有效工时，或者非创造流水
   const isLogToExclude = (l: ValueCreationLog) => {
     return (
       l.type === RefineType.NonEffectiveHours ||
       (l.type as string) === '非有效工时' ||
       (l.type as string) === 'NonEffectiveHours' ||
-      Boolean(l.costCategory)
+      !isCreationMiningLog(l)
     );
   };
 
@@ -287,31 +289,31 @@ export function computeUnitSingleMonth(
     return sum;
   }, 0);
 
-  // 动态消耗
+  // 动态消耗 (通过 resolveDynamicCostCategory 精准解析)
   const confirmedConsumptionLogs = monthLogs.filter(l => 
     isConfirmedOrApproved(l.status) &&
     isLogBelongsToUnit(l)
   );
 
   const aCost = confirmedConsumptionLogs
-    .filter(l => l.costCategory === 'A')
-    .reduce((sum, l) => sum + (l.dynamicCost || 0), 0);
+    .filter(l => resolveDynamicCostCategory(l) === 'A')
+    .reduce((sum, l) => sum + getDynamicCostAmount(l), 0);
 
   const b1Cost = confirmedConsumptionLogs
-    .filter(l => l.costCategory === 'B' && l.valueConsumptionMode === 'B1')
-    .reduce((sum, l) => sum + (l.dynamicCost || 0), 0);
+    .filter(l => resolveDynamicCostCategory(l) === 'B1')
+    .reduce((sum, l) => sum + getDynamicCostAmount(l), 0);
 
   const b2Cost = confirmedConsumptionLogs
-    .filter(l => l.costCategory === 'B' && l.valueConsumptionMode === 'B2')
-    .reduce((sum, l) => sum + (l.dynamicCost || 0), 0);
+    .filter(l => resolveDynamicCostCategory(l) === 'B2')
+    .reduce((sum, l) => sum + getDynamicCostAmount(l), 0);
 
   const cCost = confirmedConsumptionLogs
-    .filter(l => l.costCategory === 'C')
-    .reduce((sum, l) => sum + (l.dynamicCost || 0), 0);
+    .filter(l => resolveDynamicCostCategory(l) === 'C')
+    .reduce((sum, l) => sum + getDynamicCostAmount(l), 0);
 
   const dCost = confirmedConsumptionLogs
-    .filter(l => l.costCategory === 'D')
-    .reduce((sum, l) => sum + (l.dynamicCost || 0), 0);
+    .filter(l => resolveDynamicCostCategory(l) === 'D')
+    .reduce((sum, l) => sum + getDynamicCostAmount(l), 0);
 
   // 成本包 = 工资包 + 承兑实发
   const costPackage = salaryPackage + bonusPayout;
@@ -322,7 +324,7 @@ export function computeUnitSingleMonth(
 
   // 已确权收产包 = 收款包 + 已确权产兑包
   const incomeValuePackage = revenuePackage + confirmedValuePackage;
-  // 月度盈亏(已确权) = 已确权收产包 - 可控成本 - 直接费用
+  // 月损益(已确权) = 已确权收产包 - 可控成本 - 直接费用
   const monthlyProfit = incomeValuePackage - totalCost - directCost;
 
   // 在途指标
@@ -418,7 +420,7 @@ export function computeBusinessUnitProfitRanking(
     yearlyInTransitProfitMap[unitName] = transitSum;
   });
 
-  // 主排序键：主排序只能使用「月度盈亏(已确权)」降序；绝对禁止用含在途的盈亏作为主排名依据。
+  // 主排序键：主排序只能使用「月损益(已确权)」降序；绝对禁止用含在途的损益作为主排名依据。
   const sortedMetrics = [...currentMonthMetrics].sort((a, b) => {
     if (a.isNoActivity !== b.isNoActivity) {
       return a.isNoActivity ? 1 : -1;

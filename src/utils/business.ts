@@ -2,7 +2,7 @@ import { User, Role, ValueCreationLog, MiningResource, RefineCategory, AuditStat
 import { isSystemAdmin } from './accessControl';
 import { TIER_COEFFICIENTS } from '../constants/coefficients';
 import { roundMoney } from './formatMoney';
-import { normalizeRefineTier } from './consumptionHedge';
+import { normalizeRefineTier, resolveLogRefineTier } from './consumptionHedge';
 import {
   getInitialRevenueCapacity,
   getInitialValueCapacity,
@@ -115,7 +115,7 @@ export const calculateHistoricalNetValue = (log: ValueCreationLog, resources: Mi
   }
 
   if (factor === 0) {
-    const tier = normalizeRefineTier(log.costCategory);
+    const tier = resolveLogRefineTier(log);
     if (log.category === RefineCategory.Value || (log.category as string) === 'Value' || (log.category as string) === '产值') {
       // Use TIER_COEFFICIENTS here
       const coeffs = isHighValueExpert ? TIER_COEFFICIENTS.VALUE_MANAGER : TIER_COEFFICIENTS.VALUE_CHAN;
@@ -368,7 +368,7 @@ export function computeValueOutput5Incentive(
 
 /**
  * @businessRule 经营单元本级 - 收款专项计提 (computeCollection2Incentive)
- * @口径 已确权收款；含「款专」且不含「经管员」；amount×2%；不乘 C权、B2权
+ * @口径 附录 G.2：已确权收款；仅「初款专」「中款专」；高款专、经管员高款专、含「经管员」不触发；amount×2%；不乘 C权、B2权
  */
 export function computeCollection2Incentive(
   log: ValueCreationLog | any,
@@ -395,8 +395,8 @@ export function computeCollection2Incentive(
     collectorCategory = (userOrUsers as any).category || '';
   }
 
-  // 含「款专」且不含「经管员」
-  if (!collectorCategory.includes('款专') || collectorCategory.includes('经管员')) {
+  // 岗位仅初款专/中款专；高款专、经管员高款专、含「经管员」不触发
+  if (collectorCategory !== '初款专' && collectorCategory !== '中款专') {
     return 0;
   }
 

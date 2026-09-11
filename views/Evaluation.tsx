@@ -1,20 +1,22 @@
-import React, { useMemo, useState } from 'react';
-import { Search, ChevronDown, ChevronUp, Crown, TrendingUp, ShieldCheck, AlertTriangle } from 'lucide-react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import { Search, ChevronDown, ChevronUp, Crown, TrendingUp, ShieldCheck, AlertTriangle, RefreshCw } from 'lucide-react';
 import { useCostPrivacy } from '../src/hooks/useCostPrivacy';
 import { CostPrivacyToggle } from '../src/components/CostPrivacyToggle';
 import { User, ValueCreationLog, MiningResource } from '../types';
-import { computeAllEvaluations } from '../src/utils/valueEvaluation';
+import { computeAllEvaluations, EvaluationResult } from '../src/utils/valueEvaluation';
 import { formatAmount, formatRatio } from '../src/utils/formatters';
 import { InfoTip } from '../src/components/InfoTip';
 import { BusinessDateFilter } from '../src/components/BusinessDateFilter';
 import { getLocalMonthString } from '../src/utils/dateUtils';
 import { UI_LABELS } from '../src/constants/uiLabels';
+import { fetchEvaluationData, EvaluationExpertRow } from '../src/api/evaluation';
+import { toast } from 'sonner';
 
 interface EvaluationProps {
-  users: User[];
+  users?: User[];
   logs?: ValueCreationLog[];
   auditLogs?: ValueCreationLog[];
-  resources: MiningResource[];
+  resources?: MiningResource[];
   currentTime?: Date;
   onFilterMonthChange?: (month: string) => void;
 }
@@ -33,12 +35,54 @@ const getTierBadgeClass = (tier?: string) => {
   return 'bg-slate-50 text-rose-600 border-slate-300';
 };
 
-const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, resources, currentTime, onFilterMonthChange }) => {
+const Evaluation: React.FC<EvaluationProps> = ({ users = [], logs = [], auditLogs, resources = [], currentTime, onFilterMonthChange }) => {
   const { maskMoney } = useCostPrivacy();
   const effectiveLogs = auditLogs || logs;
+  const isLocalEmbedded = import.meta.env.VITE_USE_LOCAL_AUTH === 'true';
+
   const [filterMonth, setFilterMonth] = useState<string>(() => getLocalMonthString());
   const [filterStartDate, setFilterStartDate] = useState<string>('');
   const [filterEndDate, setFilterEndDate] = useState<string>('');
+
+  // 服务端 API 数据状态
+  const [serverEvaluations, setServerEvaluations] = useState<EvaluationExpertRow[] | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // 加载服务端评价数据
+  const loadEvaluationData = useCallback(() => {
+    if (isLocalEmbedded) {
+      setServerEvaluations(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    const params = (filterStartDate && filterEndDate)
+      ? { startDate: filterStartDate, endDate: filterEndDate }
+      : { month: filterMonth || getLocalMonthString() };
+
+    fetchEvaluationData(params)
+      .then(res => {
+        setServerEvaluations(res.experts || []);
+      })
+      .catch(err => {
+        console.error('加载价值评价数据失败:', err);
+        const msg = err?.message || '无法加载价值评价数据';
+        setError(msg);
+        toast.error(msg);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [filterMonth, filterStartDate, filterEndDate, isLocalEmbedded]);
+
+  useEffect(() => {
+    loadEvaluationData();
+  }, [loadEvaluationData]);
 
   // 自定义查询状态（模糊搜索、等级、类别）
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -54,10 +98,13 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
     });
   };
 
-  // 核心评价逻辑：使用全量审计日志 auditLogs（包含 JZCZ + DTCB）作为计算基准
-  const evaluations = useMemo(() => {
-    return computeAllEvaluations(users, effectiveLogs, resources, filterMonth, filterStartDate, filterEndDate);
-  }, [users, effectiveLogs, resources, filterMonth, filterStartDate, filterEndDate]);
+  // 核心评价数据：线上以服务端为准，本地开发模式兜底走 computeAllEvaluations
+  const evaluations: (EvaluationExpertRow | EvaluationResult)[] = useMemo(() => {
+    if (isLocalEmbedded) {
+      return computeAllEvaluations(users, effectiveLogs, resources, filterMonth, filterStartDate, filterEndDate);
+    }
+    return serverEvaluations || [];
+  }, [isLocalEmbedded, serverEvaluations, users, effectiveLogs, resources, filterMonth, filterStartDate, filterEndDate]);
 
   // 过滤后的评价数据
   const filteredEvaluations = useMemo(() => {
@@ -77,7 +124,7 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
     });
   }, [evaluations, searchQuery, selectedTier, selectedCategory]);
 
-  type SortField = 'userName' | 'monthlyIncome' | 'monthlyCost' | 'contribution' | 'monthlyEfficiency' | 'historyDebt' | 'yearlyContribution' | 'yearlyEfficiency' | 'tier' | null;
+  type SortField = 'userName' | 'monthlyIncome' | 'monthlyCost' | 'contribution' | 'monthlyEfficiency' | 'yearlyContribution' | 'yearlyEfficiency' | 'tier' | null;
   type SortOrder = 'asc' | 'desc' | null;
 
   const [sortField, setSortField] = useState<SortField>(null);
@@ -135,10 +182,6 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
         case 'monthlyEfficiency':
           valA = a.monthlyEfficiencyUpper ?? a.monthlyEfficiency ?? 0;
           valB = b.monthlyEfficiencyUpper ?? b.monthlyEfficiency ?? 0;
-          break;
-        case 'historyDebt':
-          valA = a.historyDebt ?? 0;
-          valB = b.historyDebt ?? 0;
           break;
         case 'yearlyContribution':
           valA = a.yearlyContributionUpper ?? a.yearlyContribution ?? ((a.yearlyIncomeUpper ?? a.yearlyIncome) - a.yearlyCost);
@@ -361,9 +404,21 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
         <div className="bg-slate-100/70 px-4 sm:px-6 py-2 border-b border-slate-300 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center space-x-2">
             <span className="text-[11px] font-bold text-slate-900 uppercase tracking-wider font-mono">全量价值贡献审计记录</span>
+            {loading && (
+              <span className="inline-flex items-center gap-1.5 text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 font-mono">
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                正在同步服务端...
+              </span>
+            )}
+            {error && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 font-mono">
+                <AlertTriangle className="w-3 h-3 text-rose-500" />
+                {error}
+              </span>
+            )}
             {sortField && (
               <span className="text-[10px] bg-slate-200 text-slate-800 px-2 py-0.5 font-mono border border-slate-300 flex items-center gap-1">
-                已按 [{sortField === 'userName' ? '采集主体' : sortField === 'monthlyIncome' ? '收产包' : sortField === 'monthlyCost' ? '成本包' : sortField === 'contribution' ? '月贡献' : sortField === 'monthlyEfficiency' ? '月效率' : sortField === 'historyDebt' ? '历史欠产包' : sortField === 'yearlyContribution' ? '年贡献' : sortField === 'yearlyEfficiency' ? '年效率' : '管理决策路由'}] {sortOrder === 'asc' ? '升序' : '降序'} 排序
+                已按 [{sortField === 'userName' ? '采集主体' : sortField === 'monthlyIncome' ? '收产包' : sortField === 'monthlyCost' ? '成本包' : sortField === 'contribution' ? '月损益' : sortField === 'monthlyEfficiency' ? '月效率' : sortField === 'yearlyContribution' ? '年损益' : sortField === 'yearlyEfficiency' ? '年效率' : '管理决策路由'}] {sortOrder === 'asc' ? '升序' : '降序'} 排序
                 <button 
                   onClick={() => { setSortField(null); setSortOrder(null); }}
                   className="ml-1 text-slate-500 hover:text-slate-900 font-bold cursor-pointer"
@@ -372,6 +427,17 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                 </button>
               </span>
             )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={loadEvaluationData}
+              disabled={loading}
+              title="刷新数据"
+              className="text-[11px] text-slate-600 hover:text-slate-900 font-medium px-2 py-1 bg-white hover:bg-slate-50 border border-slate-300 transition-colors cursor-pointer flex items-center gap-1 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              刷新
+            </button>
           </div>
         </div>
 
@@ -475,15 +541,18 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                   </span>
                 </th>
                 <th 
+                  className="py-2 px-3 text-[11px] font-bold text-slate-700 uppercase tracking-wider text-center whitespace-nowrap border-r border-slate-300 font-sans"
+                >
+                  <span className="inline-flex items-center justify-center">
+                    统计口径
+                  </span>
+                </th>
+                <th 
                   onClick={() => handleSort('monthlyIncome')}
                   className="group py-2 px-4 text-[11px] font-bold text-slate-700 uppercase tracking-wider text-right whitespace-nowrap border-r border-slate-300 cursor-pointer hover:bg-slate-200 transition-colors select-none font-sans"
                 >
                   <span className="inline-flex items-center justify-end w-full">
                     收产包 {renderSortIcon('monthlyIncome')}
-                    <InfoTip 
-                      title="收产包口径" 
-                      content="产专：上行展示已确权+待确权产兑包；下行展示仅已确权产兑包。款专：当期收款包。" 
-                    />
                   </span>
                 </th>
                 <th 
@@ -508,8 +577,8 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                   className="group py-2 px-4 text-[11px] font-bold text-slate-700 uppercase tracking-wider text-right whitespace-nowrap border-r border-slate-300 cursor-pointer hover:bg-slate-200 transition-colors select-none font-sans"
                 >
                   <span className="inline-flex items-center justify-end w-full">
-                    月贡献 {renderSortIcon('contribution')}
-                    <InfoTip title="月贡献口径" content="该行收产包 − 成本包。正值代表正向价值积累。" />
+                    月损益 {renderSortIcon('contribution')}
+                    <InfoTip title="月损益口径" content="该行收产包 − 成本包。正值代表正向净收益，负值代表损益亏损。" />
                   </span>
                 </th>
                 <th 
@@ -522,24 +591,12 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                   </span>
                 </th>
                 <th 
-                  onClick={() => handleSort('historyDebt')}
-                  className="group py-2 px-4 text-[11px] font-bold text-slate-700 uppercase tracking-wider text-right whitespace-nowrap border-r border-slate-300 cursor-pointer hover:bg-slate-200 transition-colors select-none font-sans"
-                >
-                  <span className="inline-flex items-center justify-end w-full">
-                    历史欠产包 {renderSortIcon('historyDebt')}
-                    <InfoTip 
-                      title="历史欠产包口径" 
-                      content="当年 1~M-1 月累计欠产滚动（每年 1 月清零）。存在欠产时以负数标识。" 
-                    />
-                  </span>
-                </th>
-                <th 
                   onClick={() => handleSort('yearlyContribution')}
                   className="group py-2 px-4 text-[11px] font-bold text-slate-700 uppercase tracking-wider text-right whitespace-nowrap border-r border-slate-300 cursor-pointer hover:bg-slate-200 transition-colors select-none font-sans"
                 >
                   <span className="inline-flex items-center justify-end w-full">
-                    年贡献 {renderSortIcon('yearlyContribution')}
-                    <InfoTip title="年贡献口径" content="当年累计收产包 − 当年累计成本包。正值代表当年累计净贡献。" />
+                    年损益 {renderSortIcon('yearlyContribution')}
+                    <InfoTip title="年损益口径" content="当年累计收产包 − 当年累计成本包。正值代表当年累计净收益，负值代表累计亏损。" />
                   </span>
                 </th>
                 <th 
@@ -563,7 +620,31 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
               </tr>
             </thead>
             <tbody>
-              {sortedEvaluations.length === 0 ? (
+              {loading && evaluations.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-6 py-20 text-center text-slate-500 font-bold uppercase text-[11px] tracking-widest font-mono">
+                    <div className="flex items-center justify-center space-x-2">
+                      <RefreshCw className="w-4 h-4 text-indigo-600 animate-spin" />
+                      <span>正在加载价值评价数据...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : error && evaluations.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-6 py-16 text-center text-rose-600 font-bold text-xs tracking-wider font-mono">
+                    <div className="flex flex-col items-center justify-center space-y-2">
+                      <AlertTriangle className="w-6 h-6 text-rose-500" />
+                      <span>{error || '数据加载失败'}</span>
+                      <button
+                        onClick={loadEvaluationData}
+                        className="mt-2 px-3 py-1 bg-white border border-rose-300 text-rose-700 text-xs hover:bg-rose-50 font-bold cursor-pointer transition-colors"
+                      >
+                        重新加载
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ) : sortedEvaluations.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="px-6 py-20 text-center text-slate-400 font-bold uppercase text-[11px] tracking-widest font-mono">
                     {UI_LABELS.EMPTY_DEFAULT}
@@ -589,19 +670,25 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
 
                     return (
                       <React.Fragment key={e.userId}>
-                        {/* 上行 (已确权+待确权产兑包) */}
+                        {/* 上行 (产兑包（虚拟）) */}
                         <tr className="hover:bg-slate-50 transition-colors">
                           {/* 1. 采集主体 (上下合并为一格) */}
                           <td rowSpan={2} className="py-2 px-4 text-left whitespace-nowrap align-middle border-b border-r border-slate-300 bg-white">
                             <div className="font-bold text-xs text-slate-900">{e.userName}</div>
                             <div className="text-[10px] text-slate-500 font-mono tracking-tight mt-0.5">{e.category} · {e.userId}</div>
                           </td>
-                          {/* 2. 收产包 (上行) */}
+                          {/* 2. 统计口径 (上行: 产兑包（虚拟）) */}
+                          <td className="py-2 px-3 text-center whitespace-nowrap border-b border-r border-slate-300">
+                            <span className="inline-block px-1.5 py-0.5 text-[10px] font-bold font-sans bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              产兑包（虚拟）
+                            </span>
+                          </td>
+                          {/* 3. 收产包 (上行) */}
                           <td className="py-2 px-4 text-right whitespace-nowrap font-mono text-xs text-slate-900 border-b border-r border-slate-300 font-medium">
                             {formatAmount(incomeUpper)}
                           </td>
-                          {/* 3. 成本包 (上下合并为一格) */}
-                          <td rowSpan={2} className="py-2 px-4 text-right whitespace-nowrap align-middle border-b border-r border-slate-300 bg-white">
+                          {/* 4. 成本包 (上行) */}
+                          <td className="py-2 px-4 text-right whitespace-nowrap align-middle border-b border-r border-slate-300 bg-white">
                             <div className="flex flex-col items-end w-full min-w-[120px]">
                               <div className="flex items-center justify-end space-x-2 w-full">
                                 <span className="font-mono text-xs font-semibold text-slate-900">{maskMoney(e.monthlyCost)}</span>
@@ -652,23 +739,19 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                               )}
                             </div>
                           </td>
-                          {/* 4. 月贡献 (上行) */}
+                          {/* 5. 月损益 (上行) */}
                           <td className="py-2 px-4 text-right whitespace-nowrap font-mono text-xs font-semibold border-b border-r border-slate-300">
                             <span className={contribUpper >= 0 ? 'text-slate-900' : 'text-rose-600'}>
                               {contribUpper > 0 ? `+${formatAmount(contribUpper)}` : formatAmount(contribUpper)}
                             </span>
                           </td>
-                          {/* 5. 月效率 (上行) */}
+                          {/* 6. 月效率 (上行) */}
                           <td className="py-2 px-4 text-right whitespace-nowrap font-mono text-xs font-bold border-b border-r border-slate-300">
                             <span className={effUpper >= 1.2 ? 'text-slate-900' : 'text-rose-600'}>
                               {formatRatio(effUpper)}
                             </span>
                           </td>
-                          {/* 6. 历史欠产包 (上下合并为一格) */}
-                          <td rowSpan={2} className={`py-2 px-4 text-right whitespace-nowrap align-middle font-mono text-xs font-bold border-b border-r border-slate-300 bg-white ${(e.historyDebt ?? 0) < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
-                            {e.historyDebt ? formatAmount(e.historyDebt) : '0'}
-                          </td>
-                          {/* 7. 年贡献 (上行) */}
+                          {/* 7. 年损益 (上行) */}
                           <td className="py-2 px-4 text-right whitespace-nowrap font-mono text-xs font-semibold border-b border-r border-slate-300">
                             <span className={yrContribUpper >= 0 ? 'text-slate-900' : 'text-rose-600'}>
                               {yrContribUpper > 0 ? `+${formatAmount(yrContribUpper)}` : formatAmount(yrContribUpper)}
@@ -687,25 +770,83 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                             </span>
                           </td>
                         </tr>
-                        {/* 下行 (仅已确权产兑包) */}
+                        {/* 下行 (产兑包（现金）) */}
                         <tr className="hover:bg-slate-50 transition-colors">
-                          {/* 2. 收产包 (下行) */}
+                          {/* 2. 统计口径 (下行: 产兑包（现金）) */}
+                          <td className="py-2 px-3 text-center whitespace-nowrap border-b border-r border-slate-300">
+                            <span className="inline-block px-1.5 py-0.5 text-[10px] font-bold font-sans bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              产兑包（现金）
+                            </span>
+                          </td>
+                          {/* 3. 收产包 (下行) */}
                           <td className="py-2 px-4 text-right whitespace-nowrap font-mono text-xs text-slate-900 border-b border-r border-slate-300 font-medium">
                             {formatAmount(incomeLower)}
                           </td>
-                          {/* 4. 月贡献 (下行) */}
+                          {/* 4. 成本包 (下行 - 数据与上行一致) */}
+                          <td className="py-2 px-4 text-right whitespace-nowrap align-middle border-b border-r border-slate-300 bg-white">
+                            <div className="flex flex-col items-end w-full min-w-[120px]">
+                              <div className="flex items-center justify-end space-x-2 w-full">
+                                <span className="font-mono text-xs font-semibold text-slate-900">{maskMoney(e.monthlyCost)}</span>
+                                <button onClick={() => toggleCost(e.userId)} className="text-slate-600 hover:text-slate-900 transition-colors flex items-center text-[10px] bg-slate-100 px-1.5 py-0.5 border border-slate-300">
+                                  明细 {expandedCosts.has(e.userId) ? <ChevronUp className="w-3 h-3 ml-0.5" /> : <ChevronDown className="w-3 h-3 ml-0.5" />}
+                                </button>
+                              </div>
+                              {expandedCosts.has(e.userId) && (
+                                <div className="mt-2 w-full bg-slate-50 border border-slate-300 p-2 space-y-1 text-[10px] text-slate-600 font-mono text-right">
+                                  <div className="flex justify-between items-center">
+                                    <span className="flex items-center text-slate-500">
+                                      GXB
+                                      <InfoTip
+                                        title="GXB"
+                                        content="单月刚性工资包（人事核定，按月在岗计取）"
+                                        className="ml-1 opacity-70 hover:opacity-100"
+                                      />
+                                    </span>
+                                    <span className="text-slate-900 font-semibold">{maskMoney(e.baseSalary || 0)}</span>
+                                  </div>
+                                  {e.isRevenueExpert && (
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-slate-500">A类</span>
+                                      <span className="text-slate-900 font-semibold">{maskMoney(e.aCost || 0)}</span>
+                                    </div>
+                                  )}
+                                  {e.isProdExpert && (
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-slate-500">B1类</span>
+                                      <span className="text-slate-900 font-semibold">{maskMoney(e.b1Cost || 0)}</span>
+                                    </div>
+                                  )}
+                                  <div className="flex justify-between items-center">
+                                    <span className="flex items-center text-slate-500">
+                                      D类
+                                      <InfoTip title="D类成本" content="经营单元开支，无项目。按实际发生月人员平均分摊" className="ml-1 opacity-70 hover:opacity-100" />
+                                    </span>
+                                    <span className="text-slate-900 font-semibold">{maskMoney(e.dCost || 0)}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center">
+                                    <span className="flex items-center text-slate-500">
+                                      FXDC
+                                      <InfoTip title="FXDC" content="非有效工时对冲，冲抵刚性工资包" className="ml-1 opacity-70 hover:opacity-100" />
+                                    </span>
+                                    <span className="text-slate-900 font-semibold">-{maskMoney(e.nonEffectiveDeduction || 0)}</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          {/* 5. 月损益 (下行) */}
                           <td className="py-2 px-4 text-right whitespace-nowrap font-mono text-xs font-semibold border-b border-r border-slate-300">
                             <span className={contribLower >= 0 ? 'text-slate-900' : 'text-rose-600'}>
                               {contribLower > 0 ? `+${formatAmount(contribLower)}` : formatAmount(contribLower)}
                             </span>
                           </td>
-                          {/* 5. 月效率 (下行) */}
+                          {/* 6. 月效率 (下行) */}
                           <td className="py-2 px-4 text-right whitespace-nowrap font-mono text-xs font-bold border-b border-r border-slate-300">
                             <span className={effLower >= 1.2 ? 'text-slate-900' : 'text-rose-600'}>
                               {formatRatio(effLower)}
                             </span>
                           </td>
-                          {/* 7. 年贡献 (下行) */}
+                          {/* 7. 年损益 (下行) */}
                           <td className="py-2 px-4 text-right whitespace-nowrap font-mono text-xs font-semibold border-b border-r border-slate-300">
                             <span className={yrContribLower >= 0 ? 'text-slate-900' : 'text-rose-600'}>
                               {yrContribLower > 0 ? `+${formatAmount(yrContribLower)}` : formatAmount(yrContribLower)}
@@ -736,7 +877,13 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                         <div className="font-bold text-xs text-slate-900">{e.userName}</div>
                         <div className="text-[10px] text-slate-500 font-mono tracking-tight mt-0.5">{e.category} · {e.userId}</div>
                       </td>
-                      {/* 2. 收产包 */}
+                      {/* 2. 统计口径 */}
+                      <td className="py-2 px-3 text-center whitespace-nowrap border-b border-r border-slate-300">
+                        <span className="inline-block px-1.5 py-0.5 text-[10px] font-bold font-sans bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          当期收款包
+                        </span>
+                      </td>
+                      {/* 3. 收产包 */}
                       <td className="py-2 px-4 text-right whitespace-nowrap font-mono text-xs text-slate-900 font-medium border-b border-r border-slate-300">
                         {formatAmount(e.monthlyIncome)}
                       </td>
@@ -792,7 +939,7 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                           )}
                         </div>
                       </td>
-                      {/* 4. 月贡献 */}
+                      {/* 4. 月损益 */}
                       <td className="py-2 px-4 text-right whitespace-nowrap font-mono text-xs font-semibold border-b border-r border-slate-300">
                         <span className={e.contribution >= 0 ? 'text-slate-900' : 'text-rose-600'}>
                           {e.contribution > 0 ? `+${formatAmount(e.contribution)}` : formatAmount(e.contribution)}
@@ -804,11 +951,7 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                           {formatRatio(e.monthlyEfficiency)}
                         </span>
                       </td>
-                      {/* 6. 历史欠产包 */}
-                      <td className={`py-2 px-4 text-right whitespace-nowrap font-mono text-xs font-bold border-b border-r border-slate-300 ${(e.historyDebt ?? 0) < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
-                        {e.historyDebt ? formatAmount(e.historyDebt) : '0'}
-                      </td>
-                      {/* 7. 年贡献 */}
+                      {/* 6. 年损益 */}
                       <td className="py-2 px-4 text-right whitespace-nowrap font-mono text-xs font-semibold border-b border-r border-slate-300">
                         {(() => {
                           const yrContrib = e.yearlyContribution ?? (e.yearlyIncome - e.yearlyCost);
@@ -819,13 +962,13 @@ const Evaluation: React.FC<EvaluationProps> = ({ users, logs = [], auditLogs, re
                           );
                         })()}
                       </td>
-                      {/* 8. 年效率 */}
+                      {/* 7. 年效率 */}
                       <td className="py-2 px-4 text-right whitespace-nowrap font-mono text-xs font-bold border-b border-r border-slate-300">
                         <span className={e.yearlyEfficiency >= 1.2 ? 'text-slate-900' : 'text-rose-600'}>
                           {formatRatio(e.yearlyEfficiency)}
                         </span>
                       </td>
-                      {/* 9. 管理决策路由 */}
+                      {/* 8. 管理决策路由 */}
                       <td className="py-2 px-4 text-left whitespace-nowrap border-b border-slate-300">
                         <span className={`inline-block px-2 py-0.5 text-[10px] font-bold border ${getTierBadgeClass(e.tier)} font-sans`}>
                           {getTierBadgeText(e.tier)}

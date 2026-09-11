@@ -40,6 +40,33 @@ export function getUserRankName(userOrRole?: User | Role | string): string {
 }
 
 /**
+ * 解析采集人用户对象（与 formatCollectorDisplay 同口径）
+ * 匹配规则: id === x || userId === x || name === x
+ */
+export function resolveCollector(
+  userOrId: User | string | undefined | null,
+  users: User[] = []
+): User | undefined {
+  if (!userOrId) return undefined;
+  if (typeof userOrId === 'object') return userOrId;
+
+  const id = String(userOrId).trim();
+  if (!id || id === LEGACY_SYSTEM_B2 || id === SYS_B2 || id === SYS_C || id === 'sys_B2' || id === 'sys_C') {
+    return undefined;
+  }
+
+  const idLower = id.toLowerCase();
+  return users.find(u => {
+    if (!u) return false;
+    if (u.id === id || (u.id && u.id.toLowerCase() === idLower)) return true;
+    if (u.userId === id || (u.userId && u.userId.toLowerCase() === idLower)) return true;
+    if (u.name === id || (u.name && u.name.toLowerCase() === idLower)) return true;
+    if ((u as any).userName === id || ((u as any).userName && String((u as any).userName).toLowerCase() === idLower)) return true;
+    return false;
+  });
+}
+
+/**
  * 展示归一：将采集主体统一展示为 “姓名 | 职级”
  * 示例：
  *   唐恒 | 中产专
@@ -61,7 +88,7 @@ export function formatCollectorDisplay(
   if (id === SYS_C) return SYS_C;
   if (id === 'sys_B2' || id === 'sys_C') return id === 'sys_B2' ? SYS_B2 : SYS_C;
 
-  const foundUser = users.find(u => u && (u.id === id || u.userId === id || u.name === id));
+  const foundUser = resolveCollector(id, users);
   if (foundUser) {
     const rank = getUserRankName(foundUser);
     return rank ? `${foundUser.name} | ${rank}` : foundUser.name;

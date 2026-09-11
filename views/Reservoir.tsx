@@ -9,6 +9,7 @@ import { centerMatch } from '../src/utils/centerScope';
 import { sumConfirmedRevenuePackage, sumIncomeProductionPackage } from '../src/utils/reconcileMiningFromLogs';
 import { getUserSalaryByMonth } from '../src/utils/business';
 import { isSalaryActiveForMonth } from '../src/utils/employmentStatus';
+import { isDynamicCostLog } from '../src/utils/costCategory';
 import { getLocalMonthString, resolveLogBusinessMonth, resolveLogBusinessDate, isDateInRange, isLogInFilter } from '../src/utils/dateUtils';
 import { formatMoney, roundMoney } from '../src/utils/formatMoney';
 import { 
@@ -455,13 +456,13 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
 
   const totalCPoints = useMemo(() => {
     return filteredLogs
-      .filter(l => l.costCategory === 'C' && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved))
+      .filter(l => isDynamicCostLog(l) && l.costCategory === 'C' && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved))
       .reduce((acc, l) => acc + (l.dynamicCost || 0), 0);
   }, [filteredLogs]);
 
   const totalB2Points = useMemo(() => {
     return filteredLogs
-      .filter(l => l.costCategory === 'B' && l.valueConsumptionMode === 'B2' && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved))
+      .filter(l => isDynamicCostLog(l) && l.costCategory === 'B' && l.valueConsumptionMode === 'B2' && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved))
       .reduce((acc, l) => acc + (l.dynamicCost || 0), 0);
   }, [filteredLogs]);
 

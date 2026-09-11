@@ -1,4 +1,4 @@
-import { ValueCreationLog, AuditStatus } from '../types';
+import { ValueCreationLog, AuditStatus, RefineCategory } from '../types';
 
 export type DynamicCostCategory = 'A' | 'B1' | 'B2' | 'C' | 'D';
 
@@ -49,16 +49,44 @@ export const DYNAMIC_COST_CATEGORY_META: Record<
 };
 
 /**
- * 判定单条流水是否属于动态消耗侧流水
- * 判定满足任一即可：
- * 1. confirmationType === '手动确权'
- * 2. 或存在 costCategory (且属于成本分类)
- * 3. 或存在 consumptionType (若字段有值)
+ * 判定单条流水是否属于创造流水（category 为收款/Revenue 或产值/Value）
+ * 创造流水的 costCategory 表示成色档（T1/T2/T3 或历史 A/B/C），必须计入创造四格占用，非消耗单。
+ */
+export function isCreationCategoryLog(log?: ValueCreationLog | null): boolean {
+  if (!log) return false;
+  const cat = log.category as any;
+  return (
+    cat === RefineCategory.Revenue ||
+    cat === RefineCategory.Value ||
+    cat === '收款' ||
+    cat === '产值' ||
+    cat === 'Revenue' ||
+    cat === 'Value' ||
+    cat === 'revenue' ||
+    cat === 'value'
+  );
+}
+
+/**
+ * 判定单条流水是否属于动态消耗侧流水（与后端 costCategory 及指引 A.1.1 严格同序）：
+ * 1. confirmationType === '手动确权' → true (消耗申报标准落库类型)
+ * 2. consumptionType 有值 → true
+ * 3. confirmationType ∈ {收款确权, 联动确权} → false (创造落库类型)
+ * 4. category ∈ 收款/产值 且无 1/2 → false (兜底创造，成色档非消耗)
+ * 5. costCategory ∈ A|B|C|D → true
+ * 否则 false
  */
 export function isDynamicCostLog(log?: ValueCreationLog | null): boolean {
   if (!log) return false;
+  // 1. confirmationType === '手动确权' → true
   if (log.confirmationType === '手动确权') return true;
+  // 2. consumptionType 有值 → true
   if (Boolean((log as any).consumptionType)) return true;
+  // 3. 显式创造落库确权类型 → false
+  if (log.confirmationType === '收款确权' || log.confirmationType === '联动确权') return false;
+  // 4. category ∈ 收款/产值 且无 1/2 → false (兜底创造单)
+  if (isCreationCategoryLog(log)) return false;
+  // 5. costCategory ∈ A|B|C|D → true
   if (log.costCategory && ['A', 'B', 'C', 'D'].includes(log.costCategory)) return true;
   return false;
 }

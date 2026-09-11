@@ -13,6 +13,18 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  --color-primary: #1a56db;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --color-info: #2563eb;
+  --color-surface: #ffffff;
+  --color-border: #cbd5e1;
+  --color-text: #0f172a;
+  --color-text-muted: #64748b;
+  --radius-sm: 6px;
+  --radius-md: 12px;
 }
 
 body {
@@ -20,14 +32,13 @@ body {
   display: flex;
   min-width: 320px;
   min-height: 100vh;
+  font-size: 14px;
+  color: var(--color-text);
+  background-color: #f8fafc;
 }
 
 #root {
   width: 100%;
-}
-
-* {
-  font-size: 13px !important;
 }
 
 /* Global Border & Divider Enhancement for High Contrast & Readability */
@@ -76,7 +87,7 @@ hr {
 
 @layer components {
   .water-pool {
-    @apply relative overflow-hidden rounded-full flex flex-col items-center justify-center transition-all duration-700 cursor-pointer border-4 border-white/30 backdrop-blur-sm;
+    @apply relative rounded-xl flex flex-col items-center justify-center transition-all duration-300 cursor-pointer border border-white/40 backdrop-blur-sm shadow-sm;
   }
 
   .text-ellipsis {

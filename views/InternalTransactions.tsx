@@ -777,7 +777,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
         </div>
         <h3 className="text-base font-black text-slate-800 tracking-tight">无内部交易访问与操作权限</h3>
         <p className="text-xs text-slate-500 max-w-md leading-relaxed">
-          根据系统权责规范，当前智能体账户 (NPCXIE) 的内部交易发起、审核与流转权限已取消。如需处理内部交易，请使用对应经营单元负责人或系统管理账户。
+          根据系统权责规范，当前智能体帐户 (NPCXIE) 的内部交易发起、审核与流转权限已取消。如需处理内部交易，请使用对应经营单元负责人或系统管理帐户。
         </p>
       </div>
     );

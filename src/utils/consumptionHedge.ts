@@ -2,6 +2,7 @@ import { MiningResource, ValueCreationLog, AuditStatus, RefineCategory, RefineTy
 import { getInitialRevenueCapacity, getInitialValueCapacity } from './miningCapacity';
 import { importNetAmount } from './purification';
 import { TIER_COEFFICIENTS } from '../constants/coefficients';
+import { isDynamicCostLog, isCreationCategoryLog } from './costCategory';
 
 export { importNetAmount };
 
@@ -62,11 +63,11 @@ export function calculateAccruedCosts(miningId: string, allLogs: ValueCreationLo
   );
 
   const C = resourceLogs
-    .filter(l => l && l.costCategory === 'C')
+    .filter(l => l && isDynamicCostLog(l) && l.costCategory === 'C')
     .reduce((sum, l) => sum + (l.dynamicCost !== undefined && l.dynamicCost !== null ? Number(l.dynamicCost) : (Number(l.amount) || 0)), 0);
 
   const B2 = resourceLogs
-    .filter(l => l && l.costCategory === 'B' && l.valueConsumptionMode === 'B2')
+    .filter(l => l && isDynamicCostLog(l) && l.costCategory === 'B' && l.valueConsumptionMode === 'B2')
     .reduce((sum, l) => sum + (l.dynamicCost !== undefined && l.dynamicCost !== null ? Number(l.dynamicCost) : (Number(l.amount) || 0)), 0);
 
   return { C, B2 };
@@ -135,6 +136,24 @@ export function normalizeRefineTier(costCategory?: string | null): 'T1' | 'T2' |
   return 'T3';
 }
 
+/**
+ * 统一读取流水成色档位 (SSOT)
+ * 优先读取 log.refineTier；若无（历史数据迁移兼容），对于创造单回退读取 normalizeRefineTier(log.costCategory)；缺省返回 'T3'。
+ */
+export function resolveLogRefineTier(log?: ValueCreationLog | null): 'T1' | 'T2' | 'T3' {
+  if (!log) return 'T3';
+  if (log.refineTier) {
+    return normalizeRefineTier(log.refineTier);
+  }
+  if (isCreationCategoryLog(log) && log.costCategory) {
+    return normalizeRefineTier(log.costCategory);
+  }
+  if (log.costCategory && (log.costCategory === 'T1' || log.costCategory === 'T2' || log.costCategory === 'T3')) {
+    return normalizeRefineTier(log.costCategory);
+  }
+  return 'T3';
+}
+
 export function getLogRefineFactor(log: ValueCreationLog, resource?: MiningResource, collector?: User): number {
   if (!log) return 0;
   const categoryStr = log.category as string;
@@ -158,7 +177,7 @@ export function getLogRefineFactor(log: ValueCreationLog, resource?: MiningResou
   const isHighRevenueExpert = collector ? ((collector.category || '').includes('高款专') || ((collector.secondaryRoles as string[]) || []).includes('高款专')) : false;
   const isRevenueSpecialist = collector ? ((collector.category || '').includes('款专') || ((collector.secondaryRoles as string[]) || []).includes('款专')) : false;
 
-  const tier = normalizeRefineTier(log.costCategory);
+  const tier = resolveLogRefineTier(log);
   if (categoryStr === RefineCategory.Value || categoryStr === 'Value' || categoryStr === '产值') {
     const coeffs = isHighValueExpert ? TIER_COEFFICIENTS.VALUE_MANAGER : TIER_COEFFICIENTS.VALUE_CHAN;
     if (tier === 'T1') return coeffs.Enterprise;
@@ -196,12 +215,8 @@ export function applyConsumptionHedgeToLogs(
     if (!log) return log;
     if (log.miningId !== miningId) return log;
 
-    // 排除成本类消耗单 (C, A, B2)
-    if (
-      log.costCategory === 'C' || 
-      log.costCategory === 'A' || 
-      (log.costCategory === 'B' && log.valueConsumptionMode === 'B2')
-    ) {
+    // 排除动态成本类消耗单
+    if (isDynamicCostLog(log)) {
       return log;
     }
 

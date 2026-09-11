@@ -32,6 +32,7 @@ import {
 } from '@/utils/reconcileMiningFromLogs';
 import { getLocalDateString, getLocalMonthString, isLogInFilter, resolveLogBusinessDate, isDateInRange } from '@/utils/dateUtils';
 import { formatMoney, roundMoney } from '@/utils/formatMoney';
+import { isDynamicCostLog } from '@/utils/costCategory';
 import { deriveProjectStatus } from '@/utils/projectStatus';
 import { formatProjectStatusLabel, formatRefineTypeLabel } from '@/utils/statusDisplay';
 
@@ -623,7 +624,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
       const isApproved = l.status === AuditStatus.Approved;
 
       if (isInPeriod) {
-        if (isApproved) {
+        if (isApproved && isDynamicCostLog(l)) {
           if (l.costCategory === 'A') aCosts += l.dynamicCost;
           if (l.costCategory === 'B' && l.valueConsumptionMode === 'B1') b1Costs += l.dynamicCost;
           if (l.costCategory === 'B' && l.valueConsumptionMode === 'B2') b2Costs += l.dynamicCost;
@@ -677,7 +678,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
     for (const l of activeAuditLogs) {
       const isInPeriod = isDateInRange(resolveLogBusinessDate(l), periodRange.startDateStr, periodRange.endDateStr);
       const isApproved = l.status === AuditStatus.Approved;
-      if (isInPeriod && isApproved) {
+      if (isInPeriod && isApproved && isDynamicCostLog(l)) {
         if (l.costCategory === 'C') {
           cCostsDynamic += l.dynamicCost || 0;
         }
@@ -777,7 +778,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
 
     const amountToInject = Math.abs(netBalance);
     showConfirm(
-      `确定执行【统筹池兜底注入】操作？\n\n• 刚性工资包：${formatMoney(rigidSalaryPackage)}\n• 当前收产包：${formatMoney(incomeWaterPool)}\n• 兜底缺口数值：${formatMoney(amountToInject)}\n\n确认后将从统筹池向收产包流入 ${formatMoney(amountToInject)} 收款确权积分。`,
+      `确定执行【统筹池兜底注入】操作？\n\n• 刚性工资包：${formatMoney(rigidSalaryPackage)}\n• 当前收产包：${formatMoney(incomeWaterPool)}\n• 兜底缺口数值：${formatMoney(amountToInject)}\n\n确认后将从统筹池向收产包流入 ${formatMoney(amountToInject)} 注入积分。`,
       () => {
         if (onSystemAdjustment) {
           const newLog = {
@@ -947,7 +948,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
       [6, '专家专项计提奖金池 (Bonus Pool)', totalBonus, '采集专家专项计提激励及理论分配池'],
       [7, '平台统筹留用池 (Platform Pool)', coordPool, '已确权收款20%提取与分红沉淀，用于刚性补足与对冲'],
       [8, '分红池纯结余 (Dividend Pool)', divPool, '覆盖成本与承兑后的净盈余沉淀（80%二次分配，20%注入统筹池）'],
-      [9, '组织造血对冲能力 (蓄水入库 / 刚性支出)', `${reservoirInflowVal} / ${isCostVisible ? totalRigidExpensesVal : '***'}`, '入库总蓄水对冲刚性底线开支能力比率'],
+      [9, '组织造血能力（对冲） (蓄水入库 / 刚性支出)', `${reservoirInflowVal} / ${isCostVisible ? totalRigidExpensesVal : '***'}`, '入库总蓄水对冲刚性底线开支能力比率'],
       [10, '全盘加权含金量 (%)', `${purityVal}%`, '全盘矿山资源与流水加权综合含金量评估']
     ];
 
@@ -1026,7 +1027,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
   ];
 
   return (
-    <div className="w-full max-w-7xl mx-auto space-y-4 md:space-y-6 lg:space-y-8 animate-in fade-in duration-700">
+    <div className="w-full space-y-4 md:space-y-6 animate-in fade-in duration-700">
       {/* Custom Banner Header - Moved to Top */}
       <div className={`bg-[#0f2b46] text-white px-6 md:px-8 py-5 md:py-6 flex flex-col items-center justify-center gap-2 md:gap-4 relative overflow-hidden ${UI_TOKENS.RADIUS_PANEL} shadow-xl`}>
         <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent pointer-events-none"></div>
@@ -1092,40 +1093,34 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
 
         {/* Bottom: Period Value Selector & Countdown & Meeting Sample Controls */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-3 border-t border-slate-100">
-          <div className="flex items-center gap-4 flex-wrap">
-            <div className="flex items-center gap-3 flex-wrap">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">时段切换</span>
-              <div className="flex flex-wrap bg-slate-50 p-1 rounded-xl border border-slate-100">
-                 {periodOptions.map((opt) => (
-                   <button
-                     key={opt.value}
-                     onClick={() => setPeriodValue(opt.value)}
-                     className={`px-3 md:px-4 py-1.5 rounded-lg text-[10px] font-black whitespace-nowrap transition-all ${
-                       periodValue === opt.value ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-200'
-                     }`}
-                   >
-                     {opt.label}
-                   </button>
-                 ))}
-              </div>
-            </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">时段切换</span>
+            <div className="flex flex-wrap items-center bg-slate-50 p-1 rounded-xl border border-slate-100">
+               {periodOptions.map((opt) => (
+                 <button
+                   key={opt.value}
+                   onClick={() => setPeriodValue(opt.value)}
+                   className={`px-3 md:px-4 py-1.5 rounded-lg text-[10px] font-black whitespace-nowrap transition-all ${
+                     periodValue === opt.value ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-200'
+                   }`}
+                 >
+                   {opt.label}
+                 </button>
+               ))}
 
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-100">
-              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">当前统计周期</span>
-              <span className="text-xs font-black text-slate-900">{currentPeriodLabel}</span>
-            </div>
-
-            {/* Countdown (Moved below next to period selector) */}
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-100">
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0"></div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">刚性核减倒计时</span>
-                <span className="text-[10px] font-black text-slate-700 font-mono tracking-tight">每月2日 00:00</span>
-              </div>
+               {/* 距刚性核减倒计时提示（移动至月份/时段选项右侧同行显示） */}
+               <div className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-lg border border-slate-200/80 shadow-xs ml-1.5">
+                 <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse shrink-0"></div>
+                 <div className="flex items-center gap-1.5 whitespace-nowrap">
+                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">距刚性核减</span>
+                   <span className="text-[9px] font-black text-slate-300">·</span>
+                   <span className="text-[10px] font-black text-slate-700 font-mono tracking-tight">每月2日 00:00</span>
+                 </div>
+               </div>
             </div>
           </div>
 
-          <div className="flex items-center flex-wrap gap-2.5 sm:ml-auto">
+          <div className="flex items-center justify-end flex-wrap gap-2.5 ml-auto">
             {/* 1) 留样状态文案 / 角标 */}
             {isSampleSupported ? (
               currentMeetingSample ? (
@@ -1216,7 +1211,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
 
       {/* 经营驾驶舱 - 核心指标 */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-        <Card className="p-3.5 bg-white border-slate-100 shadow-sm rounded-2xl flex flex-col justify-between">
+        <Card noPadding className="p-3 bg-white border-slate-100 shadow-sm rounded-2xl flex flex-col justify-between">
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">全盘加权含金量</span>
@@ -1236,16 +1231,19 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
               <span className={`text-2xl font-black tracking-tighter ${globalWeightedPurityState.color500}`}>{displayGlobalWeightedPurity.toFixed(1)}%</span>
               <span className="text-[10px] font-bold text-slate-400">加权平均</span>
             </div>
+            <span className="text-[10px] font-bold text-slate-400">
+              目标基准: 100%
+            </span>
           </div>
           <div className="mt-1.5 h-1 bg-slate-100 rounded-full overflow-hidden">
             <div 
               className={`h-full transition-all duration-1000 ${globalWeightedPurityState.color500.replace('text', 'bg')}`}
-              style={{ width: `${displayGlobalWeightedPurity}%` }}
+              style={{ width: `${Math.min(displayGlobalWeightedPurity, 100)}%` }}
             />
           </div>
         </Card>
 
-        <Card className="p-3.5 bg-white border-slate-100 shadow-sm rounded-2xl flex flex-col justify-between">
+        <Card noPadding className="p-3 bg-white border-slate-100 shadow-sm rounded-2xl flex flex-col justify-between">
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">组织造血能力 (对冲)</span>
@@ -1257,7 +1255,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
               </button>
             </div>
             <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
-              {((displayReservoirInflow / (displayTotalRigidExpenses || 1)) * 100).toFixed(0)}% 对冲
+              {((displayReservoirInflow / (displayTotalRigidExpenses || 1)) * 100).toFixed(0)}% 对冲比例
             </span>
           </div>
           <div className="flex items-baseline justify-between py-0.5">
@@ -1425,7 +1423,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
               </div>
             )}
 
-            <div className="p-2 md:p-4">
+            <div className="p-2 sm:p-3 md:p-3.5">
               <style>{`
               @keyframes flow-left {
                 0% { background-position: 0 0; }
@@ -1436,66 +1434,100 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                 100% { background-position: 40px 0; }
               }
               @keyframes flow-dash {
-                to { stroke-dashoffset: -18; }
+                to { stroke-dashoffset: -24; }
               }
+              .sandtable-canvas {
+                background-color: #f8fafc;
+                background-image: radial-gradient(#cbd5e1 1.2px, transparent 1.2px);
+                background-size: 24px 24px;
+              }
+              /* 6大核心水池公共基类：放大30% + 向内扩张凹陷质感 */
               .water-pool {
-                border-radius: 1rem;
+                border-radius: 1.125rem;
                 display: flex;
                 flex-direction: column;
                 align-items: center;
                 justify-content: center;
                 text-align: center;
                 position: absolute;
-                overflow: hidden;
-                transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+                overflow: visible;
+                transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
                 z-index: 10;
-                container-type: inline-size;
-                /* 极简几何立体感 */
+                min-width: 220px;
+                max-width: 390px;
+                min-height: 83px;
+                box-sizing: border-box;
+                border: 1.5px solid rgba(255, 255, 255, 0.4);
+                /* 向内收束多重内阴影 + 微弱中心高光浮雕 + 柔和投影 */
                 box-shadow: 
-                  0 12px 0 0 rgba(0,0,0,0.2),
-                  0 16px 24px rgba(0,0,0,0.3),
-                  inset 0 4px 8px rgba(255,255,255,0.5),
-                  inset 0 -8px 12px rgba(0,0,0,0.2);
-                border: 1px solid rgba(255,255,255,0.4);
+                  inset 0 4px 14px 0 rgba(0, 0, 0, 0.42),
+                  inset 0 -4px 10px 0 rgba(0, 0, 0, 0.32),
+                  inset 0 0 24px 2px rgba(255, 255, 255, 0.16),
+                  0 6px 18px -3px rgba(15, 23, 42, 0.22),
+                  0 2px 6px -1px rgba(15, 23, 42, 0.12);
               }
+              /* 交互反馈：微缩向内塌陷（scale 0.97）+ 内阴影向心加深 */
               .water-pool:hover {
-                transform: translate(-50%, calc(-50% + 6px)) scale(1.02) !important;
+                transform: translate(-50%, -50%) scale(0.97) !important;
                 box-shadow: 
-                  0 6px 0 0 rgba(0,0,0,0.2),
-                  0 8px 12px rgba(0,0,0,0.3),
-                  inset 0 4px 8px rgba(255,255,255,0.5),
-                  inset 0 -8px 12px rgba(0,0,0,0.2);
-                z-index: 20;
+                  inset 0 8px 22px 2px rgba(0, 0, 0, 0.62),
+                  inset 0 -6px 16px 2px rgba(0, 0, 0, 0.48),
+                  inset 0 0 32px 6px rgba(255, 255, 255, 0.28),
+                  0 3px 10px -2px rgba(15, 23, 42, 0.28);
+                filter: brightness(1.06);
+                z-index: 25;
               }
-              .water-pool::before {
-                content: '';
-                position: absolute;
-                top: 6px; left: 6px; right: 6px; bottom: 6px;
-                border-radius: 0.75rem;
-                border: 1px solid rgba(255,255,255,0.3);
-                pointer-events: none;
+
+              /* 1. 收产包：科技深邃蓝（中心高光 -> 边缘深暗向心收束） */
+              .pool-shouchan {
+                background: radial-gradient(circle at 50% 50%, #3b82f6 0%, #1d4ed8 48%, #172554 100%);
+                border-color: rgba(147, 197, 253, 0.45);
               }
-              .water-pool::after {
-                content: '';
-                position: absolute;
-                top: 0; left: 0; right: 0; bottom: 0;
-                border-radius: 1rem;
-                background: linear-gradient(135deg, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0.1) 100%);
-                pointer-events: none;
+              /* 2. 刚性池：玫瑰酒红（中心明艳 -> 边缘深浓暗红） */
+              .pool-gangxing {
+                background: radial-gradient(circle at 50% 50%, #f43f5e 0%, #be123c 48%, #4c0519 100%);
+                border-color: rgba(254, 205, 211, 0.45);
               }
+              /* 3. 统筹池：帝王紫罗兰（中心明亮 -> 边缘深紫深渊） */
+              .pool-tongchou {
+                background: radial-gradient(circle at 50% 50%, #a855f7 0%, #6d28d9 48%, #2e1065 100%);
+                border-color: rgba(221, 214, 254, 0.5);
+              }
+              /* 4. 奖金池：翡翠翠绿（中心莹绿 -> 边缘墨绿敛聚） */
+              .pool-jiangjin {
+                background: radial-gradient(circle at 50% 50%, #10b981 0%, #047857 48%, #022c22 100%);
+                border-color: rgba(167, 243, 208, 0.45);
+              }
+              /* 5. 承兑池：琥珀金棕（中心明亮金 -> 边缘深棕焦灼） */
+              .pool-chengdui {
+                background: radial-gradient(circle at 50% 50%, #f59e0b 0%, #b45309 48%, #451a03 100%);
+                border-color: rgba(253, 230, 138, 0.45);
+              }
+              /* 6. 分红池：星空深靛（中心靛青 -> 边缘幽蓝深邃） */
+              .pool-fenhong {
+                background: radial-gradient(circle at 50% 50%, #6366f1 0%, #4338ca 48%, #1e1b4b 100%);
+                border-color: rgba(199, 210, 254, 0.45);
+              }
+
               .flow-line {
-                stroke-dasharray: 12, 6;
-                animation: flow-dash 1s linear infinite;
+                stroke-dasharray: 8 6;
+                animation: flow-dash 1.2s linear infinite;
               }
             `}</style>
             
-            <div className="relative w-full aspect-[4/3] md:aspect-[5/3] bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden mb-4">
-              <div className="absolute top-4 left-5 right-5 flex items-center justify-between z-10">
-                <div className="text-xl font-black text-slate-700">价值流转沙盘</div>
+            <div className="relative w-full h-[477px] sm:h-[495px] md:h-[513px] sandtable-canvas rounded-2xl md:rounded-[1.5rem] border border-slate-200/90 shadow-sm overflow-hidden mb-3 select-none">
+              {/* Sandtable Header */}
+              <div className="absolute top-0 left-0 right-0 h-11 px-4 flex items-center justify-between z-30 border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                  <div className="text-sm md:text-base font-black text-slate-800 tracking-tight flex items-center gap-1.5">
+                    <span>价值流转沙盘</span>
+                  </div>
+                </div>
                 {waterMetrics.incomeWaterPool < waterMetrics.rigidSalaryPackage && (
                   <button
                     onClick={handleTriggerCoordinationAdjustment}
-                    className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 transition-all transform active:scale-95 cursor-pointer"
+                    className="px-3 py-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-lg text-[10px] md:text-xs font-bold shadow-xs flex items-center gap-1.5 transition-all transform active:scale-95 cursor-pointer"
                     title="收产包低于刚性工资包，点击执行统筹池兜底注入（须弹窗确认）"
                   >
                     <span>🛡️</span>
@@ -1503,169 +1535,159 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                   </button>
                 )}
               </div>
+
               {/* SVG Pipes Background */}
-              <svg className="absolute inset-0 w-full h-full z-0">
+              <svg 
+                viewBox="0 0 1000 500" 
+                preserveAspectRatio="none" 
+                className="absolute inset-0 w-full h-full z-0 pointer-events-none"
+              >
                 <defs>
-                  <marker id="arrow-start-gray" markerWidth="24" markerHeight="24" refX="4" refY="12" orient="auto" markerUnits="userSpaceOnUse">
-                    <path d="M 20 4 L 4 12 L 20 20 Z" fill="#94a3b8" />
+                  {/* Soft Drop Shadow Filter for Badges */}
+                  <filter id="badge-shadow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#0f172a" floodOpacity="0.08" />
+                  </filter>
+
+                  {/* Markers for Inflow & Outflow */}
+                  <marker id="arrow-blue" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                    <path d="M 1 1.5 L 9 5 L 1 8.5 Z" fill="#2563eb" />
                   </marker>
-                  <marker id="arrow-end-gray" markerWidth="24" markerHeight="24" refX="20" refY="12" orient="auto" markerUnits="userSpaceOnUse">
-                    <path d="M 4 4 L 20 12 L 4 20 Z" fill="#94a3b8" />
+                  <marker id="arrow-red" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                    <path d="M 1 1.5 L 9 5 L 1 8.5 Z" fill="#e11d48" />
                   </marker>
-                  <marker id="arrow-start-green" markerWidth="24" markerHeight="24" refX="4" refY="12" orient="auto" markerUnits="userSpaceOnUse">
-                    <path d="M 20 4 L 4 12 L 20 20 Z" fill="#10b981" />
+                  <marker id="arrow-green" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                    <path d="M 1 1.5 L 9 5 L 1 8.5 Z" fill="#059669" />
                   </marker>
-                  <marker id="arrow-end-green" markerWidth="24" markerHeight="24" refX="20" refY="12" orient="auto" markerUnits="userSpaceOnUse">
-                    <path d="M 4 4 L 20 12 L 4 20 Z" fill="#10b981" />
+                  <marker id="arrow-purple" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                    <path d="M 1 1.5 L 9 5 L 1 8.5 Z" fill="#7c3aed" />
                   </marker>
-                  <marker id="arrow-start-blue" markerWidth="24" markerHeight="24" refX="4" refY="12" orient="auto" markerUnits="userSpaceOnUse">
-                    <path d="M 20 4 L 4 12 L 20 20 Z" fill="#3b82f6" />
-                  </marker>
-                  <marker id="arrow-end-blue" markerWidth="24" markerHeight="24" refX="20" refY="12" orient="auto" markerUnits="userSpaceOnUse">
-                    <path d="M 4 4 L 20 12 L 4 20 Z" fill="#3b82f6" />
-                  </marker>
-                  <marker id="arrow-start-purple" markerWidth="24" markerHeight="24" refX="4" refY="12" orient="auto" markerUnits="userSpaceOnUse">
-                    <path d="M 20 4 L 4 12 L 20 20 Z" fill="#8b5cf6" />
-                  </marker>
-                  <marker id="arrow-end-purple" markerWidth="24" markerHeight="24" refX="20" refY="12" orient="auto" markerUnits="userSpaceOnUse">
-                    <path d="M 4 4 L 20 12 L 4 20 Z" fill="#8b5cf6" />
-                  </marker>
-                  <marker id="arrow-end-red" markerWidth="24" markerHeight="24" refX="20" refY="12" orient="auto" markerUnits="userSpaceOnUse">
-                    <path d="M 4 4 L 20 12 L 4 20 Z" fill="#f43f5e" />
-                  </marker>
-                  <marker id="arrow-end-yellow" markerWidth="24" markerHeight="24" refX="20" refY="12" orient="auto" markerUnits="userSpaceOnUse">
-                    <path d="M 4 4 L 20 12 L 4 20 Z" fill="#f59e0b" />
+                  <marker id="arrow-yellow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                    <path d="M 1 1.5 L 9 5 L 1 8.5 Z" fill="#d97706" />
                   </marker>
                 </defs>
 
-                {/* Helper for Double-Layer Pipe */}
-                {/* 
-                  Usage: <DoublePipe x1 y1 x2 y2 label? />
-                  For simplicity, I will inline the logic.
-                */}
-
-                {/* 1. 收产包 -> 刚性池 (资源流向) */}
+                {/* 1. 收产包 -> 刚性池 (日常运维消耗) */}
                 <g className="pipe-group">
-                  <line x1="30%" y1="25%" x2="68%" y2="25%" stroke="#eab308" strokeWidth="12" strokeLinecap="round" />
-                  <line x1="30%" y1="25%" x2="68%" y2="25%" stroke="#3b82f6" strokeWidth="4" strokeLinecap="round" className="flow-line" markerStart="url(#arrow-end-blue)" markerEnd="url(#arrow-end-blue)" />
+                  <line x1="280" y1="110" x2="720" y2="110" stroke="#e2e8f0" strokeWidth="6" strokeLinecap="round" />
+                  <line x1="280" y1="110" x2="720" y2="110" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-blue)" />
+                  {/* Outflow Arrow (流出箭头) */}
+                  <polygon points="315,106 325,110 315,114" fill="#2563eb" />
                 </g>
 
-                {/* 2. 收产包 -> 统筹池 (营收风险提成) */}
+                {/* 2. 收产包(收款包) -> 统筹池 (20% 确权收款后台) */}
                 <g className="pipe-group">
-                  <line x1="18%" y1="35%" x2="18%" y2="55%" stroke="#eab308" strokeWidth="12" strokeLinecap="round" />
-                  <line x1="18%" y1="55%" x2="32%" y2="55%" stroke="#eab308" strokeWidth="12" strokeLinecap="round" />
-                  
-                  <line x1="18%" y1="35%" x2="18%" y2="55%" stroke="#3b82f6" strokeWidth="4" strokeLinecap="round" className="flow-line" markerStart="url(#arrow-end-blue)" markerEnd="url(#arrow-end-blue)" />
-                  <line x1="18%" y1="55%" x2="32%" y2="55%" stroke="#3b82f6" strokeWidth="4" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-end-blue)" />
+                  <path d="M 185 150 L 185 265 L 400 265" fill="none" stroke="#e2e8f0" strokeWidth="6" strokeLinejoin="round" strokeLinecap="round" />
+                  <path d="M 185 150 L 185 265 L 400 265" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-blue)" />
+                  {/* Outflow Arrow (流出箭头) */}
+                  <polygon points="181,175 185,185 189,175" fill="#2563eb" />
                 </g>
 
                 {/* 3. 刚性池 -> 奖金池 (理论分配) */}
                 <g className="pipe-group">
-                  <line x1="82%" y1="35%" x2="82%" y2="50%" stroke="#eab308" strokeWidth="12" strokeLinecap="round" />
-                  <line x1="82%" y1="35%" x2="82%" y2="50%" stroke="#f43f5e" strokeWidth="4" strokeLinecap="round" className="flow-line" markerStart="url(#arrow-end-red)" markerEnd="url(#arrow-end-red)" />
+                  <line x1="815" y1="150" x2="815" y2="240" stroke="#e2e8f0" strokeWidth="6" strokeLinecap="round" />
+                  <line x1="815" y1="150" x2="815" y2="240" stroke="#f43f5e" strokeWidth="2.5" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-red)" />
+                  {/* Outflow Arrow (流出箭头) */}
+                  <polygon points="811,165 815,175 819,165" fill="#e11d48" />
                 </g>
 
                 {/* 4. 奖金池 -> 承兑池 (计提承兑) */}
                 <g className="pipe-group">
-                  <line x1="82%" y1="60%" x2="82%" y2="80%" stroke="#eab308" strokeWidth="12" strokeLinecap="round" />
-                  <line x1="82%" y1="60%" x2="82%" y2="80%" stroke="#10b981" strokeWidth="4" strokeLinecap="round" className="flow-line" markerStart="url(#arrow-end-green)" markerEnd="url(#arrow-end-green)" />
+                  <line x1="815" y1="310" x2="815" y2="395" stroke="#e2e8f0" strokeWidth="6" strokeLinecap="round" />
+                  <line x1="815" y1="310" x2="815" y2="395" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-green)" />
+                  {/* Outflow Arrow (流出箭头) */}
+                  <polygon points="811,325 815,335 819,325" fill="#059669" />
                 </g>
 
                 {/* 5. 承兑池 -> 分红池 (沉淀盈余) */}
                 <g className="pipe-group">
-                  <line x1="70%" y1="87%" x2="30%" y2="87%" stroke="#eab308" strokeWidth="12" strokeLinecap="round" />
-                  <line x1="70%" y1="87%" x2="30%" y2="87%" stroke="#f59e0b" strokeWidth="4" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-end-yellow)" />
+                  <line x1="720" y1="430" x2="280" y2="430" stroke="#e2e8f0" strokeWidth="6" strokeLinecap="round" />
+                  <line x1="720" y1="430" x2="280" y2="430" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-yellow)" />
+                  {/* Outflow Arrow (流出箭头) */}
+                  <polygon points="685,426 675,430 685,434" fill="#d97706" />
                 </g>
 
-                {/* 6. 分红池 -> 统筹池 (20% 二次循环) */}
+                {/* 6. 分红池 -> 统筹池 (20% 分红后台) */}
                 <g className="pipe-group">
-                  <line x1="18%" y1="77%" x2="18%" y2="55%" stroke="#eab308" strokeWidth="12" strokeLinecap="round" />
-                  <line x1="18%" y1="55%" x2="32%" y2="55%" stroke="#eab308" strokeWidth="12" strokeLinecap="round" />
-                  
-                  <line x1="18%" y1="77%" x2="18%" y2="55%" stroke="#a855f7" strokeWidth="4" strokeLinecap="round" className="flow-line" markerStart="url(#arrow-end-purple)" markerEnd="url(#arrow-end-purple)" />
-                  <line x1="18%" y1="55%" x2="32%" y2="55%" stroke="#a855f7" strokeWidth="4" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-end-purple)" />
+                  <path d="M 185 390 L 185 290 L 400 290" fill="none" stroke="#e2e8f0" strokeWidth="6" strokeLinejoin="round" strokeLinecap="round" />
+                  <path d="M 185 390 L 185 290 L 400 290" fill="none" stroke="#8b5cf6" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-purple)" />
+                  {/* Outflow Arrow (流出箭头) */}
+                  <polygon points="181,370 185,360 189,370" fill="#7c3aed" />
                 </g>
 
                 {/* 7. 统筹池 -> 刚性池 (统筹补足) */}
                 <g className="pipe-group">
-                  <line x1="44%" y1="47%" x2="44%" y2="25%" stroke="#eab308" strokeWidth="12" strokeLinecap="round" />
-                  <line x1="44%" y1="25%" x2="70%" y2="25%" stroke="#eab308" strokeWidth="12" strokeLinecap="round" />
-                  
-                  <line x1="44%" y1="47%" x2="44%" y2="25%" stroke="#3b82f6" strokeWidth="4" strokeLinecap="round" className="flow-line" markerStart="url(#arrow-end-blue)" markerEnd="url(#arrow-end-blue)" />
-                  <line x1="44%" y1="25%" x2="70%" y2="25%" stroke="#3b82f6" strokeWidth="4" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-end-blue)" />
+                  <path d="M 500 235 L 500 130 L 720 130" fill="none" stroke="#e2e8f0" strokeWidth="6" strokeLinejoin="round" strokeLinecap="round" />
+                  <path d="M 500 235 L 500 130 L 720 130" fill="none" stroke="#f43f5e" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-red)" />
+                  {/* Outflow Arrow (流出箭头) */}
+                  <polygon points="496,215 500,205 504,215" fill="#e11d48" />
                 </g>
 
-                {/* 8. 分红池 -> 奖金池 (盈余二次分配) */}
+                {/* 8. 分红池 -> 奖金池 (80% 盈余二次分配) */}
                 <g className="pipe-group">
-                  {/* Background pipe */}
-                  <line x1="30%" y1="82%" x2="68%" y2="82%" stroke="#eab308" strokeWidth="12" strokeLinecap="round" />
-                  <line x1="68%" y1="82%" x2="68%" y2="55%" stroke="#eab308" strokeWidth="12" strokeLinecap="round" />
-                  <line x1="68%" y1="55%" x2="70%" y2="55%" stroke="#eab308" strokeWidth="12" strokeLinecap="round" />
-                  
-                  {/* Flowing pipe */}
-                  <line x1="30%" y1="82%" x2="68%" y2="82%" stroke="#10b981" strokeWidth="4" strokeLinecap="round" className="flow-line" />
-                  <line x1="68%" y1="82%" x2="68%" y2="55%" stroke="#10b981" strokeWidth="4" strokeLinecap="round" className="flow-line" />
-                  <line x1="68%" y1="55%" x2="70%" y2="55%" stroke="#10b981" strokeWidth="4" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-end-green)" />
+                  <path d="M 280 415 L 670 415 L 670 275 L 720 275" fill="none" stroke="#e2e8f0" strokeWidth="6" strokeLinejoin="round" strokeLinecap="round" />
+                  <path d="M 280 415 L 670 415 L 670 275 L 720 275" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-green)" />
+                  {/* Outflow Arrow (流出箭头) */}
+                  <polygon points="310,411 320,415 310,419" fill="#059669" />
                 </g>
               </svg>
 
-              {/* 统筹池 (Center-Left) */}
+              {/* 3. 统筹池 (Center, Row 2) */}
               <div 
-                className="water-pool text-white shadow-lg w-[24%] aspect-[5/3] cursor-pointer group hover:scale-105 transition-transform" 
-                style={{ background: 'linear-gradient(135deg, #a855f7, #7e22ce)', left: '44%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-1s' }}
+                className="water-pool pool-tongchou text-white shadow-md w-fit min-w-[220px] max-w-[370px] min-h-[86px] p-3 sm:p-3.5 cursor-pointer group flex flex-col items-center justify-center" 
+                style={{ left: '50%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-1s' }}
                 onClick={handleTriggerCoordinationAdjustment}
                 title="统筹池：点击可执行统筹兜底资金注入（须弹窗确认）"
               >
-                <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
-                <h4 className="text-[10px] font-black mb-0.5 relative z-10 drop-shadow-md leading-none whitespace-nowrap">统筹池</h4>
-                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{formatMoney(displayPlatformCoordinationPool)}</div>
-                <div className="text-[8px] font-bold text-white/70 relative z-10 mt-1 tracking-tight group-hover:text-white">点击兜底注入</div>
+                <h4 className="text-xs md:text-sm font-black mb-1 relative z-10 drop-shadow-xs leading-tight whitespace-nowrap text-purple-100 uppercase tracking-wide">统筹池</h4>
+                <div className="text-sm md:text-base font-black font-mono relative z-10 drop-shadow-xs leading-tight whitespace-nowrap">{formatMoney(displayPlatformCoordinationPool)}</div>
+                <div className="text-[9px] font-bold text-purple-200 bg-black/30 px-2.5 py-0.5 rounded-full border border-white/20 mt-1.5 tracking-tight group-hover:bg-white group-hover:text-purple-700 transition-colors whitespace-nowrap">点击兜底注入</div>
               </div>
 
-              {/* 1. 收产包 (Top Left) */}
-              <div className="water-pool text-white shadow-lg w-[24%] aspect-[5/3]" style={{ background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', left: '18%', top: '25%', transform: 'translate(-50%, -50%)', animationDelay: '0s' }}>
-                <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
-                <h4 className="text-[10px] font-black mb-0.5 relative z-10 drop-shadow-md leading-none">收产包</h4>
-                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md border-b border-blue-400/50 pb-0.5 mb-1 w-[95%] leading-none text-center">{formatMoney(displayIncomeWaterPool)}</div>
-                <div className="grid grid-cols-2 gap-1 relative z-10 w-[95%] text-[8px] md:text-[9px]">
-                  <div className="bg-amber-500/20 px-1 py-0.5 rounded flex flex-col items-center">
-                    <span className="font-bold">收款包</span>
-                    <span className="font-mono">{formatMoney(displayRevenueWater)}</span>
+              {/* 1. 收产包 (Top Left, Row 1) */}
+              <div 
+                className="water-pool pool-shouchan text-white shadow-md w-fit min-w-[220px] max-w-[400px] min-h-[86px] p-3 sm:p-3.5 flex flex-col items-center justify-center" 
+                style={{ left: '18.5%', top: '22%', transform: 'translate(-50%, -50%)', animationDelay: '0s' }}
+              >
+                <h4 className="text-xs md:text-sm font-black mb-1 relative z-10 drop-shadow-xs leading-tight whitespace-nowrap text-blue-100 uppercase tracking-wide">收产包</h4>
+                <div className="text-sm md:text-base font-black font-mono relative z-10 drop-shadow-xs border-b border-white/20 pb-1 mb-1.5 w-full leading-tight text-center whitespace-nowrap">{formatMoney(displayIncomeWaterPool)}</div>
+                <div className="flex items-center gap-2 relative z-10 w-full text-[8px] md:text-[9px]">
+                  <div className="bg-black/30 px-2 py-1 rounded-lg border border-white/15 flex-1 flex flex-col items-center justify-center whitespace-nowrap">
+                    <span className="font-bold text-white/85 leading-tight">收款包</span>
+                    <span className="font-mono font-bold text-amber-200 leading-tight">{formatMoney(displayRevenueWater)}</span>
                   </div>
-                  <div className="bg-emerald-500/20 px-1 py-0.5 rounded flex flex-col items-center">
-                    <span className="font-bold">产兑包</span>
-                    <span className="font-mono">{formatMoney(displayValueWater)}</span>
+                  <div className="bg-black/30 px-2 py-1 rounded-lg border border-white/15 flex-1 flex flex-col items-center justify-center whitespace-nowrap">
+                    <span className="font-bold text-white/85 leading-tight">产兑包</span>
+                    <span className="font-mono font-bold text-emerald-200 leading-tight">{formatMoney(displayValueWater)}</span>
                   </div>
                 </div>
               </div>
 
-              {/* 2. 刚性池 (Top Right) */}
+              {/* 2. 刚性池 (Top Right, Row 1) */}
               {(() => {
                 const operatingLoss = displayOperatingLoss;
                 const totalRigid = displayTotalRigidExpenses + operatingLoss;
                 return (
                   <div 
-                    className="water-pool text-white shadow-lg w-[28%] aspect-[2/1] cursor-pointer group" 
-                    style={{ background: 'linear-gradient(135deg, #f43f5e, #be123c)', left: '82%', top: '25%', transform: 'translate(-50%, -50%)', animationDelay: '-2s' }}
+                    className="water-pool pool-gangxing text-white shadow-md w-fit min-w-[235px] max-w-[415px] min-h-[86px] p-3 sm:p-3.5 cursor-pointer group flex flex-col items-center justify-center" 
+                    style={{ left: '81.5%', top: '22%', transform: 'translate(-50%, -50%)', animationDelay: '-2s' }}
                     onClick={() => onSwitchTab?.('consumption')}
                   >
-                    <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
-                    <h4 className="text-[10px] font-black mb-0.5 relative z-10 drop-shadow-md leading-none">刚性池</h4>
-                    <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md border-b border-rose-400/50 pb-0.5 mb-1 w-[90%] leading-none text-center">
+                    <h4 className="text-xs md:text-sm font-black mb-1 relative z-10 drop-shadow-xs leading-tight whitespace-nowrap text-rose-100 uppercase tracking-wide">刚性池</h4>
+                    <div className="text-sm md:text-base font-black font-mono relative z-10 drop-shadow-xs border-b border-white/20 pb-1 mb-1.5 w-full leading-tight text-center whitespace-nowrap">
                       {maskMoney(totalRigid)}
                     </div>
                     
-                    <div className="grid grid-cols-2 gap-1 relative z-10 w-[95%] text-[8px] md:text-[9px]">
-                      <div className="bg-rose-400/20 px-1 py-0.5 rounded flex flex-col items-center">
-                        <span className="font-bold truncate w-full text-center">👤刚性包</span>
-                        <span className="font-mono">{maskMoney(displayTotalRigidExpenses)}</span>
+                    <div className="flex items-center gap-2 relative z-10 w-full text-[8px] md:text-[9px]">
+                      <div className="bg-black/30 px-2 py-1 rounded-lg border border-white/15 flex-1 flex flex-col items-center justify-center whitespace-nowrap">
+                        <span className="font-bold text-white/85 truncate w-full text-center leading-tight">👤刚性包</span>
+                        <span className="font-mono font-bold text-white leading-tight">{maskMoney(displayTotalRigidExpenses)}</span>
                       </div>
-                      <div className="bg-rose-400/20 px-1 py-0.5 rounded flex flex-col items-center group/loss relative" title="运维损耗池">
-                        <span className="font-bold truncate w-full text-center">📉损耗</span>
-                        <span className="font-mono">{maskMoney(operatingLoss)}</span>
+                      <div className="bg-black/30 px-2 py-1 rounded-lg border border-white/15 flex-1 flex flex-col items-center justify-center group/loss relative whitespace-nowrap" title="运维损耗池">
+                        <span className="font-bold text-white/85 truncate w-full text-center leading-tight">📉损耗</span>
+                        <span className="font-mono font-bold text-rose-200 leading-tight">{maskMoney(operatingLoss)}</span>
                         
                         {/* Tooltip for breakdown */}
-                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-32 p-2 bg-slate-800 text-white text-[9px] rounded-lg shadow-2xl opacity-0 group-hover/loss:opacity-100 transition-all duration-200 pointer-events-none z-50 border border-slate-700 backdrop-blur-md">
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-36 p-2 bg-slate-800 text-white text-[9px] rounded-lg shadow-2xl opacity-0 group-hover/loss:opacity-100 transition-all duration-200 pointer-events-none z-50 border border-slate-700 backdrop-blur-md">
                           <div className="text-[10px] font-black border-b border-slate-600 mb-1 pb-1 text-rose-400">损耗明细</div>
                           <div className="flex justify-between w-full mb-0.5"><span>A消耗:</span> <span className="font-mono">{maskMoney(waterMetrics.aCosts)}</span></div>
                           <div className="flex justify-between w-full mb-0.5"><span>B1消耗:</span> <span className="font-mono">{maskMoney(waterMetrics.b1Costs)}</span></div>
@@ -1677,44 +1699,90 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                 );
               })()}
 
-              {/* 3. 奖金池 (Middle Right) */}
-              <div className="water-pool text-white shadow-lg w-[24%] aspect-[5/3]" style={{ background: 'linear-gradient(135deg, #10b981, #047857)', left: '82%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-3s' }}>
-                <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
-                <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none">奖金池</h4>
-                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{formatMoney(displayTotalBonusPool)}</div>
+              {/* 4. 奖金池 (Middle Right, Row 2) */}
+              <div 
+                className="water-pool pool-jiangjin text-white shadow-md w-fit min-w-[220px] max-w-[370px] min-h-[86px] p-3 sm:p-3.5 flex flex-col items-center justify-center" 
+                style={{ left: '81.5%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-3s' }}
+              >
+                <h4 className="text-xs md:text-sm font-black mb-1 relative z-10 drop-shadow-xs leading-tight whitespace-nowrap text-emerald-100 uppercase tracking-wide">奖金池</h4>
+                <div className="text-sm md:text-base font-black font-mono relative z-10 drop-shadow-xs leading-tight whitespace-nowrap">{formatMoney(displayTotalBonusPool)}</div>
               </div>
 
-              {/* 4. 承兑池 (Bottom Right) */}
-              <div className="water-pool text-white shadow-lg w-[24%] aspect-[5/3]" style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)', left: '82%', top: '85%', transform: 'translate(-50%, -50%)', animationDelay: '-4s' }}>
-                <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
-                <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none">承兑池</h4>
-                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md leading-none">{formatMoney(displayTotalBonusPool)}</div>
+              {/* 5. 承兑池 (Bottom Right, Row 3) */}
+              <div 
+                className="water-pool pool-chengdui text-white shadow-md w-fit min-w-[220px] max-w-[370px] min-h-[86px] p-3 sm:p-3.5 flex flex-col items-center justify-center" 
+                style={{ left: '81.5%', top: '86%', transform: 'translate(-50%, -50%)', animationDelay: '-4s' }}
+              >
+                <h4 className="text-xs md:text-sm font-black mb-1 relative z-10 drop-shadow-xs leading-tight whitespace-nowrap text-amber-100 uppercase tracking-wide">承兑池</h4>
+                <div className="text-sm md:text-base font-black font-mono relative z-10 drop-shadow-xs leading-tight whitespace-nowrap">{formatMoney(displayTotalBonusPool)}</div>
               </div>
 
-              {/* 5. 分红池 (Bottom Left) */}
-              <div className="water-pool text-white shadow-lg w-[24%] aspect-[5/3]" style={{ background: 'linear-gradient(135deg, #a855f7, #7e22ce)', left: '18%', top: '85%', transform: 'translate(-50%, -50%)', animationDelay: '-6s' }}>
-                <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
-                <h4 className="text-[10px] font-black mb-1 relative z-10 drop-shadow-md leading-none">分红池</h4>
-                <div className="text-[10px] font-black font-mono relative z-10 drop-shadow-md border-b border-white/20 pb-0.5 mb-1 w-[90%] leading-none text-center">
+              {/* 6. 分红池 (Bottom Left, Row 3) */}
+              <div 
+                className="water-pool pool-fenhong text-white shadow-md w-fit min-w-[220px] max-w-[370px] min-h-[86px] p-3 sm:p-3.5 flex flex-col items-center justify-center" 
+                style={{ left: '18.5%', top: '86%', transform: 'translate(-50%, -50%)', animationDelay: '-6s' }}
+              >
+                <h4 className="text-xs md:text-sm font-black mb-1 relative z-10 drop-shadow-xs leading-tight whitespace-nowrap text-indigo-100 uppercase tracking-wide">分红池</h4>
+                <div className="text-sm md:text-base font-black font-mono relative z-10 drop-shadow-xs leading-tight text-center whitespace-nowrap">
                   {formatMoney(displayDividendPool)}
                 </div>
-                <div className={`text-[8px] font-bold ${waterMetrics.fhctzCost > 0 ? 'text-amber-300' : 'text-white/40'} relative z-10 uppercase tracking-tighter`}>
-                  {`统筹补足(fhctz): ${formatMoney(waterMetrics.fhctzCost)}`}
-                </div>
+                {waterMetrics.fhctzCost > 0 && (
+                  <div className="text-[8px] md:text-[9px] font-bold text-amber-300 relative z-10 uppercase tracking-tighter leading-tight whitespace-nowrap mt-1">
+                    统筹补足: {formatMoney(waterMetrics.fhctzCost)}
+                  </div>
+                )}
               </div>
 
-              <svg className="absolute inset-0 w-full h-full z-50 pointer-events-none">
-                <text x="18%" y="42%" fill="#3b82f6" fontSize="10" fontWeight="black" textAnchor="middle" className="drop-shadow-[0_1px_2px_rgba(255,255,255,0.9)]">20% 已确权收款</text>
-                <text x="82%" y="42%" fill="#10b981" fontSize="10" fontWeight="black" textAnchor="middle" className="drop-shadow-[0_1px_2px_rgba(255,255,255,0.9)]">奖金理论分配</text>
-                <text x="82%" y="72%" fill="#f59e0b" fontSize="10" fontWeight="black" textAnchor="middle" className="drop-shadow-[0_1px_2px_rgba(255,255,255,0.9)]">计提承兑</text>
-                <text x="56%" y="22%" fill="#3b82f6" fontSize="10" fontWeight="black" textAnchor="middle" className="drop-shadow-[0_1px_2px_rgba(255,255,255,0.9)]">统筹补足</text>
-                <text x="50%" y="91%" fill="#a855f7" fontSize="9" fontWeight="black" textAnchor="middle" className="drop-shadow-[0_1px_2px_rgba(255,255,255,0.9)]">沉淀盈余</text>
-                <text x="18%" y="62%" fill="#3b82f6" fontSize="10" fontWeight="black" textAnchor="middle" className="drop-shadow-[0_1px_2px_rgba(255,255,255,0.9)]">20% 循环</text>
-                <text x="44%" y="80%" fill="#10b981" fontSize="9" fontWeight="black" textAnchor="middle" className="drop-shadow-[0_1px_2px_rgba(255,255,255,0.9)]">80% 盈余二次分配</text>
+              {/* SVG Labels Badges (Overlay with crisp background pills & drop shadows) */}
+              <svg 
+                viewBox="0 0 1000 500" 
+                preserveAspectRatio="none" 
+                className="absolute inset-0 w-full h-full z-20 pointer-events-none"
+              >
+                {/* 1. 日常运维消耗 */}
+                <g filter="url(#badge-shadow)">
+                  <rect x="425" y="70" width="140" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#93c5fd" strokeWidth="1" />
+                  <text x="495" y="85" fill="#2563eb" fontSize="9.5" fontWeight="bold" textAnchor="middle">日常运维消耗</text>
+                </g>
+                {/* 2. 收款包 -> 统筹池 (20% 确权收款) - 上移至蓝色管线上方 */}
+                <g filter="url(#badge-shadow)">
+                  <rect x="245" y="235" width="135" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#93c5fd" strokeWidth="1" />
+                  <text x="312.5" y="250" fill="#2563eb" fontSize="9.5" fontWeight="bold" textAnchor="middle">收款包（20%）后台</text>
+                </g>
+                {/* 奖金理论分配 */}
+                <g filter="url(#badge-shadow)">
+                  <rect x="770" y="184" width="120" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#fecdd3" strokeWidth="1" />
+                  <text x="830" y="199" fill="#e11d48" fontSize="9.5" fontWeight="bold" textAnchor="middle">理论分配</text>
+                </g>
+                {/* 计提承兑 */}
+                <g filter="url(#badge-shadow)">
+                  <rect x="770" y="341" width="120" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#a7f3d0" strokeWidth="1" />
+                  <text x="830" y="356" fill="#059669" fontSize="9.5" fontWeight="bold" textAnchor="middle">计提承兑</text>
+                </g>
+                {/* 统筹补足 */}
+                <g filter="url(#badge-shadow)">
+                  <rect x="545" y="142" width="140" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#fecdd3" strokeWidth="1" />
+                  <text x="615" y="157" fill="#e11d48" fontSize="9.5" fontWeight="bold" textAnchor="middle">统筹补足注入</text>
+                </g>
+                {/* 沉淀盈余 */}
+                <g filter="url(#badge-shadow)">
+                  <rect x="435" y="444" width="130" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#fde68a" strokeWidth="1" />
+                  <text x="500" y="459" fill="#d97706" fontSize="9.5" fontWeight="bold" textAnchor="middle">沉淀盈余</text>
+                </g>
+                {/* 20% 分红后台 (统筹池左侧 紫色SVG管线下方) */}
+                <g filter="url(#badge-shadow)">
+                  <rect x="250" y="302" width="125" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#ddd6fe" strokeWidth="1" />
+                  <text x="312.5" y="317" fill="#7c3aed" fontSize="9.5" fontWeight="bold" textAnchor="middle">20%分红后台</text>
+                </g>
+                {/* 80% 盈余二次分配 */}
+                <g filter="url(#badge-shadow)">
+                  <rect x="370" y="379" width="160" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#a7f3d0" strokeWidth="1" />
+                  <text x="450" y="394" fill="#059669" fontSize="9.5" fontWeight="bold" textAnchor="middle">80% 盈余二次分配</text>
+                </g>
               </svg>
             </div>
 
-            <div className="mt-4 p-4 bg-slate-50 rounded-[1.5rem] border border-slate-100">
+            <div className="mt-2.5 p-2.5 md:p-3 bg-slate-50 rounded-2xl border border-slate-100">
                <div className="w-full">
                   <div className="flex items-center justify-between mb-2">
                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">经营单元效率看板</p>
@@ -1724,7 +1792,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                      {salaryByCenter.map(c => {
                        const isExcludedUnit = ['HR', 'FIN', 'QA'].some(dept => (c.name || '').trim().toUpperCase().includes(dept));
                        return (
-                         <div key={c.name} className="bg-white p-3 rounded-2xl border border-slate-200 hover:border-blue-400 transition-all shadow-sm hover:shadow-md space-y-2">
+                         <div key={c.name} className="bg-white p-2.5 rounded-2xl border border-slate-200 hover:border-blue-400 transition-all shadow-sm hover:shadow-md space-y-1.5">
                             <div className="flex justify-between items-start">
                               <div className="flex flex-col">
                                 <span className="text-[11px] font-black text-slate-900 truncate max-w-[120px]">{c.name}</span>
@@ -1735,7 +1803,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                               </div>
                             </div>
                             
-                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1.5 border-t border-slate-50">
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-1 border-t border-slate-50">
                               <div className="flex justify-between items-center">
                                 <span className="text-[9px] text-slate-500">产值初限</span>
                                 <span className="text-[9px] font-bold text-slate-700">{formatMoney(c.valueLimit)}</span>
@@ -1747,42 +1815,40 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                             </div>
 
                             {!isExcludedUnit && (
-                              <div className="p-2 bg-blue-50/50 rounded-xl border border-blue-100/50 space-y-1.5">
+                              <div className="p-2 bg-blue-50/50 rounded-xl border border-blue-100/60 space-y-1.5">
                                 <div className="flex items-center justify-between">
                                   <span className="text-[9px] font-black text-blue-800 tracking-tight">经营单元本级</span>
                                   <div className="flex gap-1">
-                                     <span className="w-1 h-1 rounded-full bg-blue-400"></span>
-                                     <span className="w-1 h-1 rounded-full bg-blue-200"></span>
+                                     <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+                                     <span className="w-1.5 h-1.5 rounded-full bg-blue-200"></span>
                                   </div>
                                 </div>
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div className="flex flex-col">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  <div className="flex items-center justify-between bg-white/80 px-2 py-1 rounded-lg border border-blue-100/70 shadow-2xs">
                                     <div className="flex items-center gap-1">
-                                      <span className="text-[8px] text-blue-600 font-bold">产值专项计提</span>
+                                      <span className="text-[8px] text-blue-700 font-bold whitespace-nowrap">产值专项计提</span>
                                       <InfoTip 
                                         title="产值专项计提" 
                                         content="产值专项计提 = 已确权产值 × 5%。仅初产专/中产专触发（中产专亦为5%），不乘C权、B2权。"
                                         placement="top"
                                       >
-                                        <Info size={10} className="text-blue-300 cursor-help" />
+                                        <Info size={10} className="text-blue-400 cursor-help" />
                                       </InfoTip>
                                     </div>
-                                    <span className="text-xs font-black text-blue-900 leading-none mt-1">{formatMoney(c.value5Percent)}</span>
+                                    <span className="text-xs font-black text-blue-900 font-mono">{formatMoney(c.value5Percent)}</span>
                                   </div>
-                                  <div className="flex flex-col border-l border-blue-100 pl-3">
+                                  <div className="flex items-center justify-between bg-white/80 px-2 py-1 rounded-lg border border-blue-100/70 shadow-2xs">
                                     <div className="flex items-center gap-1">
-                                      <span className="text-[8px] text-blue-600 font-bold">收款专项计提</span>
+                                      <span className="text-[8px] text-blue-700 font-bold whitespace-nowrap">收款专项计提</span>
                                       <InfoTip 
                                         title="收款专项计提" 
                                         content="收款专项计提 = 已确权收款 × 2%。含款专且不含经管员，不乘C权、B2权。"
                                         placement="top"
                                       >
-                                        <Info size={10} className="text-blue-300 cursor-help" />
+                                        <Info size={10} className="text-blue-400 cursor-help" />
                                       </InfoTip>
                                     </div>
-                                    <div className="flex items-baseline gap-1.5 mt-1">
-                                      <span className="text-xs font-black text-blue-900 leading-none">{formatMoney(c.revenue2Percent)}</span>
-                                    </div>
+                                    <span className="text-xs font-black text-blue-900 font-mono">{formatMoney(c.revenue2Percent)}</span>
                                   </div>
                                 </div>
                               </div>
@@ -2035,61 +2101,66 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                     <div className="space-y-6 mt-6 pt-6 border-t border-slate-200/60">
                       {/* 收款轨 */}
                       <div>
-                        <div className="flex items-center justify-between mb-3">
-                          <span className="text-[10px] font-black text-yellow-700 uppercase tracking-widest"> {UI_LABELS.REVENUE_RAIL}</span>
+                        <div className="flex items-center justify-between mb-2.5">
+                          <span className="text-[10px] font-black text-yellow-700 uppercase tracking-widest flex items-center gap-1">
+                            <span>🪙</span> {UI_LABELS.REVENUE_RAIL}
+                          </span>
                           <span className="text-[9px] font-bold text-slate-400">款当: {formatMoney(q.revenue.capacity)}</span>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="bg-white p-3 rounded-2xl border border-slate-200">
-                            <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.PENDING}</p>
-                            <p className="text-sm font-black text-amber-600 font-mono">{formatMoney(q.revenue.pending)}</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="bg-white px-2.5 py-2 rounded-xl border border-slate-200 flex items-center justify-between shadow-2xs">
+                            <span className="text-[8px] font-black text-slate-400 uppercase">{UI_LABELS.PENDING}</span>
+                            <span className="text-xs font-black text-amber-600 font-mono">{formatMoney(q.revenue.pending)}</span>
                           </div>
-                          <div className="bg-white p-3 rounded-2xl border border-slate-200">
-                            <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.CONFIRMED}</p>
-                            <p className="text-sm font-black text-emerald-600 font-mono">{formatMoney(q.revenue.confirmed)}</p>
+                          <div className="bg-white px-2.5 py-2 rounded-xl border border-slate-200 flex items-center justify-between shadow-2xs">
+                            <span className="text-[8px] font-black text-slate-400 uppercase">{UI_LABELS.CONFIRMED}</span>
+                            <span className="text-xs font-black text-emerald-600 font-mono">{formatMoney(q.revenue.confirmed)}</span>
                           </div>
-                          <div className="bg-white p-3 rounded-2xl border border-slate-200 relative">
-                            <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.UNCONFIRMED}</p>
-                            <p className="text-sm font-black text-rose-600 font-mono">{formatMoney(q.revenue.unconfirmed)}</p>
+                          <div className="bg-white px-2.5 py-2 rounded-xl border border-slate-200 flex items-center justify-between shadow-2xs">
+                            <span className="text-[8px] font-black text-slate-400 uppercase">{UI_LABELS.UNCONFIRMED}</span>
+                            <span className="text-xs font-black text-rose-600 font-mono">{formatMoney(q.revenue.unconfirmed)}</span>
                           </div>
-                          <div className="bg-white p-3 rounded-2xl border border-slate-200">
-                            <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.MINED}</p>
-                            <p className="text-sm font-black text-blue-600 font-mono">{formatMoney(q.revenue.mined)}</p>
+                          <div className="bg-white px-2.5 py-2 rounded-xl border border-slate-200 flex items-center justify-between shadow-2xs">
+                            <span className="text-[8px] font-black text-slate-400 uppercase">{UI_LABELS.MINED}</span>
+                            <span className="text-xs font-black text-blue-600 font-mono">{formatMoney(q.revenue.mined)}</span>
                           </div>
                         </div>
                       </div>
 
                       {/* 价值转化缺口 */}
-                      <div className="flex items-center justify-center py-1 bg-slate-100/50 rounded-xl border border-dashed border-slate-200">
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                          价值转化缺口: <span className={q.value.confirmed > q.revenue.confirmed ? 'text-rose-500' : 'text-emerald-500'}>
-                            {formatMoney(q.value.confirmed - q.revenue.confirmed)}
-                          </span>
+                      <div className="flex items-center justify-between px-3 py-1.5 bg-slate-100/60 rounded-xl border border-dashed border-slate-200">
+                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                          价值转化缺口
+                        </span>
+                        <span className={`text-xs font-black font-mono ${q.value.confirmed > q.revenue.confirmed ? 'text-rose-600' : 'text-emerald-600'}`}>
+                          {formatMoney(q.value.confirmed - q.revenue.confirmed)}
                         </span>
                       </div>
 
                       {/* 产值轨 */}
                       <div>
-                        <div className="flex items-center justify-between mb-3">
-                          <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest"> {UI_LABELS.VALUE_RAIL}</span>
+                        <div className="flex items-center justify-between mb-2.5">
+                          <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest flex items-center gap-1">
+                            <span>💎</span> {UI_LABELS.VALUE_RAIL}
+                          </span>
                           <span className="text-[9px] font-bold text-slate-400">产当: {formatMoney(q.value.capacity)}</span>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="bg-white p-3 rounded-2xl border border-slate-200">
-                            <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.PENDING}</p>
-                            <p className="text-sm font-black text-amber-600 font-mono">{formatMoney(q.value.pending)}</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="bg-white px-2.5 py-2 rounded-xl border border-slate-200 flex items-center justify-between shadow-2xs">
+                            <span className="text-[8px] font-black text-slate-400 uppercase">{UI_LABELS.PENDING}</span>
+                            <span className="text-xs font-black text-amber-600 font-mono">{formatMoney(q.value.pending)}</span>
                           </div>
-                          <div className="bg-white p-3 rounded-2xl border border-slate-200">
-                            <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.CONFIRMED}</p>
-                            <p className={`text-sm font-black font-mono ${purityInfo.isRed ? 'text-rose-600' : 'text-emerald-600'}`}>{formatMoney(q.value.confirmed)}</p>
+                          <div className="bg-white px-2.5 py-2 rounded-xl border border-slate-200 flex items-center justify-between shadow-2xs">
+                            <span className="text-[8px] font-black text-slate-400 uppercase">{UI_LABELS.CONFIRMED}</span>
+                            <span className={`text-xs font-black font-mono ${purityInfo.isRed ? 'text-rose-600' : 'text-emerald-600'}`}>{formatMoney(q.value.confirmed)}</span>
                           </div>
-                          <div className="bg-white p-3 rounded-2xl border border-slate-200 relative">
-                            <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.UNCONFIRMED}</p>
-                            <p className="text-sm font-black text-rose-600 font-mono">{formatMoney(q.value.unconfirmed)}</p>
+                          <div className="bg-white px-2.5 py-2 rounded-xl border border-slate-200 flex items-center justify-between shadow-2xs">
+                            <span className="text-[8px] font-black text-slate-400 uppercase">{UI_LABELS.UNCONFIRMED}</span>
+                            <span className="text-xs font-black text-rose-600 font-mono">{formatMoney(q.value.unconfirmed)}</span>
                           </div>
-                          <div className="bg-white p-3 rounded-2xl border border-slate-200">
-                            <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.MINED}</p>
-                            <p className="text-sm font-black text-blue-600 font-mono">{formatMoney(q.value.mined)}</p>
+                          <div className="bg-white px-2.5 py-2 rounded-xl border border-slate-200 flex items-center justify-between shadow-2xs">
+                            <span className="text-[8px] font-black text-slate-400 uppercase">{UI_LABELS.MINED}</span>
+                            <span className="text-xs font-black text-blue-600 font-mono">{formatMoney(q.value.mined)}</span>
                           </div>
                         </div>
                       </div>

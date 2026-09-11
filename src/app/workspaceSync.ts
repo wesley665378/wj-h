@@ -14,6 +14,8 @@ import { buildValueEfficiencySnapshots } from '../utils/valueEfficiencySnapshots
 import { buildJzfpSnapshot } from '../utils/jzfpSnapshot';
 import { pickUserForWorkspaceSync } from '../utils/userSyncPayload';
 import { isSystemAdmin } from '../utils/accessControl';
+import { filterLogsForDtcbSync } from '../utils/dtcbLogs';
+import { filterLogsForJzczSync } from '../utils/jzczLogs';
 
 export interface BuildSyncPayloadInput {
   managedUsers?: User[];
@@ -103,8 +105,8 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
   const nextSamples = overrides?.meetingSamples ?? input.meetingSamples;
   const nextAcc = overrides?.acceptanceRecords ?? input.acceptanceRecords;
 
-  const dtcbLogs = nextLogs ? nextLogs.filter(l => l.confirmationType === '手动确权') : undefined;
-  const jzczLogs = nextLogs ? nextLogs.filter(l => l.confirmationType !== '手动确权') : undefined;
+  const dtcbLogs = nextLogs ? filterLogsForDtcbSync(nextLogs) : undefined;
+  const jzczLogs = nextLogs ? filterLogsForJzczSync(nextLogs) : undefined;
   // 快照延迟或移除：自动 sync 不附带 valueEfficiencySnapshots / jzfp，大幅缩减 payload 与前端计算开销
   const snapshots = undefined;
   const jzfpSnapshots = undefined;

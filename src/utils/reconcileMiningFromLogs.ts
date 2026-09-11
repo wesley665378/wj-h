@@ -1,6 +1,7 @@
 
 import { ValueCreationLog, MiningResource, RefineCategory, AuditStatus, User } from '../../types';
 import { calculateHistoricalNetValue } from './business';
+import { isCreationMiningLog } from './purification';
 
 export const resolveLogPackageNet = (log: ValueCreationLog, resources: MiningResource[], users: User[]) => {
   return calculateHistoricalNetValue(log, resources, users);
@@ -36,15 +37,15 @@ const isLinkageType = (confType: any, logObj: any) =>
 
 export const sumConfirmedRevenuePackage = (logs: ValueCreationLog[], resources: MiningResource[], users: User[]) => {
   return logs
-    .filter(l => isRevenueCategory(l.category) && isConfirmedOrApproved(l.status) && !l.costCategory)
+    .filter(l => isCreationMiningLog(l) && isRevenueCategory(l.category) && isConfirmedOrApproved(l.status))
     .reduce((sum, l) => sum + resolveLogPackageNet(l, resources, users), 0);
 };
 
 export const sumValueConversionPackage = (logs: ValueCreationLog[], resources: MiningResource[], users: User[]) => {
   return logs
     .filter(l => 
+      isCreationMiningLog(l) &&
       isValueCategory(l.category) && 
-      !l.costCategory &&
       (isConfirmedOrApproved(l.status) || (isPendingStatus(l.status) && isLinkageType(l.confirmationType, l)))
     )
     .reduce((sum, l) => sum + resolveLogPackageNet(l, resources, users), 0);
@@ -60,9 +61,8 @@ export const reconcileMiningLogs = (logs: ValueCreationLog[], resources: MiningR
     
     // 基础口径：排除成本消耗类
     const confirmedLogs = relevantLogs.filter(l => 
-      l.status === AuditStatus.Confirmed && 
-      l.costCategory !== 'C' &&
-      !(l.costCategory === 'B' && l.valueConsumptionMode === 'B2')
+      isCreationMiningLog(l) &&
+      l.status === AuditStatus.Confirmed
     );
 
     const pendingValueSum = relevantLogs

@@ -57,6 +57,8 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 
 interface DistributionProps {
@@ -131,6 +133,7 @@ interface BonusCalculation {
   teamDividendStatus?: string;
   cWeight: number;
   centerLevelBonus?: number;
+  unitRedundancy?: number;
   theoreticalBonus?: number;
   isRevenueExpert?: boolean;
   isChan?: boolean;
@@ -424,474 +427,376 @@ const Distribution: React.FC<DistributionProps> = ({
   const C_WEIGHT = TIER_COEFFICIENTS.BASE_LOSS; // 系统默认 C 对冲权重
 
   const distributionData = useMemo(() => {
-    const getFirstPass = () => {
-      // 本地嵌入式（isLocalEmbedded 为 true）或多月份自定义查询动态聚合
-      const currentYear = effectiveMonth
-        ? effectiveMonth.split("-")[0]
-        : new Date().getFullYear().toString();
+    // 1. 服务端 SSOT（线上模式且单月查询）：以 GET /api/distribution 返回的 experts / distribution 为单一事实来源
+    if (!isLocalEmbedded && serverDistribution && serverDistribution.length > 0 && !startDate && !endDate) {
+      return serverDistribution.map((item: any) => {
+        const userObj = users.find((u) => u.id === item.userId);
+        const cat = item.category || userObj?.category || "";
+        const isRevenueExpert = item.isRevenueExpert ?? cat.includes("款专");
+        const isChanExpert = cat.includes("产专");
+        const isChan = item.isChan ?? (isChanExpert || cat === "经管员高产专");
+        const salaryPackage = item.salaryPackage ?? (userObj?.salaryPackage || (effectiveMonth ? getUserSalaryByMonth(userObj || {} as any, effectiveMonth) : 0));
 
-      const logsByUserYearly = new Map<string, ValueCreationLog[]>();
-      const logsByUserMonthly = new Map<string, ValueCreationLog[]>();
+        const userLogsMonthly = (logs || []).filter(
+          (l) => l.recordedCollectorId === item.userId && 
+                 resolveLogBusinessMonth(l) === effectiveMonth && 
+                 (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved)
+        );
 
-      (logs || []).forEach((log) => {
-        if (
-          log.status !== AuditStatus.Confirmed &&
-          log.status !== AuditStatus.Approved
-        )
-          return;
+        // 经营单元本级：加项优先 item.centerLevelBonus；兼容 item.unitRedundancy；禁止两字段相加
+        const centerLevelBonus = item.centerLevelBonus ?? item.unitRedundancy ?? 0;
+        const unitRedundancy = centerLevelBonus;
 
-        const collectorId = log.recordedCollectorId || "";
-        const logMonth = resolveLogBusinessMonth(log);
-        const logDate = resolveLogBusinessDate(log);
+        const historyDebtConfirmed = item.historyDebtConfirmed ?? item.confirmed?.historyDebt ?? item.historyDebt ?? 0;
+        const historyDebtApproved = item.historyDebtApproved ?? item.approved?.historyDebt ?? historyDebtConfirmed;
+        const historyDebt = historyDebtConfirmed;
+        const currentSurplus = item.currentSurplus ?? item.confirmed?.currentSurplus ?? item.currentSurplusConfirmed ?? 0;
+        const currentSurplusApproved = item.currentSurplusApproved ?? item.approved?.currentSurplus ?? currentSurplus;
+        const netRedundancy = item.netRedundancy ?? item.confirmed?.netRedundancy ?? item.netRedundancyConfirmed ?? 0;
+        const netRedundancyApproved = item.netRedundancyApproved ?? item.approved?.netRedundancy ?? netRedundancy;
+        const nextDebt = item.nextDebt ?? item.confirmed?.nextDebt ?? item.nextDebtConfirmed ?? 0;
+        const theoreticalBonus = item.theoreticalBonus ?? item.confirmed?.theoreticalBonus ?? item.theoreticalBonusConfirmed ?? 0;
+        const theoreticalBonusApproved = item.theoreticalBonusApproved ?? item.approved?.theoreticalBonus ?? theoreticalBonus;
+        const ratio = item.ratio ?? item.confirmed?.ratio ?? 0;
+        const historyRecords = item.historyRecords ?? item.confirmed?.historyRecords ?? item.historyRecordsConfirmed ?? [];
 
-        const matches = startDate && endDate
-          ? isDateInRange(logDate, startDate, endDate)
-          : monthsInRange.includes(logMonth);
+        // 成本包与收产包
+        const costPackage = item.costPackage ?? item.confirmed?.costPackage ?? -(item.totalCost ?? salaryPackage);
+        const totalCost = item.totalCost ?? item.confirmed?.totalCost ?? Math.abs(costPackage);
+        const nonEffectiveDeductionConfirmed = item.nonEffectiveDeductionConfirmed ?? item.nonEffectiveDeduction ?? item.confirmed?.nonEffectiveDeduction ?? 0;
+        const nonEffectiveDeductionApproved = item.nonEffectiveDeductionApproved ?? item.nonEffectiveDeduction ?? item.approved?.nonEffectiveDeduction ?? 0;
 
-        if (matches) {
-          if (!logsByUserMonthly.has(collectorId)) {
-            logsByUserMonthly.set(collectorId, []);
-          }
-          logsByUserMonthly.get(collectorId)!.push(log);
-        }
+        const aCostConfirmed = item.aCostConfirmed ?? item.confirmed?.aCost ?? (isRevenueExpert ? Math.max(0, totalCost - salaryPackage + nonEffectiveDeductionConfirmed) : 0);
+        const bCostConfirmed = item.bCostConfirmed ?? item.confirmed?.b1Cost ?? (!isRevenueExpert ? Math.max(0, totalCost - salaryPackage + nonEffectiveDeductionConfirmed) : 0);
 
-        if (logMonth.startsWith(currentYear)) {
-          if (!logsByUserYearly.has(collectorId)) {
-            logsByUserYearly.set(collectorId, []);
-          }
-          logsByUserYearly.get(collectorId)!.push(log);
-        }
+        const baseValueConfirmed = item.baseValueConfirmed ?? item.confirmed?.incomePackage ?? (currentSurplus + totalCost);
+        const baseValueApproved = item.baseValueApproved ?? item.approved?.incomePackage ?? baseValueConfirmed;
+
+        return {
+          userId: item.userId,
+          userName: item.userName || userObj?.name || item.userId,
+          category: cat,
+          isRevenueExpert,
+          isChan,
+          costPackage,
+          totalCost,
+          nonEffectiveDeductionConfirmed,
+          nonEffectiveDeductionApproved,
+          historyDebt,
+          currentSurplus,
+          netRedundancy,
+          nextDebt,
+          theoreticalBonus,
+          ratio,
+          centerLevelBonus,
+          unitRedundancy,
+
+          historyRecordsConfirmed: historyRecords,
+          historyRecordsApproved: item.historyRecordsApproved || historyRecords,
+          historyDebtConfirmed: historyDebt,
+          historyDebtApproved: item.historyDebtApproved ?? historyDebt,
+          currentSurplusConfirmed: currentSurplus,
+          currentSurplusApproved: item.currentSurplusApproved ?? currentSurplus,
+          netRedundancyConfirmed: netRedundancy,
+          netRedundancyApproved: item.netRedundancyApproved ?? netRedundancy,
+          theoreticalBonusConfirmed: item.theoreticalBonusConfirmed ?? theoreticalBonus,
+          theoreticalBonusApproved: item.theoreticalBonusApproved ?? theoreticalBonus,
+
+          confirmedValueConfirmed: isChan ? baseValueConfirmed : 0,
+          bCostConfirmed,
+          b2CostConfirmed: 0,
+          aCostConfirmed,
+          confirmedGoldConfirmed: !isChan ? baseValueConfirmed : 0,
+          baseValueConfirmed,
+          netBonusConfirmed: item.theoreticalBonusConfirmed ?? theoreticalBonus,
+          isBreakthroughConfirmed: currentSurplus > 0,
+          gapToBreakthroughConfirmed: currentSurplus > 0 ? 0 : Math.abs(currentSurplus),
+          paymentMatchRateConfirmed: 1,
+
+          confirmedValueApproved: isChan ? baseValueApproved : 0,
+          bCostApproved: bCostConfirmed,
+          b2CostApproved: 0,
+          aCostApproved: aCostConfirmed,
+          confirmedGoldApproved: !isChan ? baseValueApproved : 0,
+          baseValueApproved,
+          netBonusApproved: item.theoreticalBonusApproved ?? theoreticalBonus,
+          isBreakthroughApproved: currentSurplus > 0,
+          gapToBreakthroughApproved: currentSurplus > 0 ? 0 : Math.abs(currentSurplus),
+          paymentMatchRateApproved: 1,
+
+          baseValuePending: 0,
+          yearlyIncomeApproved: baseValueApproved,
+          yearlyIncomeConfirmed: baseValueConfirmed,
+          yearlyBonusApproved: item.yearlyBonusApproved ?? theoreticalBonus,
+
+          cWeight: TIER_COEFFICIENTS.BASE_LOSS,
+          salaryPackage,
+          details: userLogsMonthly,
+
+          personalIncentiveStatus: currentSurplus > 0 ? "已激活超额价值分享" : "入库任务进行中",
+          teamDividendStatus: currentSurplus > 0 ? "已激活超额价值分享" : "入库任务进行中",
+        };
       });
+    }
 
-      return users
-        .filter((u) => {
-          if (!monthsInRange.some(m => isSalaryActiveForMonth(u, m))) return false;
-          const cat = u.category || "";
-          const sRoles = u.secondaryRoles || [];
+    // 2. 本地嵌入模式或自定义多月日期范围：本地备用动态聚合
+    const currentYear = effectiveMonth
+      ? effectiveMonth.split("-")[0]
+      : new Date().getFullYear().toString();
 
-          const isExpert =
-            cat.includes("款专") || cat.includes("产专") || isCenterManagerUser(u);
-          const hasExpertSecondaryRole = sRoles.some(
-            (r) => r.includes("款专") || r.includes("产专"),
-          );
+    const logsByUserYearly = new Map<string, ValueCreationLog[]>();
+    const logsByUserMonthly = new Map<string, ValueCreationLog[]>();
 
-          return isExpert || hasExpertSecondaryRole;
-        })
-        .map((user) => {
-          const userLogsMonthly = logsByUserMonthly.get(user.id) || [];
-          const userLogsYearly = logsByUserYearly.get(user.id) || [];
+    (logs || []).forEach((log) => {
+      if (
+        log.status !== AuditStatus.Confirmed &&
+        log.status !== AuditStatus.Approved
+      )
+        return;
 
-          // 1. 刚性工资多月份动态累加：Total Salary = sum_{i=1}^M Salary_i
-          const salaryPackage = monthsInRange.reduce((sum, m) => {
-            return sum + (isSalaryActiveForMonth(user, m) ? getUserSalaryByMonth(user, m) : 0);
-          }, 0);
+      const collectorId = log.recordedCollectorId || "";
+      const logMonth = resolveLogBusinessMonth(log);
+      const logDate = resolveLogBusinessDate(log);
 
-          const isRevenueExpert = (user.category || "").includes("款专");
-          const isChanExpert = (user.category || "").includes("产专");
-          const isChan = isChanExpert || user.category === "经管员高产专";
+      const matches = startDate && endDate
+        ? isDateInRange(logDate, startDate, endDate)
+        : monthsInRange.includes(logMonth);
 
-          // 2. 消耗与收产包跨 M 个月动态累加
-          let confRevenue = 0;
-          let confProduction = 0;
-          let confACost = 0;
-          let confB1Cost = 0;
-          let confB2Cost = 0;
-          let confCCost = 0;
-          let confDCost = 0;
-          let confNonEff = 0;
-
-          let appRevenue = 0;
-          let appProduction = 0;
-          let appACost = 0;
-          let appB1Cost = 0;
-          let appB2Cost = 0;
-          let appCCost = 0;
-          let appDCost = 0;
-          let appNonEff = 0;
-
-          for (const m of monthsInRange) {
-            const cM = aggregateUserMonthMetrics(logs || [], user, m, resources || [], users || [], [AuditStatus.Confirmed]);
-            confRevenue += cM.revenuePackage;
-            confProduction += cM.productionPackage;
-            confACost += cM.aCost;
-            confB1Cost += cM.b1Cost;
-            confB2Cost += cM.b2Cost;
-            confCCost += cM.cCost;
-            confDCost += cM.dCost;
-            confNonEff += cM.nonEffectiveDeduction;
-
-            const aM = aggregateUserMonthMetrics(logs || [], user, m, resources || [], users || [], [AuditStatus.Approved]);
-            appRevenue += aM.revenuePackage;
-            appProduction += aM.productionPackage;
-            appACost += aM.aCost;
-            appB1Cost += aM.b1Cost;
-            appB2Cost += aM.b2Cost;
-            appCCost += aM.cCost;
-            appDCost += aM.dCost;
-            appNonEff += aM.nonEffectiveDeduction;
-          }
-
-          const baseValueConfirmedStr = isChan ? confProduction : confRevenue;
-          const baseValueApprovedStr = isChan ? appProduction : appRevenue;
-
-          let yearlyBaseValConfirmed = 0;
-          let yearlyBaseValApproved = 0;
-          let pendingBaseVal = 0;
-          
-          for (const m of monthsInRange) {
-            const pendingMetrics = aggregateUserMonthMetrics(logs || [], user, m, resources || [], users || [], [AuditStatus.Pending]);
-            pendingBaseVal += isChan ? pendingMetrics.productionPackage : pendingMetrics.revenuePackage;
-          }
-
-          let yearlySalaryPackage = 0;
-          if (effectiveMonth) {
-            const [y, m] = effectiveMonth.split("-").map(Number);
-            for (let mIdx = 1; mIdx <= m; mIdx++) {
-              const mStr = `${y}-${String(mIdx).padStart(2, "0")}`;
-              if (isSalaryActiveForMonth(user, mStr)) {
-                yearlySalaryPackage += getUserSalaryByMonth(user, mStr);
-              }
-            }
-          }
-
-          const yearlyMonths = Array.from(new Set(userLogsYearly.map(l => resolveLogBusinessMonth(l))));
-          for (const m of yearlyMonths) {
-            const mConf = aggregateUserMonthMetrics(userLogsYearly, user, m, resources || [], users || [], [AuditStatus.Confirmed]);
-            const mApp = aggregateUserMonthMetrics(userLogsYearly, user, m, resources || [], users || [], [AuditStatus.Approved]);
-            yearlyBaseValConfirmed += (isChan ? mConf.productionPackage : mConf.revenuePackage);
-            yearlyBaseValApproved += (isChan ? mApp.productionPackage : mApp.revenuePackage);
-          }
-
-          let historyDebt = 0;
-          let currentSurplus = 0;
-          let netRedundancy = 0;
-          let nextDebt = 0;
-          let theoreticalBonus = 0;
-
-          let historyDebtConfirmed = 0;
-          let nextDebtConfirmed = 0;
-          let currentSurplusConfirmed = 0;
-          let netRedundancyConfirmed = 0;
-          
-          let historyDebtApproved = 0;
-          let nextDebtApproved = 0;
-          let currentSurplusApproved = 0;
-          let netRedundancyApproved = 0;
-
-          let historyRecordsConfirmed: any[] = [];
-          let historyRecordsApproved: any[] = [];
-
-          let netBonusApprovedVal = 0;
-          let netBonusConfirmedVal = 0;
-
-          let ratioVal = 0;
-          let theoreticalBonusConfirmedVal = 0;
-          let theoreticalBonusApprovedVal = 0;
-          let yearlyBonusApprovedVal = 0;
-
-          const allocConfirmed = calculateBonusAllocationForMonths(
-              monthsInRange,
-              user,
-              logs || [],
-              resources || [],
-              users || [],
-              AuditStatus.Confirmed
-          );
-
-          const allocApproved = calculateBonusAllocationForMonths(
-              monthsInRange,
-              user,
-              logs || [],
-              resources || [],
-              users || [],
-              AuditStatus.Approved
-          );
-
-          if (allocConfirmed.ratio > 0 || allocApproved.ratio > 0) {
-              historyDebtConfirmed = allocConfirmed.history > 0 ? -allocConfirmed.history : 0;
-              currentSurplusConfirmed = allocConfirmed.current;
-              netRedundancyConfirmed = allocConfirmed.quota;
-              nextDebtConfirmed = allocConfirmed.newDebt;
-
-              historyDebtApproved = allocApproved.history > 0 ? -allocApproved.history : 0;
-              currentSurplusApproved = allocApproved.current;
-              netRedundancyApproved = allocApproved.quota;
-              nextDebtApproved = allocApproved.newDebt;
-              
-              historyRecordsConfirmed = allocConfirmed.historyRecords;
-              historyRecordsApproved = allocApproved.historyRecords;
-
-              historyDebt = historyDebtConfirmed;
-              currentSurplus = currentSurplusConfirmed;
-              netRedundancy = netRedundancyConfirmed;
-              nextDebt = nextDebtConfirmed;
-              theoreticalBonus = allocConfirmed.theoreticalBonus;
-          }
-
-          netBonusConfirmedVal = allocConfirmed.ratio > 0 ? allocConfirmed.theoreticalBonus : 0;
-          netBonusApprovedVal = allocApproved.ratio > 0 ? allocApproved.theoreticalBonus : 0;
-
-          ratioVal = allocConfirmed.ratio;
-          theoreticalBonusConfirmedVal = allocConfirmed.theoreticalBonus;
-          theoreticalBonusApprovedVal = allocApproved.theoreticalBonus;
-          yearlyBonusApprovedVal = yearlyBaseValApproved * allocApproved.ratio;
-
-          const userObj = users.find((u) => u.id === user.id);
-          const userCenter = userObj?.center || "";
-
-          let centerLevelBonus = 0;
-          if (user.category === "经管员高款专" || user.category === "经管员高产专") {
-            centerLevelBonus = (resources || [])
-              .filter((r) => centerMatch(r.assignedTo, userCenter))
-              .reduce((sum, r) => sum + (r.incentiveOutput5 || 0) + (r.incentiveCollection2 || 0), 0);
-          }
-
-          const serverItem = (!isLocalEmbedded && serverDistribution) 
-            ? serverDistribution.find((d: any) => d.userId === user.id)
-            : null;
-
-          // 远程模式支持读取 API 的 nonEffectiveDeduction、totalCost、historyDebt；同时本地有精确保底
-          const serverConfNonEff = serverItem?.confirmed?.nonEffectiveDeduction ?? serverItem?.nonEffectiveDeduction;
-          const serverAppNonEff = serverItem?.approved?.nonEffectiveDeduction ?? serverItem?.nonEffectiveDeduction;
-          const effectiveConfNonEff = serverConfNonEff !== undefined ? serverConfNonEff : confNonEff;
-          const effectiveAppNonEff = serverAppNonEff !== undefined ? serverAppNonEff : appNonEff;
-
-          const costOtherConfirmed = isRevenueExpert ? confACost : confB1Cost;
-          const costPackageConfirmed = -(salaryPackage + costOtherConfirmed - effectiveConfNonEff);
-          const totalCostConfirmed = Math.abs(costPackageConfirmed);
-
-          const costOtherApproved = isRevenueExpert ? appACost : appB1Cost;
-          const costPackageApproved = -(salaryPackage + costOtherApproved - effectiveAppNonEff);
-          const totalCostApproved = Math.abs(costPackageApproved);
-
-          return {
-            userId: user.id,
-            userName: user.name,
-            category: user.category || "初级专家",
-            isRevenueExpert,
-            isChan,
-            costPackage: costPackageConfirmed,
-            totalCost: totalCostConfirmed,
-            nonEffectiveDeductionConfirmed: effectiveConfNonEff,
-            nonEffectiveDeductionApproved: effectiveAppNonEff,
-            historyDebt,
-            currentSurplus,
-            netRedundancy,
-            nextDebt,
-            theoreticalBonus,
-            ratio: ratioVal,
-            centerLevelBonus,
-
-            historyRecordsConfirmed,
-            historyRecordsApproved,
-            historyDebtConfirmed,
-            historyDebtApproved,
-            currentSurplusConfirmed,
-            currentSurplusApproved,
-            netRedundancyConfirmed,
-            netRedundancyApproved,
-            theoreticalBonusConfirmed: theoreticalBonusConfirmedVal,
-            theoreticalBonusApproved: theoreticalBonusApprovedVal,
-
-            confirmedValueConfirmed: confProduction,
-            bCostConfirmed: confB1Cost,
-            b2CostConfirmed: confB2Cost,
-            aCostConfirmed: confACost,
-            confirmedGoldConfirmed: confRevenue,
-            baseValueConfirmed: baseValueConfirmedStr,
-            netBonusConfirmed: netBonusConfirmedVal,
-            isBreakthroughConfirmed: currentSurplus > 0,
-            gapToBreakthroughConfirmed: currentSurplus > 0 ? 0 : Math.abs(currentSurplus),
-            paymentMatchRateConfirmed: 1,
-
-            confirmedValueApproved: appProduction,
-            bCostApproved: appB1Cost,
-            b2CostApproved: appB2Cost,
-            aCostApproved: appACost,
-            confirmedGoldApproved: appRevenue,
-            baseValueApproved: baseValueApprovedStr,
-            netBonusApproved: netBonusApprovedVal,
-            isBreakthroughApproved: currentSurplus > 0,
-            gapToBreakthroughApproved: currentSurplus > 0 ? 0 : Math.abs(currentSurplus),
-            paymentMatchRateApproved: 1,
-
-            baseValuePending: pendingBaseVal,
-
-            yearlyIncomeApproved: yearlyBaseValApproved,
-            yearlyIncomeConfirmed: yearlyBaseValConfirmed,
-            yearlyBonusApproved: yearlyBonusApprovedVal,
-
-            cWeight: TIER_COEFFICIENTS.BASE_LOSS,
-            salaryPackage,
-            details: userLogsMonthly,
-
-            personalIncentiveStatus: currentSurplus > 0 ? "已激活超额价值分享" : "入库任务进行中",
-            teamDividendStatus: currentSurplus > 0 ? "已激活超额价值分享" : "入库任务进行中",
-          };
-        });
-    };
-
-    const firstPass = getFirstPass();
-
-    // Second pass to compute/override expert surplus based on accurate theory
-    return firstPass.map(data => {
-      const cat = data.category || "";
-      const isManagerKuan = cat === "经管员高款专";
-      const isKuan = cat === "初款专" || cat === "中款专" || cat === "高款专" || isManagerKuan;
-
-      const getIndRedundancy = (uid: string, c: string) => {
-        const isChan = (c || "").includes("产专");
-        if (isChan) {
-          const item = firstPass.find(d => d.userId === uid);
-          return item ? (item.netRedundancy || 0) : 0;
+      if (matches) {
+        if (!logsByUserMonthly.has(collectorId)) {
+          logsByUserMonthly.set(collectorId, []);
         }
-        const isRankKuan = c === "中款专" || c === "初款专";
-        const rowLogs = (logs || []).filter(
-          (l) => l.recordedCollectorId === uid &&
-                 (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved) &&
-                 (startDate && endDate
-                   ? isDateInRange(resolveLogBusinessDate(l), startDate, endDate)
-                   : monthsInRange.includes(resolveLogBusinessMonth(l)))
-        );
-        const rxPoints = rowLogs.filter(l => l.category === RefineCategory.Revenue).reduce((sum, l) => sum + (l.amount || 0), 0);
-        return isRankKuan ? rxPoints * 0.02 : 0;
-      };
-
-      let redundancy = 0;
-      if (isManagerKuan) {
-        const managerUser = users.find(u => u.id === data.userId);
-        const managerCenter = managerUser?.center || "";
-        redundancy = firstPass.reduce((acc, d) => {
-          if (d.userId === data.userId) return acc;
-          const u = users.find(x => x.id === d.userId);
-          if (managerCenter && u?.center !== managerCenter) return acc;
-          return acc + getIndRedundancy(d.userId, d.category);
-        }, 0);
+        logsByUserMonthly.get(collectorId)!.push(log);
       }
 
-      const collectionPackage = data.baseValueConfirmed || 0;
-      const costOther = data.isRevenueExpert ? (data.aCostConfirmed || 0) : (data.bCostConfirmed || 0);
-      const nonEffectiveDeduction = data.nonEffectiveDeductionConfirmed || 0;
-      const costPackage = -((data.salaryPackage || 0) + costOther - nonEffectiveDeduction);
-      const totalCost = Math.abs(costPackage);
-      
-      const collection = collectionPackage + redundancy;
-      const rawBase = collection + costPackage;
-      const currentSurplus = rawBase;
-      const historyDebt = data.historyDebtConfirmed ?? data.historyDebt ?? 0;
-      const netRedundancy = Math.max(0, currentSurplus + historyDebt);
-      const theoreticalBonus = Math.round(netRedundancy * (data.ratio || 0));
-
-      return {
-        ...data,
-        costPackage,
-        totalCost,
-        currentSurplus: rawBase,
-        currentSurplusConfirmed: rawBase,
-        currentSurplusApproved: rawBase,
-        netRedundancy,
-        netRedundancyConfirmed: netRedundancy,
-        netRedundancyApproved: netRedundancy,
-        theoreticalBonus,
-        theoreticalBonusConfirmed: theoreticalBonus,
-        theoreticalBonusApproved: theoreticalBonus,
-        netBonusConfirmed: theoreticalBonus,
-        netBonusApproved: theoreticalBonus,
-      };
+      if (logMonth.startsWith(currentYear)) {
+        if (!logsByUserYearly.has(collectorId)) {
+          logsByUserYearly.set(collectorId, []);
+        }
+        logsByUserYearly.get(collectorId)!.push(log);
+      }
     });
-  }, [logs, users, resources, effectiveMonth, startDate, endDate, monthsInRange, isLocalEmbedded, distributionLoading, distributionError, serverDistribution]);
 
-  const getRedundancyValue = React.useCallback(
-    (userId: string, category: string) => {
-      const getIndividualRedundancy = (uid: string, cat: string) => {
-        const isChan = (cat || "").includes("产专");
-        if (isChan) {
-          const item = (distributionData || []).find((d) => d.userId === uid);
-          return item ? (item.netRedundancy || 0) : 0;
-        }
-        const isRankKuan = cat === "中款专" || cat === "初款专";
+    return users
+      .filter((u) => {
+        if (!monthsInRange.some(m => isSalaryActiveForMonth(u, m))) return false;
+        const cat = u.category || "";
+        const sRoles = u.secondaryRoles || [];
 
-        const rowLogs = (logs || []).filter(
-          (l) =>
-            l.recordedCollectorId === uid &&
-            (l.status === AuditStatus.Confirmed ||
-              l.status === AuditStatus.Approved) &&
-            (startDate && endDate
-              ? isDateInRange(resolveLogBusinessDate(l), startDate, endDate)
-              : monthsInRange.includes(resolveLogBusinessMonth(l))),
+        const isExpert =
+          cat.includes("款专") || cat.includes("产专") || isCenterManagerUser(u);
+        const hasExpertSecondaryRole = sRoles.some(
+          (r) => r.includes("款专") || r.includes("产专"),
         );
 
-        const rxPoints = rowLogs
-          .filter((l) => l.category === RefineCategory.Revenue)
-          .reduce((sum, l) => sum + (l.amount || 0), 0);
-        const kuanContribution = isRankKuan ? rxPoints * 0.02 : 0;
+        return isExpert || hasExpertSecondaryRole;
+      })
+      .map((user) => {
+        const userLogsMonthly = logsByUserMonthly.get(user.id) || [];
+        const userLogsYearly = logsByUserYearly.get(user.id) || [];
 
-        return kuanContribution;
-      };
-
-      const isManager =
-        category === "经管员高款专" || category === "经管员高产专";
-      if (isManager) {
-        const managerUser = users.find(u => u.id === userId);
-        const managerCenter = managerUser?.center || "";
-        return (distributionData || []).reduce((acc, d) => {
-          if (d.userId === userId) return acc;
-          const u = users.find(x => x.id === d.userId);
-          if (managerCenter && u?.center !== managerCenter) return acc;
-          return acc + getIndividualRedundancy(d.userId, d.category);
+        // 1. 刚性工资多月份动态累加：Total Salary = sum_{i=1}^M Salary_i
+        const salaryPackage = monthsInRange.reduce((sum, m) => {
+          return sum + (isSalaryActiveForMonth(user, m) ? getUserSalaryByMonth(user, m) : 0);
         }, 0);
-      } else {
-        return getIndividualRedundancy(userId, category);
-      }
-    },
-    [logs, users, effectiveMonth, startDate, endDate, monthsInRange, distributionData],
-  );
 
-  const getKuanTheoreticalTiers = React.useCallback(
-    (data: BonusCalculation) => {
-      if (!data) return null;
-      const cat = data.category || "";
-      const isManagerKuan = cat === "经管员高款专";
-      const isKuan =
-        cat === "初款专" ||
-        cat === "中款专" ||
-        cat === "高款专" ||
-        isManagerKuan;
+        const isRevenueExpert = (user.category || "").includes("款专");
+        const isChanExpert = (user.category || "").includes("产专");
+        const isChan = isChanExpert || user.category === "经管员高产专";
 
-      if (!isKuan) return null;
+        // 2. 消耗与收产包跨 M 个月动态累加
+        let confRevenue = 0;
+        let confProduction = 0;
+        let confACost = 0;
+        let confB1Cost = 0;
+        let confB2Cost = 0;
+        let confCCost = 0;
+        let confDCost = 0;
+        let confNonEff = 0;
 
-      const collectionPackage = data.baseValueConfirmed || 0;
-      const nonEffectiveDeduction = data.nonEffectiveDeductionConfirmed || 0;
-      const costPackage = -((data.salaryPackage || 0) + (data.isChan ? (data.bCostConfirmed || 0) : (data.aCostConfirmed || 0)) - nonEffectiveDeduction);
-      const totalCost = Math.abs(costPackage);
-      const redundancy = isManagerKuan
-        ? getRedundancyValue(data.userId, cat)
-        : 0;
+        let appRevenue = 0;
+        let appProduction = 0;
+        let appACost = 0;
+        let appB1Cost = 0;
+        let appB2Cost = 0;
+        let appCCost = 0;
+        let appDCost = 0;
+        let appNonEff = 0;
 
-      // 理论基数公式：TheoryBase = max(0, Collection + CostPackage)
-      const collection = collectionPackage + redundancy;
-      const rawBase = collection + costPackage;
-      const base = rawBase < 0 ? 0 : rawBase;
+        for (const m of monthsInRange) {
+          const cM = aggregateUserMonthMetrics(logs || [], user, m, resources || [], users || [], [AuditStatus.Confirmed]);
+          confRevenue += cM.revenuePackage;
+          confProduction += cM.productionPackage;
+          confACost += cM.aCost;
+          confB1Cost += cM.b1Cost;
+          confB2Cost += cM.b2Cost;
+          confCCost += cM.cCost;
+          confDCost += cM.dCost;
+          confNonEff += cM.nonEffectiveDeduction;
 
-      const t60 = Math.round(base * 0.6);
-      const t80 = Math.round(base * 0.8);
-      const t100 = Math.round(base * 1.0);
+          const aM = aggregateUserMonthMetrics(logs || [], user, m, resources || [], users || [], [AuditStatus.Approved]);
+          appRevenue += aM.revenuePackage;
+          appProduction += aM.productionPackage;
+          appACost += aM.aCost;
+          appB1Cost += aM.b1Cost;
+          appB2Cost += aM.b2Cost;
+          appCCost += aM.cCost;
+          appDCost += aM.dCost;
+          appNonEff += aM.nonEffectiveDeduction;
+        }
 
-      return {
-        t60,
-        t80,
-        t100,
-        base,
-        rawBase,
-        collectionPackage,
-        costPackage,
-        totalCost,
-        redundancy,
-        isManagerKuan,
-      };
-    },
-    [getRedundancyValue],
-  );
+        const baseValueConfirmedStr = isChan ? confProduction : confRevenue;
+        const baseValueApprovedStr = isChan ? appProduction : appRevenue;
+
+        let yearlyBaseValConfirmed = 0;
+        let yearlyBaseValApproved = 0;
+        let pendingBaseVal = 0;
+        
+        for (const m of monthsInRange) {
+          const pendingMetrics = aggregateUserMonthMetrics(logs || [], user, m, resources || [], users || [], [AuditStatus.Pending]);
+          pendingBaseVal += isChan ? pendingMetrics.productionPackage : pendingMetrics.revenuePackage;
+        }
+
+        const yearlyMonths = Array.from(new Set(userLogsYearly.map(l => resolveLogBusinessMonth(l))));
+        for (const m of yearlyMonths) {
+          const mConf = aggregateUserMonthMetrics(userLogsYearly, user, m, resources || [], users || [], [AuditStatus.Confirmed]);
+          const mApp = aggregateUserMonthMetrics(userLogsYearly, user, m, resources || [], users || [], [AuditStatus.Approved]);
+          yearlyBaseValConfirmed += (isChan ? mConf.productionPackage : mConf.revenuePackage);
+          yearlyBaseValApproved += (isChan ? mApp.productionPackage : mApp.revenuePackage);
+        }
+
+        const allocConfirmed = calculateBonusAllocationForMonths(
+            monthsInRange,
+            user,
+            logs || [],
+            resources || [],
+            users || [],
+            AuditStatus.Confirmed
+        );
+
+        const allocApproved = calculateBonusAllocationForMonths(
+            monthsInRange,
+            user,
+            logs || [],
+            resources || [],
+            users || [],
+            AuditStatus.Approved
+        );
+
+        const historyDebtConfirmed = allocConfirmed.history > 0 ? -allocConfirmed.history : 0;
+        const historyDebtApproved = allocApproved.history > 0 ? -allocApproved.history : 0;
+
+        const userObj = users.find((u) => u.id === user.id);
+        const userCenter = userObj?.center || "";
+
+        // 经营单元本级 = Σ(incentiveOutput5 + incentiveCollection2)，按矿 assignedTo 归单元
+        const matchingResources = (resources || []).filter((r) => centerMatch(r.assignedTo, userCenter));
+        const centerLevelBonus = matchingResources.reduce((sum, r) => sum + (r.incentiveOutput5 || 0) + (r.incentiveCollection2 || 0), 0);
+        
+        // 适用对象：经管员高款专、经管员高产专、高产专
+        const isEligibleForCenterBonus = 
+          user.category === "经管员高款专" || 
+          user.category === "经管员高产专" || 
+          user.category === "高产专";
+        const levelAdd = isEligibleForCenterBonus ? centerLevelBonus : 0;
+
+        const serverItem = (!isLocalEmbedded && serverDistribution) 
+          ? serverDistribution.find((d: any) => d.userId === user.id)
+          : null;
+
+        const serverConfNonEff = serverItem?.confirmed?.nonEffectiveDeduction ?? serverItem?.nonEffectiveDeduction;
+        const serverAppNonEff = serverItem?.approved?.nonEffectiveDeduction ?? serverItem?.nonEffectiveDeduction;
+        const effectiveConfNonEff = serverConfNonEff !== undefined ? serverConfNonEff : confNonEff;
+        const effectiveAppNonEff = serverAppNonEff !== undefined ? serverAppNonEff : appNonEff;
+
+        const costOtherConfirmed = isRevenueExpert ? confACost : confB1Cost;
+        const costPackageConfirmed = -(salaryPackage + costOtherConfirmed - effectiveConfNonEff);
+        const totalCostConfirmed = Math.abs(costPackageConfirmed);
+
+        const costOtherApproved = isRevenueExpert ? appACost : appB1Cost;
+        const costPackageApproved = -(salaryPackage + costOtherApproved - effectiveAppNonEff);
+        const totalCostApproved = Math.abs(costPackageApproved);
+
+        // rawSurplus = collectionPackage / productionPackage + levelAdd + costPackage
+        const currentSurplusConfirmed = baseValueConfirmedStr + levelAdd + costPackageConfirmed;
+        const currentSurplusApproved = baseValueApprovedStr + levelAdd + costPackageApproved;
+
+        // allocQuota = max(0, rawSurplus + historyDebtSigned)
+        const netRedundancyConfirmed = Math.max(0, currentSurplusConfirmed + historyDebtConfirmed);
+        const netRedundancyApproved = Math.max(0, currentSurplusApproved + historyDebtApproved);
+
+        const ratioVal = allocConfirmed.ratio;
+        const theoreticalBonusConfirmedVal = Math.round(netRedundancyConfirmed * ratioVal);
+        const theoreticalBonusApprovedVal = Math.round(netRedundancyApproved * ratioVal);
+        const yearlyBonusApprovedVal = yearlyBaseValApproved * (allocApproved.ratio || ratioVal);
+
+        return {
+          userId: user.id,
+          userName: user.name,
+          category: user.category || "初级专家",
+          isRevenueExpert,
+          isChan,
+          costPackage: costPackageConfirmed,
+          totalCost: totalCostConfirmed,
+          nonEffectiveDeductionConfirmed: effectiveConfNonEff,
+          nonEffectiveDeductionApproved: effectiveAppNonEff,
+          historyDebt: historyDebtConfirmed,
+          currentSurplus: currentSurplusConfirmed,
+          netRedundancy: netRedundancyConfirmed,
+          nextDebt: allocConfirmed.newDebt,
+          theoreticalBonus: theoreticalBonusConfirmedVal,
+          ratio: ratioVal,
+          centerLevelBonus,
+          unitRedundancy: centerLevelBonus,
+
+          historyRecordsConfirmed: allocConfirmed.historyRecords,
+          historyRecordsApproved: allocApproved.historyRecords,
+          historyDebtConfirmed,
+          historyDebtApproved,
+          currentSurplusConfirmed,
+          currentSurplusApproved,
+          netRedundancyConfirmed,
+          netRedundancyApproved,
+          theoreticalBonusConfirmed: theoreticalBonusConfirmedVal,
+          theoreticalBonusApproved: theoreticalBonusApprovedVal,
+
+          confirmedValueConfirmed: confProduction,
+          bCostConfirmed: confB1Cost,
+          b2CostConfirmed: confB2Cost,
+          aCostConfirmed: confACost,
+          confirmedGoldConfirmed: confRevenue,
+          baseValueConfirmed: baseValueConfirmedStr,
+          netBonusConfirmed: theoreticalBonusConfirmedVal,
+          isBreakthroughConfirmed: currentSurplusConfirmed > 0,
+          gapToBreakthroughConfirmed: currentSurplusConfirmed > 0 ? 0 : Math.abs(currentSurplusConfirmed),
+          paymentMatchRateConfirmed: 1,
+
+          confirmedValueApproved: appProduction,
+          bCostApproved: appB1Cost,
+          b2CostApproved: appB2Cost,
+          aCostApproved: appACost,
+          confirmedGoldApproved: appRevenue,
+          baseValueApproved: baseValueApprovedStr,
+          netBonusApproved: theoreticalBonusApprovedVal,
+          isBreakthroughApproved: currentSurplusApproved > 0,
+          gapToBreakthroughApproved: currentSurplusApproved > 0 ? 0 : Math.abs(currentSurplusApproved),
+          paymentMatchRateApproved: 1,
+
+          baseValuePending: pendingBaseVal,
+
+          yearlyIncomeApproved: yearlyBaseValApproved,
+          yearlyIncomeConfirmed: yearlyBaseValConfirmed,
+          yearlyBonusApproved: yearlyBonusApprovedVal,
+
+          cWeight: TIER_COEFFICIENTS.BASE_LOSS,
+          salaryPackage,
+          details: userLogsMonthly,
+
+          personalIncentiveStatus: currentSurplusConfirmed > 0 ? "已激活超额价值分享" : "入库任务进行中",
+          teamDividendStatus: currentSurplusConfirmed > 0 ? "已激活超额价值分享" : "入库任务进行中",
+        };
+      });
+  }, [logs, users, resources, effectiveMonth, startDate, endDate, monthsInRange, isLocalEmbedded, distributionLoading, distributionError, serverDistribution]);
 
   const formatCategory = React.useCallback((cat: string) => {
     if (cat === "经管员高款专") return "经管员 ｜ 高款专";
@@ -955,8 +860,7 @@ const Distribution: React.FC<DistributionProps> = ({
         case 'userName':
           return d.userName || '';
         case 'incomePackage': {
-          const kuanTiers = getKuanTheoreticalTiers(d);
-          return kuanTiers ? (kuanTiers.collectionPackage + kuanTiers.redundancy) : (d.baseValueConfirmed || 0);
+          return d.baseValueConfirmed || 0;
         }
         case 'costPackage':
         case 'totalCost': {
@@ -974,10 +878,9 @@ const Distribution: React.FC<DistributionProps> = ({
             .filter((r) => r.userId === d.userId && monthsInRange.includes(r.month) && r.status === "已承兑")
             .reduce((sum, r) => sum + r.amount, 0);
         case 'yearlyCdtz': {
-          const userYearlyCdtzSum = cdtzList
+          return cdtzList
             .filter((r) => r.userId === d.userId && r.status === "已承兑" && r.month.startsWith(queryYear))
             .reduce((sum, r) => sum + r.amount, 0);
-          return userYearlyCdtzSum || d.yearlyIncomeConfirmed || 0;
         }
         default:
           return 0;
@@ -1000,7 +903,7 @@ const Distribution: React.FC<DistributionProps> = ({
     });
 
     return list;
-  }, [filteredDistributionData, sortField, sortOrder, getKuanTheoreticalTiers, cdtzList, monthsInRange, startDate, filterMonth]);
+  }, [filteredDistributionData, sortField, sortOrder, cdtzList, monthsInRange, startDate, filterMonth]);
 
   const handleSort = (field: DistributionSortField) => {
     if (sortField === field || (field === 'costPackage' && sortField === 'totalCost') || (field === 'totalCost' && sortField === 'costPackage')) {
@@ -1037,7 +940,7 @@ const Distribution: React.FC<DistributionProps> = ({
     const data = filteredDistributionData.map((d) => {
       const yearlyIncomeKey = d.isRevenueExpert
         ? "年度累计收款包"
-        : "年度累计产兑包";
+        : "年度累计产兑包（现金）";
       return {
         专家姓名: d.userName,
         职级: d.category,
@@ -1221,6 +1124,18 @@ const Distribution: React.FC<DistributionProps> = ({
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest hidden sm:inline">
               共 {filteredDistributionData.length} 位专家参与分配
             </span>
+            {distributionLoading && (
+              <span className="inline-flex items-center gap-1.5 text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded font-mono">
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                正在同步服务端...
+              </span>
+            )}
+            {distributionError && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded font-mono">
+                <AlertTriangle className="w-3 h-3" />
+                {distributionError}
+              </span>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -1255,6 +1170,15 @@ const Distribution: React.FC<DistributionProps> = ({
               />
             </div>
             <button
+              onClick={loadDistribution}
+              disabled={distributionLoading}
+              title="刷新数据"
+              className="text-[11px] text-slate-600 hover:text-slate-900 font-medium px-2.5 py-2 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shadow-2xs"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${distributionLoading ? 'animate-spin text-indigo-600' : ''}`} />
+              刷新
+            </button>
+            <button
               onClick={exportToExcel}
               disabled={!canExport}
               title={getExportButtonTitle(canExport, '导出分配清单')}
@@ -1270,15 +1194,26 @@ const Distribution: React.FC<DistributionProps> = ({
           </div>
         </div>
 
+        {startDate && endDate && (
+          <div className="bg-amber-50/80 border-b border-amber-200 px-6 py-2 text-xs text-amber-800 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={14} className="text-amber-600 shrink-0" />
+              <span>
+                当前为自定义起止日查询（{startDate} ~ {endDate}）。跨月与自定义窗口由前端实时聚合运算；切换回单月查询将使用服务端分配 SSOT。
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Table View with Horizontal Scroll */}
         <div className="block overflow-x-auto custom-scrollbar pb-4 relative">
-          <table className="w-full text-left border-separate border-spacing-0 border border-slate-300 rounded-xl overflow-hidden table-auto min-w-[1180px]">
+          <table className="w-full text-left border-separate border-spacing-0 border border-slate-300 rounded-xl overflow-hidden table-auto min-w-[1080px]">
             <thead className="sticky top-0 z-20">
               <tr className="bg-slate-100/90 backdrop-blur-md">
                 {/* 1. 采集主体 (Dimension) */}
                 <th 
                   onClick={() => handleSort('userName')}
-                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-left text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[140px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none whitespace-nowrap"
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-left text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[165px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none whitespace-nowrap"
                 >
                   <div className="flex items-center justify-between whitespace-nowrap">
                     <span className="inline-flex items-center whitespace-nowrap">
@@ -1289,18 +1224,19 @@ const Distribution: React.FC<DistributionProps> = ({
                 {/* 2. 收产包 (Measure) */}
                 <th 
                   onClick={() => handleSort('incomePackage')}
-                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[110px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none whitespace-nowrap"
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[92px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none whitespace-nowrap"
                 >
-                  <div className="flex items-center justify-end gap-1 whitespace-nowrap">
+                  <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
                     <span className="inline-flex items-center whitespace-nowrap">
                       收产包 {renderSortIcon('incomePackage')}
                     </span>
+                    <InfoTip title="收产包口径" content="款专：当期收款包（已确权或入库的收款净值）；产专：产兑包（现金）（已确权或入库的产值净值；不含联动待确权）。" />
                   </div>
                 </th>
                 {/* 3. 成本包 */}
                 <th 
                   onClick={() => handleSort('costPackage')}
-                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[120px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none whitespace-nowrap"
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[96px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none whitespace-nowrap"
                   title="点击按成本包排序"
                 >
                   <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
@@ -1314,7 +1250,7 @@ const Distribution: React.FC<DistributionProps> = ({
                 {/* 4. 历史欠产包 */}
                 <th 
                   onClick={() => handleSort('historyDebt')}
-                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[105px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none whitespace-nowrap"
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[92px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none whitespace-nowrap"
                   title="点击按历史欠产包排序"
                 >
                   <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
@@ -1327,7 +1263,7 @@ const Distribution: React.FC<DistributionProps> = ({
                 {/* 5. 分配额度（月） */}
                 <th 
                   onClick={() => handleSort('netRedundancy')}
-                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-indigo-700 bg-indigo-50/40 uppercase tracking-wider min-w-[115px] cursor-pointer hover:bg-indigo-100/60 transition-colors select-none whitespace-nowrap"
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-indigo-700 bg-indigo-50/40 uppercase tracking-wider min-w-[100px] cursor-pointer hover:bg-indigo-100/60 transition-colors select-none whitespace-nowrap"
                   title="点击按分配额度排序"
                 >
                   <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
@@ -1340,7 +1276,7 @@ const Distribution: React.FC<DistributionProps> = ({
                 {/* 6. 理论（额度） */}
                 <th 
                   onClick={() => handleSort('theoreticalBonus')}
-                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-amber-700 bg-amber-50/50 uppercase tracking-wider min-w-[135px] cursor-pointer hover:bg-amber-100/60 transition-colors select-none whitespace-nowrap"
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-amber-700 bg-amber-50/50 uppercase tracking-wider min-w-[145px] cursor-pointer hover:bg-amber-100/60 transition-colors select-none whitespace-nowrap"
                   title="点击按理论额度排序"
                 >
                   <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
@@ -1353,37 +1289,55 @@ const Distribution: React.FC<DistributionProps> = ({
                 {/* 7. 当月承兑实发 */}
                 <th 
                   onClick={() => handleSort('currentCdtz')}
-                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-emerald-800 bg-emerald-50/50 uppercase tracking-wider min-w-[110px] cursor-pointer hover:bg-emerald-100/60 transition-colors select-none whitespace-nowrap"
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-emerald-800 bg-emerald-50/50 uppercase tracking-wider min-w-[92px] cursor-pointer hover:bg-emerald-100/60 transition-colors select-none whitespace-nowrap"
                   title="点击按当月承兑实发排序"
                 >
                   <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
                     <span className="inline-flex items-center whitespace-nowrap">
                       当月承兑实发 {renderSortIcon('currentCdtz')}
                     </span>
-                    <InfoTip title="当月承兑实发口径" content="当月在承兑台账 cdtz 中实际已发放的总额。" />
+                    <InfoTip title="当月承兑实发口径" content="当月在承兑台账 cdtz 中实际已承兑发放的总额（无 cdtz 登记显示 0）。" />
                   </div>
                 </th>
                 {/* 8. 年度累计承兑 */}
                 <th 
                   onClick={() => handleSort('yearlyCdtz')}
-                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[110px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none whitespace-nowrap"
+                  className="group border-b border-r border-slate-300 py-1.5 px-3 text-right text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[100px] cursor-pointer hover:bg-slate-200/80 transition-colors select-none whitespace-nowrap"
                   title="点击按年度累计承兑排序"
                 >
                   <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
                     <span className="inline-flex items-center whitespace-nowrap">
                       年度累计承兑 {renderSortIcon('yearlyCdtz')}
                     </span>
-                    <InfoTip title="年度累计承兑口径" content="自然年内累计已承兑实发总额。" />
+                    <InfoTip title="年度累计承兑口径" content="自然年内在承兑台账 cdtz 累计已承兑实发总额（无 cdtz 登记显示 0）。" />
                   </div>
                 </th>
                 {/* 9. 操作控制 */}
-                <th className="border-b border-slate-300 py-1.5 px-3 text-center text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[100px] whitespace-nowrap">
+                <th className="border-b border-slate-300 py-1.5 px-3 text-center text-[10px] font-black text-slate-700 uppercase tracking-wider min-w-[126px] whitespace-nowrap">
                   操作控制
                 </th>
               </tr>
             </thead>
             <tbody>
-              {sortedDistributionData.length === 0 ? (
+              {distributionLoading && sortedDistributionData.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-6 py-20 text-center text-slate-500 font-bold uppercase text-[11px] tracking-widest font-mono">
+                    <div className="flex items-center justify-center space-x-2">
+                      <RefreshCw className="w-4 h-4 text-indigo-600 animate-spin" />
+                      <span>正在加载价值分配数据...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : distributionError && sortedDistributionData.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-6 py-20 text-center text-rose-500 font-bold uppercase text-[11px] tracking-widest font-mono">
+                    <div className="flex items-center justify-center space-x-2">
+                      <AlertTriangle className="w-4 h-4 text-rose-600" />
+                      <span>{distributionError}</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : sortedDistributionData.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="px-6 py-20 text-center text-slate-400 font-bold uppercase text-[10px] tracking-widest">
                     没有找到符合条件的专家
@@ -1391,29 +1345,6 @@ const Distribution: React.FC<DistributionProps> = ({
                 </tr>
               ) : (
                 sortedDistributionData.map((data) => {
-                  const userObj = users.find((u) => u.id === data.userId);
-                  const userCenter = userObj?.center || "";
-
-                  const coll2_Sum = resources
-                    .filter(
-                      (r) =>
-                        r.assignedToRevenue === data.userId ||
-                        r.assignedToRevenue === data.userName ||
-                        centerMatch(r.assignedToRevenue, userCenter),
-                    )
-                    .reduce((sum, r) => sum + (r.incentiveCollection2 || 0), 0);
-
-                  const out5_Sum = resources
-                    .filter(
-                      (r) =>
-                        r.assignedToValue === data.userId ||
-                        r.assignedToValue === data.userName ||
-                        centerMatch(r.assignedToValue, userCenter),
-                    )
-                    .reduce((sum, r) => sum + (r.incentiveOutput5 || 0), 0);
-
-                  const kuanTiers = getKuanTheoreticalTiers(data);
-
                   const userCdtzSum = cdtzList
                     .filter((r) => r.userId === data.userId && monthsInRange.includes(r.month) && r.status === "已承兑")
                     .reduce((sum, r) => sum + r.amount, 0);
@@ -1440,9 +1371,9 @@ const Distribution: React.FC<DistributionProps> = ({
                             <span className="text-[10px] font-medium text-slate-500 font-mono mt-0.5">
                               {formatCategory(data.category)} · {data.userId}
                             </span>
-                            {data.category === "经管员高款专" && (
+                            {(data.centerLevelBonus ?? data.unitRedundancy ?? 0) > 0 && (
                               <span className="text-[9px] text-indigo-600 font-mono font-medium mt-0.5">
-                                单元本级: ¥{fmtAmount(out5_Sum + coll2_Sum)}
+                                经营单元本级: ¥{fmtAmount(data.centerLevelBonus ?? data.unitRedundancy ?? 0)}
                               </span>
                             )}
                           </div>
@@ -1451,7 +1382,7 @@ const Distribution: React.FC<DistributionProps> = ({
                         {/* 2. 收产包 (Measure) */}
                         <td className="py-1.5 px-3 border border-slate-300 text-right whitespace-nowrap">
                           <span className="font-mono text-xs font-black text-slate-900">
-                            {fmtAmount(kuanTiers ? (kuanTiers.collectionPackage + kuanTiers.redundancy) : data.baseValueConfirmed)}
+                            {fmtAmount(data.baseValueConfirmed)}
                           </span>
                         </td>
 
@@ -1496,7 +1427,7 @@ const Distribution: React.FC<DistributionProps> = ({
                         {/* 8. 年度累计承兑 */}
                         <td className="py-1.5 px-3 border border-slate-300 text-right whitespace-nowrap">
                           <span className="font-mono text-xs font-bold text-slate-700">
-                            {fmtAmount(userYearlyCdtzSum || data.yearlyIncomeConfirmed)}
+                            {fmtAmount(userYearlyCdtzSum)}
                           </span>
                         </td>
 
@@ -1604,10 +1535,14 @@ const Distribution: React.FC<DistributionProps> = ({
                                     <div className="flex items-center gap-2">
                                       <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-700 font-mono font-bold text-[10px] flex items-center justify-center">1</span>
                                       <span className="font-bold text-slate-800">收产包</span>
-                                      <span className="text-[10px] text-slate-400">（确权收款/产值包，计算自实际业务流水）</span>
+                                      <span className="text-[10px] text-slate-400">
+                                        {data.isChan 
+                                          ? "（产兑包（现金）：已确权或入库的产值净值；不含联动待确权）" 
+                                          : "（当期收款包：已确权或入库的收款净值）"}
+                                      </span>
                                     </div>
                                     <span className="font-mono font-black text-indigo-600 text-xs">
-                                      {fmtAmount(kuanTiers ? kuanTiers.collectionPackage : data.baseValueConfirmed)}
+                                      {fmtAmount(data.baseValueConfirmed)}
                                     </span>
                                   </div>
 
@@ -1616,10 +1551,14 @@ const Distribution: React.FC<DistributionProps> = ({
                                     <div className="flex items-center gap-2">
                                       <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-700 font-mono font-bold text-[10px] flex items-center justify-center">2</span>
                                       <span className="font-bold text-slate-800">经营单元本级</span>
-                                      <span className="text-[10px] text-slate-400">（名下经营单元本级包归集 / 单元冗余）</span>
+                                      <span className="text-[10px] text-slate-400">
+                                        {data.category === "经管员高款专" || data.category === "经管员高产专" || data.category === "高产专"
+                                          ? "（经营单元本级：Σ(产值专项+收款专项)，适用对象并入结余）" 
+                                          : "（经营单元本级：Σ(产值专项+收款专项)，仅供展示不并入结余）"}
+                                      </span>
                                     </div>
                                     <span className="font-mono font-bold text-blue-600 text-xs">
-                                      {fmtAmount(kuanTiers ? kuanTiers.redundancy : (data.centerLevelBonus || 0))}
+                                      {fmtAmount(data.centerLevelBonus ?? data.unitRedundancy ?? 0)}
                                     </span>
                                   </div>
 
@@ -1654,7 +1593,7 @@ const Distribution: React.FC<DistributionProps> = ({
                                     <div className="flex items-center gap-2">
                                       <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 font-mono font-bold text-[10px] flex items-center justify-center">5</span>
                                       <span className="font-bold text-slate-900">{monthsInRange.length > 1 ? '多月累计结余' : '当月结余'}</span>
-                                      <span className="text-[10px] text-slate-500">（收入 − 成本 = (收产包 + 单元本级) − 成本包）</span>
+                                      <span className="text-[10px] text-slate-500">（收入 − 成本 = (收产包 + 经营单元本级) + 成本包）</span>
                                     </div>
                                     <span className={`font-mono font-black text-xs ${data.currentSurplus < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
                                       {fmtAmount(data.currentSurplus)}
@@ -1680,7 +1619,7 @@ const Distribution: React.FC<DistributionProps> = ({
                                     <div className="flex items-center gap-2">
                                       <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 font-mono font-bold text-[10px] flex items-center justify-center">7</span>
                                       <span className="font-bold text-indigo-950">分配额度（净额度）</span>
-                                      <span className="text-[10px] text-indigo-600/80">（填平历史欠产后额度 = max(0, 结余 + 历史欠产包)）</span>
+                                      <span className="text-[10px] text-indigo-600/80">（填平历史欠产包后额度 = max(0, 结余 + 历史欠产包)）</span>
                                     </div>
                                     <span className="font-mono font-black text-indigo-700 text-sm">{fmtAmount(data.netRedundancy)}</span>
                                   </div>
@@ -1789,7 +1728,7 @@ const Distribution: React.FC<DistributionProps> = ({
                                       </table>
                                     </div>
                                   ) : (
-                                    <div className="text-[10px] text-slate-400 py-3 text-center font-mono">本年无往期历史欠产记录</div>
+                                    <div className="text-[10px] text-slate-400 py-3 text-center font-mono">本年无往期历史欠产包记录</div>
                                   )}
                                 </div>
                               </div>
@@ -1895,7 +1834,7 @@ const Distribution: React.FC<DistributionProps> = ({
                     <div className="p-5 grid grid-cols-2 gap-4 bg-slate-50/50">
                       <div className="flex flex-col gap-0.5">
                         <span className="text-[9px] font-black text-slate-400 uppercase">
-                          当期确权产兑
+                          产兑包（现金）
                         </span>
                         <span className="text-xs font-bold text-slate-700 font-mono">
                           {fmtAmount(data.baseValueConfirmed)}
@@ -1913,9 +1852,9 @@ const Distribution: React.FC<DistributionProps> = ({
                         <span className="text-[9px] font-black text-[#64748b] uppercase">
                           历史滚动欠产包
                         </span>
-                        {data.historyDebt > 0 ? (
+                        {(data.historyDebtConfirmed ?? data.historyDebt ?? 0) < 0 ? (
                           <span className="text-xs font-black text-[#ef4444] font-mono">
-                            {fmtDebt(data.historyDebt)}
+                            {fmtDebt(data.historyDebtConfirmed ?? data.historyDebt)}
                           </span>
                         ) : (
                           <span className="text-xs font-semibold text-slate-300 font-mono">

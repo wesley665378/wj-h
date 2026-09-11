@@ -105,11 +105,11 @@ export const UnitMonthlyPnLCard: React.FC<UnitMonthlyPnLCardProps> = ({
       
       <div className="mt-4 pt-4 border-t border-slate-100 space-y-2 text-xs">
         <div className="flex justify-between">
-          <span className="text-slate-500">月度盈亏 (行1/行2)</span>
+          <span className="text-slate-500">月损益 (行1/行2)</span>
           <span>{formatProfit((data as any).row1MonthlyProfit)} / {formatProfit((data as any).row2MonthlyProfit)}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-slate-500">年度盈亏 (行1/行2)</span>
+          <span className="text-slate-500">年损益 (行1/行2)</span>
           <span>{formatProfit((data as any).yearlyPnl1)} / {formatProfit((data as any).yearlyPnl2)}</span>
         </div>
       </div>

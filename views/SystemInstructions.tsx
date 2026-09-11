@@ -18,12 +18,12 @@ const SystemInstructions: React.FC = () => {
   const terms = [
     {
       term: '收款包',
-      desc: '指销售专家或款专在收款（Revenue）通道，通过系统确权流程审批通过后，进入个人或经营单元账户的纯净收益部分。',
+      desc: '指销售专家或款专在收款（Revenue）通道，通过系统确权流程审批通过后，进入个人或经营单元帐户的纯净收益部分。',
       badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200/50'
     },
     {
       term: '产兑包',
-      desc: '指技术专家或产专在产值（Value）通道，通过系统确权流程审批通过后（或通过收款背书在途自动联动），进入账户的可承兑收益。',
+      desc: '指技术专家或产专在产值（Value）通道，通过系统确权流程审批通过后（或通过收款背书在途自动联动），进入帐户的可承兑收益。',
       badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200/50'
     },
     {
@@ -193,11 +193,11 @@ const SystemInstructions: React.FC = () => {
             <div>
               <h3 className="text-lg font-black text-slate-900 tracking-tight">内部交易越界保护与防误熔断</h3>
               <p className="text-slate-500 text-xs font-bold mt-1">
-                考虑提纯折耗引起的账户水位偏差
+                考虑提纯折耗引起的帐户水位偏差
               </p>
             </div>
             <p className="text-slate-600 text-sm leading-relaxed">
-              内部流转交易（如承兑额度交易）在进行跨账户转移与扣划限额验证时，均已精准内嵌入 6.7% 折耗的损耗抵消。这防止了由于未考虑纯净提纯转换导致高估账户余额，而在高频额度变动时发生额度异常报错或触发系统交易误锁死。
+              内部流转交易（如承兑额度交易）在进行跨帐户转移与扣划限额验证时，均已精准内嵌入 6.7% 折耗的损耗抵消。这防止了由于未考虑纯净提纯转换导致高估帐户余额，而在高频额度变动时发生额度异常报错或触发系统交易误锁死。
             </p>
           </div>
           <div className="mt-4 pt-4 border-t border-slate-100 flex items-center space-x-2 text-xs font-black text-rose-600 uppercase tracking-wider">
@@ -226,7 +226,7 @@ const SystemInstructions: React.FC = () => {
         </div>
         <div className="p-6 md:p-8 space-y-6">
           <p className="text-slate-600 text-sm leading-relaxed">
-            为精细化评估经营单元的静态已实现成果与动态潜在盈亏，排名榜采用<strong>双行口径机制</strong>进行严密呈递。榜单的<strong>总体排名名次完全基于第二行口径的月度盈亏结果</strong>。
+            为精细化评估经营单元的静态已实现成果与动态潜在盈亏，排名榜采用<strong>双行口径机制</strong>进行严密呈递。榜单的<strong>总体排名名次完全基于第二行口径的月损益结果</strong>。
           </p>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
@@ -245,7 +245,7 @@ const SystemInstructions: React.FC = () => {
                 </li>
                 <li className="flex items-start">
                   <span className="mr-1.5 mt-0.5 text-blue-500">▪</span>
-                  <span>月度盈亏：仅以已确权收产包减去本月各级成本。</span>
+                  <span>月损益：仅以已确权收产包减去本月各级成本。</span>
                 </li>
               </ul>
             </div>
@@ -265,7 +265,7 @@ const SystemInstructions: React.FC = () => {
                 </li>
                 <li className="flex items-start">
                   <span className="mr-1.5 mt-0.5 text-amber-600">▪</span>
-                  <span>各列都出数：收产、成本包、月度/年度盈亏第二行均全部填出，不要任何横杠。</span>
+                  <span>各列都出数：收产、成本包、月损益/年损益第二行均全部填出，不要任何横杠。</span>
                 </li>
               </ul>
             </div>

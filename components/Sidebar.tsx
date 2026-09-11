@@ -10,9 +10,10 @@ interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   onUpdateAvatar?: (avatarUrl: string) => void;
+  auditBadgeCount?: number;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab, onUpdateAvatar }) => {
+const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab, onUpdateAvatar, auditBadgeCount = 0 }) => {
   const menuItems = MENU_ITEMS.map(item => {
     return { ...item, show: checkUserPermission(user, item.id) };
   });
@@ -78,14 +79,21 @@ const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab, onUpda
             key={item.id}
             onClick={() => setActiveTab(item.id)}
             title={`切换至 [${item.label}] 模块`}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${
+            className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all ${
               activeTab === item.id 
                 ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' 
                 : 'text-slate-400 hover:bg-slate-800 hover:text-white'
             }`}
           >
-            <span className="text-xl">{item.icon}</span>
-            <span className="font-bold text-sm">{item.label}</span>
+            <div className="flex items-center space-x-3">
+              <span className="text-xl">{item.icon}</span>
+              <span className="font-bold text-sm">{item.label}</span>
+            </div>
+            {item.id === 'audit' && auditBadgeCount > 0 && (
+              <span className="px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded-full animate-pulse">
+                {auditBadgeCount}
+              </span>
+            )}
           </button>
         ))}
       </nav>

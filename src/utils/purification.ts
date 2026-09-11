@@ -2,6 +2,7 @@ import { ValueCreationLog, MiningResource, AuditStatus, RefineCategory, User } f
 import { businessUnitLabelsEqual } from './businessUnitName';
 import { parseCenterList } from './accessControl';
 import { centerMatch } from './centerScope';
+import { isDynamicCostLog, isCreationCategoryLog } from './costCategory';
 export { businessUnitLabelsEqual, parseCenterList };
 
 export interface QuadrantData {
@@ -23,11 +24,50 @@ import {
 export { importNetAmount };
 
 /**
+ * 判断单条流水是否属于创造端正常提炼流水（非动态消耗）
+ * 创造流水（category 为收款/Revenue 或产值/Value）成色档保留计入四格；
+ * 消耗流水（手动确权、SYS_C/SYS_B2、真 A/B/C/D 消耗）排除。
+ */
+export function isCreationMiningLog(log?: ValueCreationLog | null): boolean {
+  if (!log) return false;
+  if (!isCreationCategoryLog(log)) return false;
+  if (isDynamicCostLog(log)) return false;
+  return true;
+}
+
+/**
  * 获取每笔流水在四格中的入账量，基于 amount 原始值，禁止二次乘以 0.933 
  */
 export function getQuadrantLedgerAmount(log: ValueCreationLog): number {
   return log.amount || 0;
 }
+
+/**
+ * 辅助状态判断：是否处于已确权状态（不含入库）
+ */
+function isConfirmedStatus(status: any): boolean {
+  return status === AuditStatus.Confirmed || status === '已确权' || status === 'Confirmed' || status === 'confirmed';
+}
+
+/**
+ * 辅助状态判断：是否处于入库状态
+ */
+function isApprovedStatus(status: any): boolean {
+  return status === AuditStatus.Approved || status === '入库' || status === 'Approved' || status === 'approved';
+}
+
+/**
+ * 辅助状态判断：是否处于待确权状态
+ */
+function isPendingStatus(status: any): boolean {
+  return status === AuditStatus.Pending || status === '待确权' || status === 'Pending' || status === 'pending';
+}
+
+const isRevenueCategory = (cat: any) =>
+  cat === RefineCategory.Revenue || cat === '收款' || cat === 'Revenue' || cat === 'revenue';
+
+const isValueCategory = (cat: any) =>
+  cat === RefineCategory.Value || cat === '产值' || cat === 'Value' || cat === 'value';
 
 /**
  * 计算单个矿山的四象限价值数据
@@ -39,11 +79,13 @@ export function calculateSingleResourceQuadrants(
   users: User[] = []
 ): MiningQuadrants {
   // DB-02b-F: 如果指定了 centerId，过滤流水口径 (仅计入归属本单元的采集主体流水)
+  // centerUserIds 同时加入 id 与 userId
   const centerUserIds = new Set<string>();
   if (centerId) {
     users.forEach(u => {
       if (centerMatch(u.center, centerId)) {
-        centerUserIds.add(u.id);
+        if (u.id) centerUserIds.add(u.id);
+        if (u.userId) centerUserIds.add(u.userId);
       }
     });
   }
@@ -59,21 +101,18 @@ export function calculateSingleResourceQuadrants(
 
   // 1. 本矿已确认的C类与B2类动态成本，用于扣减当期容量上限
   const confirmedCLogs = relevantLogs.filter(
-    l => l.costCategory === 'C' && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved)
+    l => isDynamicCostLog(l) && l.costCategory === 'C' && (isConfirmedStatus(l.status) || isApprovedStatus(l.status))
   );
   const existingC = confirmedCLogs.reduce((sum, l) => sum + (l.dynamicCost || 0), 0);
 
   const confirmedB2Logs = relevantLogs.filter(
-    l => l.costCategory === 'B' && l.valueConsumptionMode === 'B2' && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved)
+    l => isDynamicCostLog(l) && l.costCategory === 'B' && l.valueConsumptionMode === 'B2' && (isConfirmedStatus(l.status) || isApprovedStatus(l.status))
   );
   const existingB2 = confirmedB2Logs.reduce((sum, l) => sum + (l.dynamicCost || 0), 0);
 
   // 款初/款当/产初/产当
-  // 🛑 DB-02-F 修复：如果指定了经营单元，优先从该单元的配额（quotas）获取上限
   let initialRevCap = resource.initialRevenueCapacity !== undefined ? resource.initialRevenueCapacity : resource.revenueCapacity || 0;
   let initialValueCap = resource.initialValueCapacity !== undefined ? resource.initialValueCapacity : resource.valueCapacity || 0;
-  let minedRevenue = resource.minedRevenue || 0;
-  let minedValue = resource.minedValue || 0;
 
   if (centerId && resource.quotas && resource.quotas.length > 0) {
     const matchingQuotas = resource.quotas.filter(item => 
@@ -82,45 +121,53 @@ export function calculateSingleResourceQuadrants(
     if (matchingQuotas.length > 0) {
       initialRevCap = matchingQuotas.reduce((sum, q) => sum + (q.revenueQuota || 0), 0);
       initialValueCap = matchingQuotas.reduce((sum, q) => sum + (q.valueQuota || 0), 0);
-      // DB-02c-F: mined 也采用单元配额口径
-      minedRevenue = matchingQuotas.reduce((sum, q) => sum + (q.minedRevenue || 0), 0);
-      minedValue = matchingQuotas.reduce((sum, q) => sum + (q.minedValue || 0), 0);
     } else {
-      // DB-01-GAP-F: 当矿有 quotas 但当前单元无条目时，回退为 0 (禁止回退整矿容量)
       initialRevCap = 0;
       initialValueCap = 0;
-      minedRevenue = 0;
-      minedValue = 0;
     }
   }
 
   const revenueCapacity = Math.max(0, initialRevCap - existingC);
   const valueCapacity = Math.max(0, initialValueCap - existingC - existingB2);
 
-  // 2. 正常流水的确权统计 (排除C类、B2类等在矿山本身的普通提炼)
-  const normLogs = relevantLogs.filter(
-    l => l.costCategory !== 'C' && !(l.costCategory === 'B' && l.valueConsumptionMode === 'B2')
-  );
+  // 2. 正常创造流水的确权统计 (保留收款/产值创造单，排除纯动态消耗)
+  const normLogs = relevantLogs.filter(l => isCreationMiningLog(l));
 
+  // 待确权 = Pending
   const pendingRevenue = normLogs
-    .filter(l => l.category === RefineCategory.Revenue && l.status === AuditStatus.Pending)
+    .filter(l => isRevenueCategory(l.category) && isPendingStatus(l.status))
     .reduce((sum, l) => sum + getQuadrantLedgerAmount(l), 0);
 
+  // 已确权 = Confirmed / 已确权（不含入库）
   const confirmedRevenue = normLogs
-    .filter(l => l.category === RefineCategory.Revenue && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved))
+    .filter(l => isRevenueCategory(l.category) && isConfirmedStatus(l.status))
     .reduce((sum, l) => sum + getQuadrantLedgerAmount(l), 0);
 
-  const unconfirmedRevenue = Math.max(0, revenueCapacity - confirmedRevenue - pendingRevenue);
+  // 入库 = Approved / 入库，用流水 amount 汇总
+  const minedRevenue = normLogs
+    .filter(l => isRevenueCategory(l.category) && isApprovedStatus(l.status))
+    .reduce((sum, l) => sum + getQuadrantLedgerAmount(l), 0);
 
+  // 未确权 = max(0, 当限 − 待 − 已 − 入)
+  const unconfirmedRevenue = Math.max(0, revenueCapacity - confirmedRevenue - pendingRevenue - minedRevenue);
+
+  // 待确权产值 = Pending
   const pendingValue = normLogs
-    .filter(l => l.category === RefineCategory.Value && l.status === AuditStatus.Pending)
+    .filter(l => isValueCategory(l.category) && isPendingStatus(l.status))
     .reduce((sum, l) => sum + getQuadrantLedgerAmount(l), 0);
 
+  // 已确权产值 = Confirmed / 已确权（不含入库）
   const confirmedValue = normLogs
-    .filter(l => l.category === RefineCategory.Value && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved))
+    .filter(l => isValueCategory(l.category) && isConfirmedStatus(l.status))
     .reduce((sum, l) => sum + getQuadrantLedgerAmount(l), 0);
 
-  const unconfirmedValue = Math.max(0, valueCapacity - confirmedValue - pendingValue);
+  // 入库产值 = Approved / 入库，用流水 amount 汇总
+  const minedValue = normLogs
+    .filter(l => isValueCategory(l.category) && isApprovedStatus(l.status))
+    .reduce((sum, l) => sum + getQuadrantLedgerAmount(l), 0);
+
+  // 未确权产值 = max(0, 当限 − 待 − 已 − 入)
+  const unconfirmedValue = Math.max(0, valueCapacity - confirmedValue - pendingValue - minedValue);
 
   return {
     revenue: {

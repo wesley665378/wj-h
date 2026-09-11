@@ -24,7 +24,8 @@ import { TERMINOLOGY } from '@/constants/terminology';
 import { aggregateMiningQuadrantsFromLogs, calculateSingleResourceQuadrants } from '@/utils/purification';
 import { XLSX, exportWorkbook, buildExcelFilename, EXCEL_IMPORT_MAX_BYTES, EXCEL_IMPORT_MAX_ROWS } from '@/utils/excelIo';
 import { calculateHistoricalNetValue, calculateDualTrackCoreMatrices, calculateT1PlusValue, calculateT1PlusRevenue } from '@/utils/business';
-import { calculateHedgeCapacitiesAndWeights, normalizeRefineTier, calculateInjectedAmount, getRawInputAmount } from '@/utils/consumptionHedge';
+import { calculateHedgeCapacitiesAndWeights, normalizeRefineTier, resolveLogRefineTier, calculateInjectedAmount, getRawInputAmount } from '@/utils/consumptionHedge';
+import { isDynamicCostLog } from '@/utils/costCategory';
 import { deriveProjectStatus, isProjectWritable } from '@/utils/projectStatus';
 import { isAdminOrNpc, parseCenterList, canExportExcel, getExportButtonTitle, EXPORT_DISABLED_TOOLTIP } from '@/utils/accessControl';
 import { SystemConfig } from '@/types';
@@ -33,8 +34,9 @@ import { userCenterMatchesBusinessUnit, businessUnitLabelsEqual } from '@/utils/
 import { isCenterManagerUser, sortCenterManagers } from '@/utils/centerManager';
 import { centerMatch, isGlobalReader, filterAuditLogsByCenter } from '@/utils/centerScope';
 import { labelBusinessUnit } from '@/utils/statusDisplay';
-import { formatCollectorDisplay } from '@/utils/collector';
+import { formatCollectorDisplay, resolveCollector } from '@/utils/collector';
 import { safeGetItem, safeSetItem, safeRemoveItem } from '@/utils/safeLocalStorage';
+import { formatConfirmationType } from '@/utils/formatters';
 import { toast } from 'sonner';
 
 const IMPORT_IN_PROGRESS_KEY = 'vc_import_in_progress';
@@ -206,6 +208,7 @@ const AuditModal: React.FC<{
 interface ValueCreationProps {
   user: User;
   users?: User[];
+  managedUsers?: User[];
   resources: MiningResource[];
   logs: ValueCreationLog[];
   onLogSubmit: (log: ValueCreationLog | ValueCreationLog[], options?: { isImport?: boolean; skipSystemLogs?: boolean }) => void;
@@ -234,13 +237,19 @@ export const tierDisplayMap: Record<string, { name: string, desc: string }> = {
 };
 
 const ValueCreation: React.FC<ValueCreationProps> = ({ 
-  user, users = [], resources, logs, onLogSubmit, transactions = [], onConfirmTransaction, circuitBreakers = [], onAddCircuitBreaker,
+  user, users = [], managedUsers: allManagedUsersProp, resources, logs, onLogSubmit, transactions = [], onConfirmTransaction, circuitBreakers = [], onAddCircuitBreaker,
   quotaSnapshots = {}, processingLogIds = new Set(), persistWorkspaceWithOverrides, onPauseAutoSync, systemConfig
 }) => {
   const canExport = useMemo(() => canExportExcel(user, systemConfig), [user, systemConfig]);
   const miningReconciliations = useMemo(() => reconcileMiningLogs(logs, resources), [logs, resources]);
 
   const [managedUsers, setManagedUsers] = useState<User[]>([]);
+  // 全量人事主源（用于跨单元流水采集人解析、center 映射、包汇总、导出等）
+  const allUsers = useMemo(() => {
+    if (allManagedUsersProp && allManagedUsersProp.length > 0) return allManagedUsersProp;
+    if (managedUsers && managedUsers.length > 0) return managedUsers;
+    return users && users.length > 0 ? users : [];
+  }, [allManagedUsersProp, managedUsers, users]);
   const [selectedOperatorId, setSelectedOperatorId] = useState<string>(user.id);
   const [selectedCollectors, setSelectedCollectors] = useState<{ id: string, amount: number, rawAmount?: number }[]>([]);
   const [selectedMiningId, setSelectedMiningId] = useState('');
@@ -325,6 +334,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       return logs
         .filter(l => 
           l.miningId === selectedMiningId && 
+          isDynamicCostLog(l) &&
           l.costCategory === 'C' && 
           l.dynamicCost > 0 && 
           l.status === status
@@ -339,6 +349,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       return logs
         .filter(l => 
           l.miningId === selectedMiningId && 
+          isDynamicCostLog(l) &&
           l.costCategory === 'B' && 
           l.valueConsumptionMode === 'B2' &&
           l.dynamicCost > 0 && 
@@ -963,7 +974,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 recordedCollectorId: c.id,
                 category: selectedCategory,
                 type: selectedRefineType as RefineType || RefineType.Enterprise,
-                costCategory: selectedTier as any,
+                refineTier: normalizeRefineTier(selectedTier),
                 amount: c.amount,
                 rawAmount: c.rawAmount ?? c.amount,
                 dynamicCost: 0,
@@ -1018,37 +1029,37 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     const isAdmin = isGlobalReader(user);
     if (!isAdmin) {
       if (user.center) {
-        list = filterAuditLogsByCenter(list, resources, user, managedUsers);
+        list = filterAuditLogsByCenter(list, resources, user, allUsers);
       } else {
         list = list.filter(l => l.rankId === user.id || l.recordedCollectorId === user.id);
       }
     }
     list = list.filter(l => isLogInFilter(l, filterMonth, filterStartDate, filterEndDate));
     return list;
-  }, [logs, user, resources, managedUsers, filterMonth, filterStartDate, filterEndDate]);
+  }, [logs, user, resources, allUsers, filterMonth, filterStartDate, filterEndDate]);
 
   const summaryRevenuePackage = useMemo(() => {
-    return sumConfirmedRevenuePackage(scopeLogs, resources, managedUsers);
-  }, [scopeLogs, resources, managedUsers]);
+    return sumConfirmedRevenuePackage(scopeLogs, resources, allUsers);
+  }, [scopeLogs, resources, allUsers]);
 
   const summaryValuePackage = useMemo(() => {
-    return sumValueConversionPackage(scopeLogs, resources, managedUsers);
-  }, [scopeLogs, resources, managedUsers]);
+    return sumValueConversionPackage(scopeLogs, resources, allUsers);
+  }, [scopeLogs, resources, allUsers]);
 
   const summaryIncomePackage = useMemo(() => {
-    return sumIncomeProductionPackage(scopeLogs, resources, managedUsers);
-  }, [scopeLogs, resources, managedUsers]);
+    return sumIncomeProductionPackage(scopeLogs, resources, allUsers);
+  }, [scopeLogs, resources, allUsers]);
 
   const quadrantData = useMemo(() => {
-    return aggregateMiningQuadrantsFromLogs(logs, resources, selectedResource?.id, user.center, managedUsers);
-  }, [logs, resources, selectedResource, user.center, managedUsers]);
+    return aggregateMiningQuadrantsFromLogs(logs, resources, selectedResource?.id, user.center, allUsers);
+  }, [logs, resources, selectedResource, user.center, allUsers]);
 
   const filteredLogs = useMemo(() => {
     let list = (logs || []).filter(Boolean).reverse();
     const isAdmin = isGlobalReader(user);
     if (!isAdmin) {
       if (user.center) {
-        list = filterAuditLogsByCenter(list, resources, user, managedUsers);
+        list = filterAuditLogsByCenter(list, resources, user, allUsers);
       } else {
         list = list.filter(l => l.rankId === user.id || l.recordedCollectorId === user.id);
       }
@@ -1058,13 +1069,13 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     if (recordTab === 'revenue') {
       return list.filter(l => l.category === RefineCategory.Revenue && l.status === AuditStatus.Pending);
     } else if (recordTab === 'linkedPending') {
-      return list.filter(l => l.category === RefineCategory.Value && l.status === AuditStatus.Pending && l.confirmationType === '联动确权');
+      return list.filter(l => l.category === RefineCategory.Value && l.status === AuditStatus.Pending && (l.confirmationType === '联动确权' || (l.confirmationType as any) === '自动确权'));
     } else if (recordTab === 'confirmed') {
       return list.filter(l => l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved);
     } else {
       return [];
     }
-  }, [logs, user, resources, managedUsers, recordTab, filterMonth, filterStartDate, filterEndDate]);
+  }, [logs, user, resources, allUsers, recordTab, filterMonth, filterStartDate, filterEndDate]);
 
   const paginatedLogs = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
@@ -1093,7 +1104,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     const isHighRevenueExpert = collector ? ((collector.category || '').includes('高款专') || ((collector.secondaryRoles as string[]) || []).includes('高款专')) : false;
     const isRevenueSpecialist = collector ? ((collector.category || '').includes('款专') || ((collector.secondaryRoles as string[]) || []).includes('款专')) : false;
 
-    const tier = normalizeRefineTier(log.costCategory);
+    const tier = resolveLogRefineTier(log);
     if (log.category === RefineCategory.Value) {
       const coeffs = isHighValueExpert ? TIER_COEFFICIENTS.VALUE_MANAGER : TIER_COEFFICIENTS.VALUE_CHAN;
       if (tier === 'T1') return coeffs.Enterprise;
@@ -1654,7 +1665,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           recordedCollectorId: collector.id,
           category: category,
           type: refineType,
-          costCategory: tierStr as any,
+          refineTier: normalizeRefineTier(tierStr),
           amount: initialNetAmount,
           rawAmount: rawAmount,
           dynamicCost: 0,
@@ -1819,9 +1830,9 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     }
 
     const dataToExport = filteredLogs.map(log => {
-      const collector = managedUsers.find(u => u.id === log.recordedCollectorId);
+      const collector = resolveCollector(log.recordedCollectorId, allUsers);
       const resource = resources.find(r => r.id === log.miningId);
-      const operator = managedUsers.find(u => u.id === log.rankId);
+      const operator = resolveCollector(log.rankId, allUsers);
       
       const weightInfo = getHedgeWeight(log.recordedCollectorId || '', log.amount);
       const cWeight = log.cClassRatio !== undefined ? log.cClassRatio : weightInfo.cWeight;
@@ -1856,9 +1867,9 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         '编号': log.id,
         '业务日期': resolveLogBusinessDate(log),
         '提交日期': formatSubmissionDate(log.timestamp),
-        '经营单元': labelBusinessUnit(operator?.center),
-        '采集主体': formatCollectorDisplay(log.recordedCollectorId, managedUsers),
-        '确权类型': log.confirmationType || '手动确权',
+        '经营单元': labelBusinessUnit(collector?.center),
+        '采集主体': formatCollectorDisplay(log.recordedCollectorId, allUsers),
+        '确权类型': formatConfirmationType(log),
         '输入数值': getRawInputAmount(log),
         '注入积分': displayInjection,
         'C权': cWeight < 0.8 ? `${cWeight.toFixed(4)} (低)` : cWeight.toFixed(4),
@@ -2420,7 +2431,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 <div className="bg-emerald-50 p-4 rounded-sm border border-emerald-200 mt-2 space-y-3">
                   <div className="flex justify-between items-center">
                     <p className="text-[10px] font-bold text-emerald-800 uppercase">矿山资源确权预览 (实时计算)</p>
-                    <span className="text-[8px] font-bold text-emerald-600 bg-white px-2 py-0.5 rounded border border-emerald-100">自动确权机制已激活</span>
+                    <span className="text-[8px] font-bold text-emerald-600 bg-white px-2 py-0.5 rounded border border-emerald-100">联动确权已启用</span>
                   </div>
                   
                   <div className="bg-white/60 p-2 rounded border border-emerald-200/50">
@@ -2709,9 +2720,9 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         <div className="block md:hidden space-y-3 p-2">
           {paginatedLogs.map(log => {
             if (!log) return null;
-            const collector = managedUsers.find(u => u.id === log.recordedCollectorId);
+            const collector = resolveCollector(log.recordedCollectorId, allUsers);
             const resource = resources.find(r => r.id === log.miningId);
-            const operator = managedUsers.find(u => u.id === log.rankId);
+            const operator = resolveCollector(log.rankId, allUsers);
             
             const weightInfo = getHedgeWeight(log.recordedCollectorId || '', log.amount);
             const cWeight = log.cClassRatio !== undefined ? log.cClassRatio : weightInfo.cWeight;
@@ -2753,8 +2764,8 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
                 <div className="grid grid-cols-3 gap-2 text-slate-700">
                   <div>
-                    <span className="text-slate-400 text-[10px] block">{TERMINOLOGY.BUSINESS_UNIT} / 收集人</span>
-                    <span className="font-bold">{labelBusinessUnit(operator?.center)} · {formatCollectorDisplay(log.recordedCollectorId, managedUsers)}</span>
+                    <span className="text-slate-400 text-[10px] block">{TERMINOLOGY.BUSINESS_UNIT} / 采集人</span>
+                    <span className="font-bold">{labelBusinessUnit(collector?.center)} · {formatCollectorDisplay(log.recordedCollectorId, allUsers)}</span>
                   </div>
                   <div className="text-right">
                     <span className="text-slate-400 text-[10px] block">
@@ -2777,7 +2788,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                   </div>
                   <div className="text-right">
                     <span className="text-slate-400">确权类型: </span>
-                    <span className="font-bold text-slate-700">{log.confirmationType || '手动确权'}</span>
+                    <span className="font-bold text-slate-700">{formatConfirmationType(log)}</span>
                   </div>
                   <div className="col-span-2 flex justify-between items-center border-t border-slate-100 pt-1 mt-1">
                     <span className="text-slate-500 font-bold">{isValueLine ? '产兑包' : '收款包'}:</span>
@@ -2829,9 +2840,9 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             <tbody className="divide-y divide-slate-100">
               {paginatedLogs.map(log => {
                 if (!log) return null;
-                const collector = managedUsers.find(u => u.id === log.recordedCollectorId);
+                const collector = resolveCollector(log.recordedCollectorId, allUsers);
                 const resource = resources.find(r => r.id === log.miningId);
-                const operator = managedUsers.find(u => u.id === log.rankId);
+                const operator = resolveCollector(log.rankId, allUsers);
                 
                 const weightInfo = getHedgeWeight(log.recordedCollectorId || '', log.amount);
                 const cWeight = log.cClassRatio !== undefined ? log.cClassRatio : weightInfo.cWeight;
@@ -2877,13 +2888,13 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     <td className="px-2 py-4 font-mono text-slate-400">{log.id}</td>
                     <td className="px-2 py-4 text-slate-500 font-bold hidden md:table-cell">{resolveLogBusinessDate(log)}</td>
                     <td className="px-2 py-4 text-slate-400 hidden md:table-cell">{formatSubmissionDate(log.timestamp)}</td>
-                    <td className="px-2 py-4 text-slate-600">{labelBusinessUnit(operator?.center)}</td>
+                    <td className="px-2 py-4 text-slate-600">{labelBusinessUnit(collector?.center)}</td>
                     <td className="px-2 py-4">
-                      <span className="font-bold text-slate-700">{formatCollectorDisplay(log.recordedCollectorId, managedUsers)}</span>
+                      <span className="font-bold text-slate-700">{formatCollectorDisplay(log.recordedCollectorId, allUsers)}</span>
                     </td>
                     <td className="px-2 py-4">
                       <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[9px] font-bold">
-                        {log.confirmationType || '手动确权'}
+                        {formatConfirmationType(log)}
                       </span>
                     </td>
                     <td className="px-2 py-4 text-right font-mono font-bold text-slate-700">{formatMoney(getRawInputAmount(log))}</td>

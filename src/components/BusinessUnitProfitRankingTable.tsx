@@ -5,7 +5,7 @@ import { useCostPrivacy } from '../hooks/useCostPrivacy';
 import { CostPrivacyToggle } from './CostPrivacyToggle';
 import { formatMoney } from '../utils/formatMoney';
 import { Card } from './UI';
-import { Trophy, ChevronDown, ChevronUp, Layers, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { ChevronDown, ChevronUp, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 
 export interface BusinessUnitProfitRankingTableProps {
   units: string[];
@@ -50,7 +50,6 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
 }) => {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const [filterManagerType, setFilterManagerType] = useState('全部');
-  const [showInTransitDetails, setShowInTransitDetails] = useState(false);
   const [sortField, setSortField] = useState<RankingSortField | null>(null);
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | null>(null);
   const { maskMoney } = useCostPrivacy();
@@ -189,15 +188,15 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
       case 'unitName': return '经营单元名称';
       case 'managers': return '负责人';
       case 'revenuePackage': return '收款包';
-      case 'confirmedValuePackage': return '产兑包 (已确权)';
-      case 'incomeValuePackage': return '收产包 (已确权)';
+      case 'confirmedValuePackage': return '产兑包 (现金)';
+      case 'incomeValuePackage': return '收产包 (现金)';
       case 'costPackage':
       case 'totalCostOffset': return '成本包';
-      case 'monthlyProfit': return '月度盈亏 (已确权)';
-      case 'yearlyProfit': return '年度盈亏 (已确权)';
+      case 'monthlyProfit': return '月损益 (现金)';
+      case 'yearlyProfit': return '年损益 (现金)';
       case 'inTransitValuePackage': return '在途产兑';
       case 'inTransitIncomePackage': return '含在途收产包';
-      case 'inTransitMonthlyProfit': return '含在途月度盈亏';
+      case 'inTransitMonthlyProfit': return '含在途月损益';
     }
   };
 
@@ -216,39 +215,34 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
         onClick={() => setIsExpanded(prev => !prev)}
         className="p-6 md:p-8 flex items-center justify-between cursor-pointer hover:bg-slate-50/50 transition-colors select-none"
       >
-        <div className="flex items-center space-x-4">
-          <div className="w-12 h-12 bg-gradient-to-br from-amber-500 to-orange-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-amber-500/20">
-            <Trophy className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center space-x-3">
-              <h3 className="text-xl font-black text-slate-900 tracking-tighter uppercase">
-                经营单元排名
-              </h3>
-              <span className="px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200/60 rounded-full text-[10px] font-black uppercase tracking-wider">
-                筛选: {startDate && endDate ? `${startDate} 至 ${endDate}` : selectedMonth}
+        <div>
+          <div className="flex flex-wrap items-center gap-2 md:gap-3">
+            <h3 className="text-xl font-black text-slate-900 tracking-tighter uppercase">
+              经营单元排名
+            </h3>
+            <span className="px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200/60 rounded-full text-[10px] font-black uppercase tracking-wider whitespace-nowrap">
+              筛选: {startDate && endDate ? `${startDate} 至 ${endDate}` : selectedMonth}
+            </span>
+            {sortField && (
+              <span className="px-2.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-full text-[10px] font-bold flex items-center gap-1 whitespace-nowrap">
+                按 [{getSortFieldLabel(sortField)}] {sortOrder === 'asc' ? '升序' : '降序'}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSortField(null);
+                    setSortOrder(null);
+                  }}
+                  className="ml-1 text-blue-400 hover:text-blue-800 font-bold"
+                  title="重置排序"
+                >
+                  ×
+                </button>
               </span>
-              {sortField && (
-                <span className="px-2.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-full text-[10px] font-bold flex items-center gap-1">
-                  按 [{getSortFieldLabel(sortField)}] {sortOrder === 'asc' ? '升序' : '降序'}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSortField(null);
-                      setSortOrder(null);
-                    }}
-                    className="ml-1 text-blue-400 hover:text-blue-800 font-bold"
-                    title="重置排序"
-                  >
-                    ×
-                  </button>
-                </span>
-              )}
-            </div>
-            <p className="text-slate-400 text-xs font-bold mt-1">
-              CFO主表审阅视角 · 点击各表头可升/降序排序
-            </p>
+            )}
           </div>
+          <p className="text-slate-400 text-xs font-bold mt-1">
+            CFO主表审阅视角 · 点击各表头可升/降序排序
+          </p>
         </div>
 
         <div className="flex items-center space-x-3" onClick={(e) => e.stopPropagation()}>
@@ -262,19 +256,6 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
             <option value="经管员高产专">经管员高产专</option>
             <option value="经管员NPC">经管员NPC</option>
           </select>
-
-          <button
-            onClick={() => setShowInTransitDetails(prev => !prev)}
-            className={`px-3 py-2 text-xs font-bold rounded-xl transition-all flex items-center space-x-1.5 border ${
-              showInTransitDetails 
-                ? 'bg-indigo-50 text-indigo-700 border-indigo-200 shadow-xs' 
-                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-            }`}
-            title="切换查看在途产兑、工资与承兑实发等辅列"
-          >
-            <Layers size={14} />
-            <span>{showInTransitDetails ? '隐藏辅列/在途' : '展开辅列/在途'}</span>
-          </button>
 
           <CostPrivacyToggle size="sm" />
 
@@ -337,7 +318,7 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
                     title="点击排序"
                   >
                     <span className="inline-flex items-center justify-end w-full">
-                      产兑包 (已确权) {renderSortIcon('confirmedValuePackage')}
+                      产兑包 (现金) {renderSortIcon('confirmedValuePackage')}
                     </span>
                   </th>
                   <th 
@@ -346,7 +327,7 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
                     title="点击排序"
                   >
                     <span className="inline-flex items-center justify-end w-full">
-                      收产包 (已确权) {renderSortIcon('incomeValuePackage')}
+                      收产包 (现金) {renderSortIcon('incomeValuePackage')}
                     </span>
                   </th>
                   <th 
@@ -364,49 +345,45 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
                     title="点击排序"
                   >
                     <span className="inline-flex items-center justify-end w-full">
-                      月度盈亏 (已确权) {renderSortIcon('monthlyProfit')}
+                      月损益 (现金) {renderSortIcon('monthlyProfit')}
                     </span>
                   </th>
                   <th 
                     onClick={() => handleSort('yearlyProfit')}
-                    className={`group py-4 px-3 text-right min-w-[120px] text-indigo-600 whitespace-nowrap cursor-pointer hover:bg-slate-100/80 transition-colors select-none ${!showInTransitDetails ? 'rounded-tr-xl' : ''}`}
+                    className="group py-4 px-3 text-right min-w-[120px] text-indigo-600 whitespace-nowrap cursor-pointer hover:bg-slate-100/80 transition-colors select-none"
                     title="点击排序"
                   >
                     <span className="inline-flex items-center justify-end w-full">
-                      年度盈亏 (已确权) {renderSortIcon('yearlyProfit')}
+                      年损益 (现金) {renderSortIcon('yearlyProfit')}
                     </span>
                   </th>
-                  {showInTransitDetails && (
-                    <>
-                      <th 
-                        onClick={() => handleSort('inTransitValuePackage')}
-                        className="group py-4 px-3 text-right min-w-[100px] text-amber-600 bg-amber-50/50 whitespace-nowrap cursor-pointer hover:bg-amber-100/60 transition-colors select-none"
-                        title="点击排序"
-                      >
-                        <span className="inline-flex items-center justify-end w-full">
-                          在途产兑 {renderSortIcon('inTransitValuePackage')}
-                        </span>
-                      </th>
-                      <th 
-                        onClick={() => handleSort('inTransitIncomePackage')}
-                        className="group py-4 px-3 text-right min-w-[110px] text-amber-600 bg-amber-50/50 whitespace-nowrap cursor-pointer hover:bg-amber-100/60 transition-colors select-none"
-                        title="点击排序"
-                      >
-                        <span className="inline-flex items-center justify-end w-full">
-                          含在途收产包 {renderSortIcon('inTransitIncomePackage')}
-                        </span>
-                      </th>
-                      <th 
-                        onClick={() => handleSort('inTransitMonthlyProfit')}
-                        className="group py-4 px-3 text-right min-w-[110px] text-amber-600 bg-amber-50/50 rounded-tr-xl whitespace-nowrap cursor-pointer hover:bg-amber-100/60 transition-colors select-none"
-                        title="点击排序"
-                      >
-                        <span className="inline-flex items-center justify-end w-full">
-                          含在途月度盈亏 {renderSortIcon('inTransitMonthlyProfit')}
-                        </span>
-                      </th>
-                    </>
-                  )}
+                  <th 
+                    onClick={() => handleSort('inTransitValuePackage')}
+                    className="group py-4 px-3 text-right min-w-[100px] text-amber-600 bg-amber-50/50 whitespace-nowrap cursor-pointer hover:bg-amber-100/60 transition-colors select-none"
+                    title="点击排序"
+                  >
+                    <span className="inline-flex items-center justify-end w-full">
+                      在途产兑 {renderSortIcon('inTransitValuePackage')}
+                    </span>
+                  </th>
+                  <th 
+                    onClick={() => handleSort('inTransitIncomePackage')}
+                    className="group py-4 px-3 text-right min-w-[110px] text-amber-600 bg-amber-50/50 whitespace-nowrap cursor-pointer hover:bg-amber-100/60 transition-colors select-none"
+                    title="点击排序"
+                  >
+                    <span className="inline-flex items-center justify-end w-full">
+                      含在途收产包 {renderSortIcon('inTransitIncomePackage')}
+                    </span>
+                  </th>
+                  <th 
+                    onClick={() => handleSort('inTransitMonthlyProfit')}
+                    className="group py-4 px-3 text-right min-w-[110px] text-amber-600 bg-amber-50/50 rounded-tr-xl whitespace-nowrap cursor-pointer hover:bg-amber-100/60 transition-colors select-none"
+                    title="点击排序"
+                  >
+                    <span className="inline-flex items-center justify-end w-full">
+                      含在途月损益 {renderSortIcon('inTransitMonthlyProfit')}
+                    </span>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs font-mono">
@@ -449,12 +426,12 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
                         {formatAmount(row.revenuePackage)}
                       </td>
 
-                      {/* 产兑包 (已确权) */}
+                      {/* 产兑包 (现金) */}
                       <td className="py-4 px-3 align-middle text-right font-bold text-slate-700 border-r border-slate-100 whitespace-nowrap">
                         {formatAmount(row.confirmedValuePackage)}
                       </td>
 
-                      {/* 收产包 (已确权) */}
+                      {/* 收产包 (现金) */}
                       <td className="py-4 px-3 align-middle text-right font-black text-slate-900 border-r border-slate-100 whitespace-nowrap bg-slate-50/20">
                         {formatAmount(row.incomeValuePackage)}
                       </td>
@@ -464,30 +441,26 @@ export const BusinessUnitProfitRankingTable: React.FC<BusinessUnitProfitRankingT
                         {formatAmount(row.costPackage ?? row.totalCostOffset, true)}
                       </td>
 
-                      {/* 月度盈亏 (已确权) - 主排序依据 */}
+                      {/* 月损益 (现金) - 主排序依据 */}
                       <td className="py-4 px-3 align-middle text-right font-black text-blue-600 border-r border-slate-100 whitespace-nowrap bg-blue-50/10 text-sm">
                         {formatAmount(row.monthlyProfit)}
                       </td>
 
-                      {/* 年度盈亏 (已确权) */}
-                      <td className={`py-4 px-3 align-middle text-right font-black text-indigo-600 whitespace-nowrap ${showInTransitDetails ? 'border-r border-slate-100' : ''}`}>
+                      {/* 年损益 (现金) */}
+                      <td className="py-4 px-3 align-middle text-right font-black text-indigo-600 border-r border-slate-100 whitespace-nowrap">
                         {formatAmount(row.yearlyProfit)}
                       </td>
 
                       {/* 辅列：在途指标 */}
-                      {showInTransitDetails && (
-                        <>
-                          <td className="py-4 px-3 align-middle text-right font-bold text-amber-600 bg-amber-50/30 border-r border-slate-100 whitespace-nowrap">
-                            {formatAmount(row.inTransitValuePackage)}
-                          </td>
-                          <td className="py-4 px-3 align-middle text-right font-bold text-amber-600 bg-amber-50/30 border-r border-slate-100 whitespace-nowrap">
-                            {formatAmount(row.inTransitIncomePackage)}
-                          </td>
-                          <td className="py-4 px-3 align-middle text-right font-black text-amber-700 bg-amber-50/40 whitespace-nowrap">
-                            {formatAmount(row.inTransitMonthlyProfit)}
-                          </td>
-                        </>
-                      )}
+                      <td className="py-4 px-3 align-middle text-right font-bold text-amber-600 bg-amber-50/30 border-r border-slate-100 whitespace-nowrap">
+                        {formatAmount(row.inTransitValuePackage)}
+                      </td>
+                      <td className="py-4 px-3 align-middle text-right font-bold text-amber-600 bg-amber-50/30 border-r border-slate-100 whitespace-nowrap">
+                        {formatAmount(row.inTransitIncomePackage)}
+                      </td>
+                      <td className="py-4 px-3 align-middle text-right font-black text-amber-700 bg-amber-50/40 whitespace-nowrap">
+                        {formatAmount(row.inTransitMonthlyProfit)}
+                      </td>
                     </tr>
                   );
                 })}

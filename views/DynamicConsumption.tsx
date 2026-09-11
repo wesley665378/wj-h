@@ -585,7 +585,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
   }, [consumptionLogs, currentPage]);
 
   return (
-    <div className="w-full max-w-7xl mx-auto space-y-6 font-sans text-[13px] text-[#1f2933] animate-in fade-in duration-300 pb-12">
+    <div className="w-full space-y-4 md:space-y-6 font-sans text-[13px] text-[#1f2933] animate-in fade-in duration-300 pb-12">
       
       {/* 申报表单卡片 */}
       <Card 

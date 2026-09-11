@@ -1,4 +1,5 @@
 import { User, ValueCreationLog, AuditStatus } from '../../types';
+import { isDynamicCostLog, isCreationCategoryLog } from './costCategory';
 
 export interface JzfpSnapshot {
   id: string;
@@ -53,11 +54,11 @@ export function buildJzfpSnapshot(
       let mCost = user.salaryPackage || 0;
 
       if (isProdExpert) {
-        mIncome = mLogs.filter(l => (l.category as string) === 'Value' || (l.category as string) === '产值').reduce((s, l) => s + (Number(l.netValue) || Number(l.amount) * 0.1), 0);
-        mCost += mLogs.filter(l => l.costCategory === 'B' && l.valueConsumptionMode === 'B1').reduce((s, l) => s + (Number(l.dynamicCost) || 0), 0);
+        mIncome = mLogs.filter(l => isCreationCategoryLog(l) && ((l.category as string) === 'Value' || (l.category as string) === '产值')).reduce((s, l) => s + (Number(l.netValue) || Number(l.amount) * 0.1), 0);
+        mCost += mLogs.filter(l => isDynamicCostLog(l) && l.costCategory === 'B' && l.valueConsumptionMode === 'B1').reduce((s, l) => s + (Number(l.dynamicCost) || 0), 0);
       } else if (isRevenueExpert) {
-        mIncome = mLogs.filter(l => (l.category as string) === 'Revenue' || (l.category as string) === '收款').reduce((s, l) => s + (Number(l.netValue) || Number(l.amount) * 0.1), 0);
-        mCost += mLogs.filter(l => l.costCategory === 'A').reduce((s, l) => s + (Number(l.dynamicCost) || 0), 0);
+        mIncome = mLogs.filter(l => isCreationCategoryLog(l) && ((l.category as string) === 'Revenue' || (l.category as string) === '收款')).reduce((s, l) => s + (Number(l.netValue) || Number(l.amount) * 0.1), 0);
+        mCost += mLogs.filter(l => isDynamicCostLog(l) && l.costCategory === 'A').reduce((s, l) => s + (Number(l.dynamicCost) || 0), 0);
       }
 
       const mDeficit = mCost - mIncome;
@@ -80,11 +81,11 @@ export function buildJzfpSnapshot(
     let currentCost = user.salaryPackage || 0;
 
     if (isProdExpert) {
-      currentIncome = currentLogs.filter(l => (l.category as string) === 'Value' || (l.category as string) === '产值').reduce((s, l) => s + (Number(l.netValue) || Number(l.amount) * 0.1), 0);
-      currentCost += currentLogs.filter(l => l.costCategory === 'B' && l.valueConsumptionMode === 'B1').reduce((s, l) => s + (Number(l.dynamicCost) || 0), 0);
+      currentIncome = currentLogs.filter(l => isCreationCategoryLog(l) && ((l.category as string) === 'Value' || (l.category as string) === '产值')).reduce((s, l) => s + (Number(l.netValue) || Number(l.amount) * 0.1), 0);
+      currentCost += currentLogs.filter(l => isDynamicCostLog(l) && l.costCategory === 'B' && l.valueConsumptionMode === 'B1').reduce((s, l) => s + (Number(l.dynamicCost) || 0), 0);
     } else if (isRevenueExpert) {
-      currentIncome = currentLogs.filter(l => (l.category as string) === 'Revenue' || (l.category as string) === '收款').reduce((s, l) => s + (Number(l.netValue) || Number(l.amount) * 0.1), 0);
-      currentCost += currentLogs.filter(l => l.costCategory === 'A').reduce((s, l) => s + (Number(l.dynamicCost) || 0), 0);
+      currentIncome = currentLogs.filter(l => isCreationCategoryLog(l) && ((l.category as string) === 'Revenue' || (l.category as string) === '收款')).reduce((s, l) => s + (Number(l.netValue) || Number(l.amount) * 0.1), 0);
+      currentCost += currentLogs.filter(l => isDynamicCostLog(l) && l.costCategory === 'A').reduce((s, l) => s + (Number(l.dynamicCost) || 0), 0);
     }
 
     const currentSurplus = Math.round(currentIncome - currentCost);

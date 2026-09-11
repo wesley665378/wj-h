@@ -353,6 +353,16 @@ async function startServer() {
 
 const PROCESSED_IMPORT_BATCH_IDS = new Set<string>();
 
+function isServerCreationMiningLog(l: any): boolean {
+  if (!l) return false;
+  const cat = l.category;
+  const isCreationCat = cat === 'Revenue' || cat === '收款' || cat === 'Value' || cat === '产值';
+  if (!isCreationCat) return false;
+  if (l.confirmationType === '手动确权') return false;
+  if (Boolean(l.consumptionType)) return false;
+  return true;
+}
+
 function validateLogQuotasServer(
   incomingLogs: any[],
   existingLogs: any[],
@@ -391,7 +401,7 @@ function validateLogQuotasServer(
     const revCap = Math.max(0, initRev - cCost);
     const valCap = Math.max(0, initVal - cCost - b2Cost);
 
-    const normLogs = rLogs.filter((l: any) => l.costCategory !== 'C' && !(l.costCategory === 'B' && l.valueConsumptionMode === 'B2'));
+    const normLogs = rLogs.filter((l: any) => isServerCreationMiningLog(l));
 
     const revOcc = normLogs
       .filter((l: any) => (l.category === 'Revenue' || l.category === '收款') && (l.status === '已确权' || l.status === '待确权' || l.status === 'Confirmed' || l.status === 'Pending' || l.status === 'Approved' || l.status === '入库'))
@@ -744,10 +754,10 @@ function validateLogQuotasServer(
         incentiveOutput5 = Math.round(baseAmount * 0.05);
       }
 
-      // 收款专项：已确权收款；含「款专」且不含「经管员」；amount×2%；不乘 C权、B2权
+      // 收款专项：已确权收款；岗位仅初款专/中款专；高款专、经管员高款专、含「经管员」不触发；amount×2%；不乘 C权、B2权
       let incentiveCollection2 = 0;
       const isRevenue = log.category === 'Revenue' || log.category === '收款';
-      if (isRevenue && category.includes('款专') && !category.includes('经管员')) {
+      if (isRevenue && (category === '初款专' || category === '中款专')) {
         incentiveCollection2 = Math.round(baseAmount * 0.02);
       }
 
@@ -840,23 +850,20 @@ function validateLogQuotasServer(
     resource.valueCapacity = Math.max(0, initialValueCapacity - existingC - existingB2);
 
     // 4. Summarize logs categories
-    // Pre-filter for standard creation logs (excluding costCategory C or B-B2 costs)
-    const normLogs = logs.filter(l => 
-      l.costCategory !== 'C' &&
-      !(l.costCategory === 'B' && l.valueConsumptionMode === 'B2')
-    );
+    // Pre-filter for standard creation logs (excluding consumption logs)
+    const normLogs = logs.filter(l => isServerCreationMiningLog(l));
 
-    const confirmedRevenueLogs = normLogs.filter(l => l.category === 'Revenue' && (l.status === '已确权' || l.status === '入库'));
-    resource.confirmedRevenue = confirmedRevenueLogs.reduce((sum, l) => sum + (l.amount || 0), 0);
+    const confirmedRevenueLogs = normLogs.filter(l => (l.category === 'Revenue' || l.category === '收款') && (l.status === '已确权' || l.status === 'Confirmed' || l.status === '入库' || l.status === 'Approved'));
+    resource.confirmedRevenue = confirmedRevenueLogs.reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
 
-    const pendingRevenueLogs = normLogs.filter(l => l.category === 'Revenue' && l.status === '待确权');
-    resource.pendingRevenue = pendingRevenueLogs.reduce((sum, l) => sum + (l.amount || 0), 0);
+    const pendingRevenueLogs = normLogs.filter(l => (l.category === 'Revenue' || l.category === '收款') && (l.status === '待确权' || l.status === 'Pending'));
+    resource.pendingRevenue = pendingRevenueLogs.reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
 
-    const confirmedValueLogs = normLogs.filter(l => l.category === 'Value' && (l.status === '已确权' || l.status === '入库'));
-    resource.confirmedValue = confirmedValueLogs.reduce((sum, l) => sum + (l.amount || 0), 0);
+    const confirmedValueLogs = normLogs.filter(l => (l.category === 'Value' || l.category === '产值') && (l.status === '已确权' || l.status === 'Confirmed' || l.status === '入库' || l.status === 'Approved'));
+    resource.confirmedValue = confirmedValueLogs.reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
 
-    const pendingValueLogs = normLogs.filter(l => l.category === 'Value' && l.status === '待确权');
-    resource.pendingValue = pendingValueLogs.reduce((sum, l) => sum + (l.amount || 0), 0);
+    const pendingValueLogs = normLogs.filter(l => (l.category === 'Value' || l.category === '产值') && (l.status === '待确权' || l.status === 'Pending'));
+    resource.pendingValue = pendingValueLogs.reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
 
     // unconfirmed capacities
     resource.unconfirmedRevenue = Math.max(0, resource.revenueCapacity - resource.confirmedRevenue - resource.pendingRevenue);
@@ -959,17 +966,14 @@ function validateLogQuotasServer(
       logs = MOCK_LOGS_DB.filter(l => l.miningId === miningId);
     }
 
-    const normLogs = logs.filter(l => 
-      l.costCategory !== 'C' &&
-      !(l.costCategory === 'B' && l.valueConsumptionMode === 'B2')
-    );
+    const normLogs = logs.filter(l => isServerCreationMiningLog(l));
 
     const confirmedRevenue = normLogs
-      .filter(l => (l.category === 'Revenue' || l.category === '收款') && (l.status === '已确权' || l.status === 'Confirmed' || l.status === '入库'))
+      .filter(l => (l.category === 'Revenue' || l.category === '收款') && (l.status === '已确权' || l.status === 'Confirmed' || l.status === '入库' || l.status === 'Approved'))
       .reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
 
     const confirmedValue = normLogs
-      .filter(l => (l.category === 'Value' || l.category === '产值') && (l.status === '已确权' || l.status === 'Confirmed' || l.status === '入库'))
+      .filter(l => (l.category === 'Value' || l.category === '产值') && (l.status === '已确权' || l.status === 'Confirmed' || l.status === '入库' || l.status === 'Approved'))
       .reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
 
     const revenueBasedLimit = Math.max(0, Number((confirmedRevenue - confirmedValue).toFixed(2)));
@@ -977,12 +981,12 @@ function validateLogQuotasServer(
       return [];
     }
 
-    // 严格过滤：产值 + 待确权 + 联动确权
+    // 严格过滤：产值 + 待确权 + 联动确权（兼容历史自动确权）
     const pendingLogs = logs
       .filter(l => 
         (l.category === 'Value' || l.category === '产值') && 
         (l.status === '待确权' || l.status === 'Pending') &&
-        l.confirmationType === '联动确权'
+        (l.confirmationType === '联动确权' || l.confirmationType === '自动确权')
       )
       .sort((a, b) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
 

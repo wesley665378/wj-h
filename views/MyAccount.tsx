@@ -356,7 +356,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
         {/* 产兑包 */}
         <div className="bg-gradient-to-br from-emerald-50 to-teal-50/50 p-5 rounded-3xl border border-emerald-100/80 shadow-2xs flex flex-col justify-between">
           <div>
-            <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest block mb-1">产兑包</span>
+            <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest block mb-1">产兑包（现金）</span>
             <h3 className="text-2xl font-black text-slate-900 font-mono">
               {formatAmount(productionPackage)}
             </h3>
@@ -402,17 +402,17 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
                 formatAmount(bonusQuota)
               )}
             </h3>
-            <div className="text-[10px] text-slate-500 mt-1.5 flex items-center gap-1 truncate" title="max(0, 结余 + 历史欠产)">
+            <div className="text-[10px] text-slate-500 mt-1.5 flex items-center gap-1 truncate" title="max(0, 结余 + 历史欠产包)">
               <span className="font-semibold text-sky-700">口径:</span>
-              <span className="truncate">max(0, 结余 + 历史欠产)</span>
+              <span className="truncate">max(0, 结余 + 历史欠产包)</span>
             </div>
           </div>
         </div>
 
-        {/* 历史欠产 (按月) */}
+        {/* 历史欠产包 (按月) */}
         <div className="bg-gradient-to-br from-rose-50 to-red-50/50 p-5 rounded-3xl border border-rose-100/80 shadow-2xs flex flex-col justify-between">
           <div>
-            <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest block mb-1">历史欠产 ({effectiveMonth})</span>
+            <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest block mb-1">历史欠产包 ({effectiveMonth})</span>
             <h3 className={`text-2xl font-black font-mono ${!isCostVisible ? 'text-slate-900' : historicalDebt < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
               {!isCostVisible ? (
                 '****'

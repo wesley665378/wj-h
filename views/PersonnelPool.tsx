@@ -1359,7 +1359,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
           </Card>
 
           <Card 
-            title="账号管理 (权限账户概览)" 
+            title="账号管理 (权限帐户概览)" 
             className={`p-8 ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-sm`}
             headerAction={
               <button 

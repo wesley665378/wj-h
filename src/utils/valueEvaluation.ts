@@ -4,12 +4,15 @@ import { aggregateUserMonthMetrics, calculateUserDCost, calculateBonusAllocation
 import { isLogInFilter, resolveLogBusinessMonth } from './dateUtils';
 import { isNonEffectiveHoursEffective, isSalaryActiveForMonth } from './employmentStatus';
 import { getNonEffectiveHoursDeduction } from './nonEffectiveHours';
+import { isDynamicCostLog } from './costCategory';
 
 export interface EvaluationResult extends ValueEfficiencySnapshot {
   tierLabel: string;
   tierColor: string;
   contributionStatus: '优秀' | '观察' | '预警';
   historyDebt?: number;
+  historyDebtUpper?: number;
+  historyDebtLower?: number;
   baseSalary: number;
   aCost: number;
   b1Cost: number;
@@ -126,31 +129,97 @@ export function computePersonEvaluation(
   // 匹配规则：recordedCollectorId 优先，其次是 rankId 回退
   const matchUser = (l: ValueCreationLog) => l.recordedCollectorId === user.id || (!l.recordedCollectorId && l.rankId === user.id);
 
-  // 收入包口径对齐 reconcileMiningFromLogs.ts (仅计算已确权/已入库的收款/产值)
-  const isIncomeLog = (l: ValueCreationLog) => {
-    const isRevenue = l.category === RefineCategory.Revenue && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved);
-    const isValue = l.category === RefineCategory.Value && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved);
-    return isRevenue || isValue;
-  };
+  // 状态检查辅助函数
+  const isConfirmedOrApproved = (status?: any) => 
+    status === AuditStatus.Confirmed || 
+    status === AuditStatus.Approved || 
+    (status as string) === '已确权' || 
+    (status as string) === '入库';
 
-  // 月度流水 (支持自定义起止日期筛选，或者默认按月筛选)
-  const monthlyLogs = logs.filter(l => 
-    matchUser(l) && 
-    isIncomeLog(l) &&
-    isLogInFilter(l, filterMonth, startDate, endDate)
-  );
+  // 产专待确权联动判断：必须同时为待确权且确权方式为「联动确权」
+  const isLinkedPending = (l: ValueCreationLog) => 
+    (l.status === AuditStatus.Pending || (l.status as string) === '待确权') && 
+    (l.confirmationType === '联动确权' || (l.confirmationType as string) === '联动');
 
-  // 月度收入计算
-  const monthlyIncome = monthlyLogs.reduce((acc, log) => {
-    return acc + calculateHistoricalNetValue(log, resources, allUsers);
-  }, 0);
+  const userCat = user.category || '';
+  const isRevenueExpert = userCat.includes('款专');
+  const isProdExpert = userCat.includes('产专') || userCat === '经管员高产专';
 
-  // 月度成本包计算
+  // --- 1. 月度收产包计算 ---
+  let monthlyIncome = 0;
+  let confirmedValueConfirmed = 0;
+  let pendingValueConfirmed = 0;
+  let monthlyIncomeUpper = 0;
+  let monthlyIncomeLower = 0;
+
+  if (isProdExpert) {
+    // 产专（双行口径）：
+    // 现金行：仅已确权或入库产值
+    const prodConfirmedMonthlyLogs = logs.filter(l => 
+      matchUser(l) && 
+      !isDynamicCostLog(l) &&
+      (l.category === RefineCategory.Value || (l.category as string) === '产值') &&
+      isConfirmedOrApproved(l.status) &&
+      isLogInFilter(l, filterMonth, startDate, endDate)
+    );
+    // 虚拟行待确权增量：仅待确权且 confirmationType === '联动确权'
+    const prodLinkedPendingMonthlyLogs = logs.filter(l => 
+      matchUser(l) && 
+      !isDynamicCostLog(l) &&
+      (l.category === RefineCategory.Value || (l.category as string) === '产值') &&
+      isLinkedPending(l) &&
+      isLogInFilter(l, filterMonth, startDate, endDate)
+    );
+
+    confirmedValueConfirmed = prodConfirmedMonthlyLogs.reduce((acc, log) => {
+      return acc + calculateHistoricalNetValue(log, resources, allUsers);
+    }, 0);
+
+    pendingValueConfirmed = prodLinkedPendingMonthlyLogs.reduce((acc, log) => {
+      return acc + calculateHistoricalNetValue(log, resources, allUsers);
+    }, 0);
+
+    monthlyIncomeLower = confirmedValueConfirmed;
+    monthlyIncomeUpper = confirmedValueConfirmed + pendingValueConfirmed;
+    monthlyIncome = monthlyIncomeLower;
+  } else if (isRevenueExpert) {
+    // 款专：仅已确权或入库的收款，不含任何待确权收款
+    const revenueMonthlyLogs = logs.filter(l => 
+      matchUser(l) && 
+      !isDynamicCostLog(l) &&
+      (l.category === RefineCategory.Revenue || (l.category as string) === '收款') &&
+      isConfirmedOrApproved(l.status) &&
+      isLogInFilter(l, filterMonth, startDate, endDate)
+    );
+
+    monthlyIncome = revenueMonthlyLogs.reduce((acc, log) => {
+      return acc + calculateHistoricalNetValue(log, resources, allUsers);
+    }, 0);
+
+    monthlyIncomeLower = monthlyIncome;
+    monthlyIncomeUpper = monthlyIncome;
+  } else {
+    // 通用回退
+    const generalMonthlyLogs = logs.filter(l => 
+      matchUser(l) && 
+      !isDynamicCostLog(l) &&
+      isConfirmedOrApproved(l.status) &&
+      isLogInFilter(l, filterMonth, startDate, endDate)
+    );
+    monthlyIncome = generalMonthlyLogs.reduce((acc, log) => {
+      return acc + calculateHistoricalNetValue(log, resources, allUsers);
+    }, 0);
+    monthlyIncomeLower = monthlyIncome;
+    monthlyIncomeUpper = monthlyIncome;
+  }
+
+  // --- 2. 月度成本包计算 ---
   let monthlyCostDetail: ReturnType<typeof computeUserMonthlyCost>;
   if (startDate || endDate) {
     // 自定义起止日期的成本筛选
     const costLogs = logs.filter(l => 
       l.recordedCollectorId === user.id &&
+      isDynamicCostLog(l) &&
       [AuditStatus.Confirmed, AuditStatus.Approved].includes(l.status as AuditStatus) &&
       isLogInFilter(l, filterMonth, startDate, endDate)
     );
@@ -162,10 +231,6 @@ export function computePersonEvaluation(
         else if (l.valueConsumptionMode === 'B2') b2Cost += l.dynamicCost || 0;
       } else if (l.costCategory === 'C') cCost += l.dynamicCost || 0;
     });
-
-    const category = user.category || '';
-    const isRevenueExpert = category.includes('款专');
-    const isProdExpert = category.includes('产专') || category === '经管员高产专';
 
     const nonEffectiveDeduction = (user.category === 'VP') ? 0 : logs
       .filter(l => 
@@ -218,17 +283,70 @@ export function computePersonEvaluation(
     nonEffectiveDeduction
   } = monthlyCostDetail;
 
-  // 年度流水 (从 1 月至 refMonth 业务年度内)
-  const yearlyLogs = logs.filter(l => 
-    matchUser(l) && 
-    isIncomeLog(l) &&
-    resolveLogBusinessMonth(l).startsWith(currentYear) &&
-    resolveLogBusinessMonth(l) <= refMonth
-  );
+  // --- 3. 年度收产包与成本包计算 ---
+  let yearlyIncome = 0;
+  let yearlyIncomeUpper = 0;
+  let yearlyIncomeLower = 0;
 
-  const yearlyIncome = yearlyLogs.reduce((acc, log) => {
-    return acc + calculateHistoricalNetValue(log, resources, allUsers);
-  }, 0);
+  if (isProdExpert) {
+    const prodConfirmedYearlyLogs = logs.filter(l => 
+      matchUser(l) && 
+      !isDynamicCostLog(l) &&
+      (l.category === RefineCategory.Value || (l.category as string) === '产值') &&
+      isConfirmedOrApproved(l.status) &&
+      resolveLogBusinessMonth(l).startsWith(currentYear) &&
+      resolveLogBusinessMonth(l) <= refMonth
+    );
+    const prodLinkedPendingYearlyLogs = logs.filter(l => 
+      matchUser(l) && 
+      !isDynamicCostLog(l) &&
+      (l.category === RefineCategory.Value || (l.category as string) === '产值') &&
+      isLinkedPending(l) &&
+      resolveLogBusinessMonth(l).startsWith(currentYear) &&
+      resolveLogBusinessMonth(l) <= refMonth
+    );
+
+    const yearlyConfirmedValue = prodConfirmedYearlyLogs.reduce((acc, log) => {
+      return acc + calculateHistoricalNetValue(log, resources, allUsers);
+    }, 0);
+
+    const yearlyPendingValue = prodLinkedPendingYearlyLogs.reduce((acc, log) => {
+      return acc + calculateHistoricalNetValue(log, resources, allUsers);
+    }, 0);
+
+    yearlyIncomeLower = yearlyConfirmedValue;
+    yearlyIncomeUpper = yearlyConfirmedValue + yearlyPendingValue;
+    yearlyIncome = yearlyIncomeLower;
+  } else if (isRevenueExpert) {
+    const revenueYearlyLogs = logs.filter(l => 
+      matchUser(l) && 
+      !isDynamicCostLog(l) &&
+      (l.category === RefineCategory.Revenue || (l.category as string) === '收款') &&
+      isConfirmedOrApproved(l.status) &&
+      resolveLogBusinessMonth(l).startsWith(currentYear) &&
+      resolveLogBusinessMonth(l) <= refMonth
+    );
+
+    yearlyIncome = revenueYearlyLogs.reduce((acc, log) => {
+      return acc + calculateHistoricalNetValue(log, resources, allUsers);
+    }, 0);
+
+    yearlyIncomeLower = yearlyIncome;
+    yearlyIncomeUpper = yearlyIncome;
+  } else {
+    const generalYearlyLogs = logs.filter(l => 
+      matchUser(l) && 
+      !isDynamicCostLog(l) &&
+      isConfirmedOrApproved(l.status) &&
+      resolveLogBusinessMonth(l).startsWith(currentYear) &&
+      resolveLogBusinessMonth(l) <= refMonth
+    );
+    yearlyIncome = generalYearlyLogs.reduce((acc, log) => {
+      return acc + calculateHistoricalNetValue(log, resources, allUsers);
+    }, 0);
+    yearlyIncomeLower = yearlyIncome;
+    yearlyIncomeUpper = yearlyIncome;
+  }
 
   // 年度成本 = 逐月累加业务年度内实际在职月份的月成本（不在职月份不计入）
   let yearlyCost = 0;
@@ -240,57 +358,21 @@ export function computePersonEvaluation(
     yearlyCost += mCostDetail.monthlyCost;
   }
 
-  // 效率与贡献
-  const efficiency = monthlyCost > 0 ? monthlyIncome / monthlyCost : 0;
-  const yearlyEfficiency = yearlyCost > 0 ? yearlyIncome / yearlyCost : 0;
-  const contribution = monthlyIncome - monthlyCost;
-  const fixedRatio = monthlyIncome > 0 ? (monthlyCost / monthlyIncome) * 100 : 0;
+  // --- 4. 损益、效率与分档派生 ---
+  const baselineMonthlyIncome = isProdExpert ? monthlyIncomeLower : monthlyIncome;
+  const baselineYearlyIncome = isProdExpert ? yearlyIncomeLower : yearlyIncome;
 
-  // 产值类确权情况统计 (用于 InfoTip 产兑包明细提示 及 产专双行计算)
-  const valueLogs = logs.filter(l => 
-    matchUser(l) && 
-    l.category === RefineCategory.Value &&
-    isLogInFilter(l, filterMonth, startDate, endDate)
-  );
+  const efficiency = monthlyCost > 0 ? baselineMonthlyIncome / monthlyCost : 0;
+  const yearlyEfficiency = yearlyCost > 0 ? baselineYearlyIncome / yearlyCost : 0;
+  const contribution = baselineMonthlyIncome - monthlyCost;
+  const fixedRatio = baselineMonthlyIncome > 0 ? (monthlyCost / baselineMonthlyIncome) * 100 : 0;
 
-  const confirmedValueConfirmed = valueLogs
-    .filter(l => l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved)
-    .reduce((acc, log) => acc + calculateHistoricalNetValue(log, resources, allUsers), 0);
-
-  const pendingValueConfirmed = valueLogs
-    .filter(l => l.status === AuditStatus.Pending)
-    .reduce((acc, log) => acc + calculateHistoricalNetValue(log, resources, allUsers), 0);
-
-  const userCat = user.category || '';
-  const isProdExpert = userCat.includes('产专') || userCat === '经管员高产专';
-  const isRevenueExpert = userCat.includes('款专');
-
-  const monthlyIncomeUpper = isProdExpert ? (confirmedValueConfirmed + pendingValueConfirmed) : monthlyIncome;
-  const monthlyIncomeLower = isProdExpert ? confirmedValueConfirmed : monthlyIncome;
   const contributionUpper = monthlyIncomeUpper - monthlyCost;
   const contributionLower = monthlyIncomeLower - monthlyCost;
   const monthlyEfficiencyUpper = monthlyCost > 0 ? monthlyIncomeUpper / monthlyCost : 0;
   const monthlyEfficiencyLower = monthlyCost > 0 ? monthlyIncomeLower / monthlyCost : 0;
 
-  // 年度产值拆分 (产专)
-  const yearlyValueLogs = logs.filter(l => 
-    matchUser(l) && 
-    l.category === RefineCategory.Value &&
-    resolveLogBusinessMonth(l).startsWith(currentYear) &&
-    resolveLogBusinessMonth(l) <= refMonth
-  );
-
-  const yearlyConfirmedValue = yearlyValueLogs
-    .filter(l => l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved)
-    .reduce((acc, log) => acc + calculateHistoricalNetValue(log, resources, allUsers), 0);
-
-  const yearlyPendingValue = yearlyValueLogs
-    .filter(l => l.status === AuditStatus.Pending)
-    .reduce((acc, log) => acc + calculateHistoricalNetValue(log, resources, allUsers), 0);
-
-  const yearlyIncomeUpper = isProdExpert ? (yearlyConfirmedValue + yearlyPendingValue) : yearlyIncome;
-  const yearlyIncomeLower = isProdExpert ? yearlyConfirmedValue : yearlyIncome;
-  const yearlyContribution = yearlyIncome - yearlyCost;
+  const yearlyContribution = baselineYearlyIncome - yearlyCost;
   const yearlyContributionUpper = yearlyIncomeUpper - yearlyCost;
   const yearlyContributionLower = yearlyIncomeLower - yearlyCost;
   const yearlyEfficiencyUpper = yearlyCost > 0 ? yearlyIncomeUpper / yearlyCost : 0;
@@ -305,28 +387,12 @@ export function computePersonEvaluation(
 
   const upperTierInfo = getTierFromEff(monthlyEfficiencyUpper);
   const lowerTierInfo = getTierFromEff(monthlyEfficiencyLower);
-
-  // 能级阈值：>2.5 S，>=1.5 A，>=1.2 B，否则 C (维持现状)
-  let tier = 'C';
-  let tierLabel = '改进级';
-  let tierColor = 'text-rose-500';
-
-  if (efficiency > 2.5) {
-    tier = 'S';
-    tierLabel = '卓越级';
-    tierColor = 'text-amber-500';
-  } else if (efficiency >= 1.5) {
-    tier = 'A';
-    tierLabel = '进取级';
-    tierColor = 'text-blue-500';
-  } else if (efficiency >= 1.2) {
-    tier = 'B';
-    tierLabel = '稳健级';
-    tierColor = 'text-emerald-500';
-  }
+  const defaultTierInfo = getTierFromEff(efficiency);
 
   // 历史欠产（当年 1 ~ M-1 滚动，每年 1 月清零；负数表示欠产）
   let historyDebt = 0;
+  let historyDebtUpper = 0;
+  let historyDebtLower = 0;
   try {
     const allocConfirmed = calculateBonusAllocation(
       refMonth,
@@ -336,9 +402,21 @@ export function computePersonEvaluation(
       allUsers,
       AuditStatus.Confirmed
     );
-    historyDebt = allocConfirmed.history > 0 ? -allocConfirmed.history : 0;
+    const allocApproved = calculateBonusAllocation(
+      refMonth,
+      user,
+      logs,
+      resources,
+      allUsers,
+      AuditStatus.Approved
+    );
+    historyDebtLower = allocConfirmed.history > 0 ? -allocConfirmed.history : 0;
+    historyDebtUpper = allocApproved.history > 0 ? -allocApproved.history : 0;
+    historyDebt = historyDebtLower;
   } catch {
     historyDebt = 0;
+    historyDebtUpper = 0;
+    historyDebtLower = 0;
   }
 
   return {
@@ -350,12 +428,14 @@ export function computePersonEvaluation(
     monthlyCost,
     monthlyEfficiency: efficiency,
     historyDebt,
+    historyDebtUpper,
+    historyDebtLower,
     yearlyIncome,
     yearlyCost,
     yearlyEfficiency,
-    tier,
-    tierLabel,
-    tierColor,
+    tier: defaultTierInfo.tier,
+    tierLabel: defaultTierInfo.tierLabel,
+    tierColor: defaultTierInfo.tierColor,
     contribution,
     fixedRatio,
     timestamp: Date.now(),

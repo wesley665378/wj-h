@@ -31,6 +31,7 @@ import { useCostPrivacy } from "@/hooks/useCostPrivacy";
 import { PieChartCard } from "@/components/PieChartCard";
 import { XLSX, exportWorkbook, buildExcelFilename } from "@/utils/excelIo";
 import { formatMoney } from "@/utils/formatMoney";
+import { formatConfirmationType } from "@/utils/formatters";
 import { TERMINOLOGY } from "@/constants/terminology";
 import { UI_LABELS } from "@/constants/uiLabels";
 import { isSystemAdmin, canExportExcel, getExportButtonTitle, EXPORT_DISABLED_TOOLTIP } from "@/utils/accessControl";
@@ -39,6 +40,7 @@ import { isVirtualDeductionMiningId } from "@/utils/virtualDeduction";
 import { ConsumptionAudit, AuditApiData } from "@/components/ConsumptionAudit";
 import { isProjectWritable } from "@/utils/projectStatus";
 import { isNonEffectiveHoursEffective } from "@/utils/employmentStatus";
+import { isDynamicCostLog } from "@/utils/costCategory";
 import { getNonEffectiveHoursDeduction } from "@/utils/nonEffectiveHours";
 import { formatCollectorDisplay } from "@/utils/collector";
 import { formatAuditStatusLabel } from "@/utils/statusDisplay";
@@ -157,7 +159,7 @@ const Auditing: React.FC<AuditingProps> = ({
         if (!isPending) return false;
 
         // 只接收：收款类的确权申报（来自价值创造组件）
-        if (log.category !== RefineCategory.Revenue || log.dynamicCost > 0) return false;
+        if (log.category !== RefineCategory.Revenue || isDynamicCostLog(log)) return false;
 
         // 审计员 (npcxie) 或 管理员可以确权
         return isAdmin || isNpcxie;
@@ -172,7 +174,7 @@ const Auditing: React.FC<AuditingProps> = ({
         // 只接收：产值类的确权申报（来自价值创造组件）
         return (
           log.category === RefineCategory.Value &&
-          log.dynamicCost === 0 &&
+          !isDynamicCostLog(log) &&
           (log.status === AuditStatus.Pending || log.status === AuditStatus.Confirmed)
         );
       }),
@@ -183,7 +185,7 @@ const Auditing: React.FC<AuditingProps> = ({
   const confirmedTasks = useMemo(
     () =>
       monthlyLogs.filter((log) => {
-        const isJzcz = (!log.dynamicCost || log.dynamicCost === 0) && log.confirmationType !== '手动确权';
+        const isJzcz = !isDynamicCostLog(log);
         const isConfirmedOrApproved = log.status === AuditStatus.Confirmed || log.status === AuditStatus.Approved;
         return isJzcz && isConfirmedOrApproved;
       }),
@@ -194,7 +196,7 @@ const Auditing: React.FC<AuditingProps> = ({
   const consumptionTasks = useMemo(
     () =>
       monthlyLogs.filter((log) => {
-        return (log.dynamicCost > 0 || log.confirmationType === '手动确权') && log.status === AuditStatus.Pending;
+        return isDynamicCostLog(log) && log.status === AuditStatus.Pending;
       }),
     [monthlyLogs],
   );
@@ -202,7 +204,7 @@ const Auditing: React.FC<AuditingProps> = ({
   // 2. 历史记录过滤逻辑
   const historyTasks = useMemo(() => {
     return monthlyLogs
-      .filter((log) => log.dynamicCost > 0 || log.confirmationType === '手动确权')
+      .filter((log) => isDynamicCostLog(log))
       .reverse();
   }, [monthlyLogs]);
 
@@ -300,15 +302,17 @@ const Auditing: React.FC<AuditingProps> = ({
     const grossValue = approved
       .filter((l) => l.amount > 0)
       .reduce((acc, curr) => acc + curr.netValue, 0);
-    // 动态消耗 (dynamicCost > 0)
+    // 动态消耗 isDynamicCostLog
     const totalConsumption = approved.reduce(
       (acc, curr) =>
         acc +
-        (curr.costCategory === "C"
-          ? Math.abs(curr.netValue)
+        (isDynamicCostLog(curr) && curr.costCategory === "C"
+          ? (curr.dynamicCost || Math.abs(curr.netValue) || 0)
           : isNonEffectiveHoursEffective(curr)
           ? getNonEffectiveHoursDeduction(curr)
-          : curr.dynamicCost || 0),
+          : isDynamicCostLog(curr)
+          ? curr.dynamicCost || 0
+          : 0),
       0,
     );
     // 实际净值 (对冲后)
@@ -344,7 +348,7 @@ const Auditing: React.FC<AuditingProps> = ({
       {
         name: "A",
         value: approved
-          .filter((l) => l.costCategory === "A")
+          .filter((l) => isDynamicCostLog(l) && l.costCategory === "A")
           .reduce((acc, curr) => acc + curr.dynamicCost, 0),
         color: "#F43F5E",
       },
@@ -352,7 +356,7 @@ const Auditing: React.FC<AuditingProps> = ({
         name: "B1",
         value: approved
           .filter(
-            (l) => l.costCategory === "B" && l.valueConsumptionMode === "B1",
+            (l) => isDynamicCostLog(l) && l.costCategory === "B" && l.valueConsumptionMode === "B1",
           )
           .reduce((acc, curr) => acc + curr.dynamicCost, 0),
         color: "#FB7185",
@@ -361,7 +365,7 @@ const Auditing: React.FC<AuditingProps> = ({
         name: "B2",
         value: approved
           .filter(
-            (l) => l.costCategory === "B" && l.valueConsumptionMode === "B2",
+            (l) => isDynamicCostLog(l) && l.costCategory === "B" && l.valueConsumptionMode === "B2",
           )
           .reduce((acc, curr) => acc + curr.dynamicCost, 0),
         color: "#FDA4AF",
@@ -369,8 +373,8 @@ const Auditing: React.FC<AuditingProps> = ({
       {
         name: "C",
         value: approved
-          .filter((l) => l.costCategory === "C")
-          .reduce((acc, curr) => acc + Math.abs(curr.netValue), 0),
+          .filter((l) => isDynamicCostLog(l) && l.costCategory === "C")
+          .reduce((acc, curr) => acc + (curr.dynamicCost || Math.abs(curr.netValue) || 0), 0),
         color: "#FECDD3",
       },
       {
@@ -456,10 +460,10 @@ const Auditing: React.FC<AuditingProps> = ({
       nextStatus = AuditStatus.Confirmed;
     }
 
-    const isConsumption = log.dynamicCost > 0;
+    const isConsumption = isDynamicCostLog(log);
     const collectorDisplay = formatCollectorDisplay(log.recordedCollectorId, users);
     const businessDateStr = resolveLogBusinessDate(log);
-    const confirmationTypeStr = log.confirmationType || "手动确权";
+    const confirmationTypeStr = formatConfirmationType(log);
     const injectedAmount = calculateInjectedAmount(log);
 
     if (action === "reject") {
@@ -480,7 +484,7 @@ const Auditing: React.FC<AuditingProps> = ({
       );
     } else {
       showConfirm(
-        `确定要【${isConsumption ? '审核确认' : '手动确权'}】该笔价值提报单据吗？\n\n` +
+        `确定要【${isConsumption ? '消耗确权' : '收款确权'}】该笔价值提报单据吗？\n\n` +
         `• 申报编号：${log.id}\n` +
         `• 业务日期：${businessDateStr}\n` +
         `• 矿山编号：${log.miningId}\n` +
@@ -493,7 +497,7 @@ const Auditing: React.FC<AuditingProps> = ({
           onAudit(log.id, nextStatus);
         },
         undefined,
-        isConsumption ? '确认审核' : '确认确权',
+        isConsumption ? '消耗确权' : '收款确权',
         '取消'
       );
     }
@@ -529,7 +533,7 @@ const Auditing: React.FC<AuditingProps> = ({
       `• 待确权笔数：${targetTasks.length} 笔\n` +
       `• ${amountLabel}：${totalAmount.toLocaleString()} 积分\n` +
       `• 净包数值合计：￥${Math.round(totalNet).toLocaleString()}\n\n` +
-      `确认后，系统将依次执行确权，将单据转为【已确权】状态并自动同步联动产值确权与工作区。`,
+      `确认后，系统将依次执行确权，将单据转为【已确权】状态并自动同步联动确权与工作区。`,
       async () => {
         setIsBatchConfirming(true);
         const toastId = toast.loading(`正在批量确权 (0/${targetTasks.length})...`);
@@ -619,12 +623,12 @@ const Auditing: React.FC<AuditingProps> = ({
           '采集主体': formatCollectorDisplay(log.recordedCollectorId, users),
           '经营单元': users.find(u => u.id === log.rankId)?.center || "未分配",
           '非效对冲': (log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? getNonEffectiveHoursDeduction(log) : '-',
-          'A': log.costCategory === 'A' ? log.dynamicCost : '-',
-          'C积分': log.costCategory === 'C' ? log.dynamicCost : '-',
+          'A': (isDynamicCostLog(log) && log.costCategory === 'A') ? log.dynamicCost : '-',
+          'C积分': (isDynamicCostLog(log) && log.costCategory === 'C') ? log.dynamicCost : '-',
           'C权': Number(cWeightValue) < 0.8 ? `${cWeightValue} (低)` : cWeightValue,
           '款初/款当': revLimitStr,
-          'B1': (log.costCategory === 'B' && log.valueConsumptionMode === 'B1') ? log.dynamicCost : '-',
-          'B2积分': (log.costCategory === 'B' && log.valueConsumptionMode === 'B2') ? log.dynamicCost : '-',
+          'B1': (isDynamicCostLog(log) && log.costCategory === 'B' && log.valueConsumptionMode === 'B1') ? log.dynamicCost : '-',
+          'B2积分': (isDynamicCostLog(log) && log.costCategory === 'B' && log.valueConsumptionMode === 'B2') ? log.dynamicCost : '-',
           'B2权': b2WeightValue,
           '产初/产当 ': valLimitB2Str,
           '确权日期': log.confirmedAt ? new Date(log.confirmedAt).toLocaleString() : '-',
@@ -638,21 +642,21 @@ const Auditing: React.FC<AuditingProps> = ({
           提交日期: formatSubmissionDate(log.timestamp),
           类别: log.type,
           矿山编号: log.miningId,
-          确权类型: log.confirmationType || "收款确权",
+          确权类型: formatConfirmationType(log),
           申请角色: log.rankId,
           采集主体: formatCollectorDisplay(log.recordedCollectorId, users),
           [activeTab === "linked" ? "输入产值" : (activeTab === "pending" ? "输入收款" : "输入数值")]: getRawInputAmount(log),
           注入积分: calculateInjectedAmount(log),
-          A: log.costCategory === "A" ? log.dynamicCost : 0,
+          A: (isDynamicCostLog(log) && log.costCategory === "A") ? log.dynamicCost : 0,
           B1:
-            log.costCategory === "B" && log.valueConsumptionMode === "B1"
+            (isDynamicCostLog(log) && log.costCategory === "B" && log.valueConsumptionMode === "B1")
               ? log.dynamicCost
               : 0,
           B2:
-            log.costCategory === "B" && log.valueConsumptionMode === "B2"
+            (isDynamicCostLog(log) && log.costCategory === "B" && log.valueConsumptionMode === "B2")
               ? log.dynamicCost
               : 0,
-          消耗分类: log.costCategory || "N/A",
+          消耗分类: isDynamicCostLog(log) ? (log.costCategory || "N/A") : "-",
           [activeTab === "pending" ? "收款包" : (activeTab === "linked" ? "产兑包" : "收款包/产兑包")]: log.netValue,
           状态: log.status === AuditStatus.Approved ? '入库' : log.status,
         };
@@ -663,7 +667,7 @@ const Auditing: React.FC<AuditingProps> = ({
     const workbook = XLSX.utils.book_new();
     const sheetName =
       activeTab === "pending"
-        ? "待处理确权"
+        ? "收款确权记录"
         : activeTab === "consumption"
           ? "消耗确权记录"
           : activeTab === "linked"
@@ -749,7 +753,7 @@ const Auditing: React.FC<AuditingProps> = ({
         <div className="flex flex-wrap bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-inner gap-1">
             <button
               onClick={() => setActiveTab("pending")}
-              title="查看待处理的价值确权任务"
+              title="查看待处理收款确权任务"
               className={`px-4 md:px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all flex items-center space-x-2 ${activeTab === "pending" ? "bg-white text-slate-900 shadow-xl scale-105" : "text-slate-400 hover:text-slate-600"}`}
             >
               <span>收款确权</span>
@@ -772,18 +776,6 @@ const Auditing: React.FC<AuditingProps> = ({
               </span>
             </button>
             <button
-              onClick={() => setActiveTab("confirmed")}
-              title="查看已完成确权的记录"
-              className={`px-4 md:px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all flex items-center space-x-2 ${activeTab === "confirmed" ? "bg-white text-slate-900 shadow-xl scale-105" : "text-slate-400 hover:text-slate-600"}`}
-            >
-              <span>确权记录</span>
-              <span
-                className={`px-2 py-0.5 rounded-full text-[8px] ${activeTab === "confirmed" ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-500"}`}
-              >
-                {confirmedTasks.length}
-              </span>
-            </button>
-            <button
               onClick={() => setActiveTab("consumption")}
               title="查看待处理消耗确权任务"
               className={`px-4 md:px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all flex items-center space-x-2 ${activeTab === "consumption" ? "bg-white text-slate-900 shadow-xl scale-105" : "text-slate-400 hover:text-slate-600"}`}
@@ -793,6 +785,18 @@ const Auditing: React.FC<AuditingProps> = ({
                 className={`px-2 py-0.5 rounded-full text-[8px] ${activeTab === "consumption" ? "bg-rose-600 text-white" : "bg-slate-200 text-slate-500"}`}
               >
                 {consumptionTasks.length}
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveTab("confirmed")}
+              title="查看已完成确权的记录"
+              className={`px-4 md:px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all flex items-center space-x-2 ${activeTab === "confirmed" ? "bg-white text-slate-900 shadow-xl scale-105" : "text-slate-400 hover:text-slate-600"}`}
+            >
+              <span>确权记录</span>
+              <span
+                className={`px-2 py-0.5 rounded-full text-[8px] ${activeTab === "confirmed" ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-500"}`}
+              >
+                {confirmedTasks.length}
               </span>
             </button>
             <button
@@ -809,7 +813,7 @@ const Auditing: React.FC<AuditingProps> = ({
         <Card
           title={
             activeTab === "pending"
-              ? `周期待处理确权 (${auditTasks.length})`
+              ? `待处理收款确权 (${auditTasks.length})`
               : activeTab === "consumption"
                 ? `待处理消耗确权 (${consumptionTasks.length})`
                 : activeTab === "linked"
@@ -1040,10 +1044,10 @@ const Auditing: React.FC<AuditingProps> = ({
                           {(log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? maskMoney(Math.round(getNonEffectiveHoursDeduction(log))) : '-'}
                         </td>
                         <td className="px-3 py-6 text-right font-mono font-bold text-blue-600">
-                          {log.costCategory === 'A' ? maskMoney(Math.round(log.dynamicCost)) : '-'}
+                          {(isDynamicCostLog(log) && log.costCategory === 'A') ? maskMoney(Math.round(log.dynamicCost)) : '-'}
                         </td>
                         <td className="px-3 py-6 text-right font-mono font-bold text-amber-600 font-extrabold">
-                          {log.costCategory === 'C' ? maskMoney(Math.round(log.dynamicCost)) : '-'}
+                          {(isDynamicCostLog(log) && log.costCategory === 'C') ? maskMoney(Math.round(log.dynamicCost)) : '-'}
                         </td>
                         <td className={`px-4 py-6 text-right font-mono font-black ${Number(cWeightValue) < 0.8 ? 'bg-amber-100/70 text-amber-900' : 'text-amber-700 bg-amber-50/20'}`} title={Number(cWeightValue) < 0.8 ? "当前 C 权低于 0.8，请确认风险。" : undefined}>
                           <span className="inline-flex items-center justify-end gap-1">
@@ -1059,10 +1063,10 @@ const Auditing: React.FC<AuditingProps> = ({
                           {revLimitStr}
                         </td>
                         <td className="px-3 py-6 text-right font-mono font-bold text-rose-600">
-                          {(log.costCategory === 'B' && log.valueConsumptionMode === 'B1') ? maskMoney(Math.round(log.dynamicCost)) : '-'}
+                          {(isDynamicCostLog(log) && log.costCategory === 'B' && log.valueConsumptionMode === 'B1') ? maskMoney(Math.round(log.dynamicCost)) : '-'}
                         </td>
                         <td className="px-3 py-6 text-right font-mono font-bold text-emerald-600 font-extrabold">
-                          {(log.costCategory === 'B' && log.valueConsumptionMode === 'B2') ? maskMoney(Math.round(log.dynamicCost)) : '-'}
+                          {(isDynamicCostLog(log) && log.costCategory === 'B' && log.valueConsumptionMode === 'B2') ? maskMoney(Math.round(log.dynamicCost)) : '-'}
                         </td>
                         <td className="px-4 py-6 text-right font-mono font-black text-emerald-700 bg-emerald-50/20">
                           {b2WeightValue}
@@ -1189,7 +1193,7 @@ const Auditing: React.FC<AuditingProps> = ({
                     }
                   })().map((log) => {
                     if (!log) return null;
-                    const isConsumption = log.dynamicCost > 0 || log.confirmationType === '手动确权';
+                    const isConsumption = isDynamicCostLog(log);
                     const isDeduction = log.type === RefineType.NonEffectiveHours;
 
                     const confirmedDate = log.confirmedAt
@@ -1283,7 +1287,7 @@ const Auditing: React.FC<AuditingProps> = ({
                           {activeTab === "pending" || (activeTab === "linked" && log.status === AuditStatus.Pending) ? (
                             <div className="flex items-center justify-end space-x-3 opacity-0 group-hover:opacity-100 transition-opacity">
                               {log.category === RefineCategory.Value &&
-                              log.confirmationType === "联动确权" ? (
+                              (log.confirmationType === "联动确权" || (log.confirmationType as any) === "自动确权") ? (
                                 <div className="flex flex-col items-end">
                                   <span className="text-[9px] font-black text-amber-600 uppercase tracking-widest mb-1">
                                     等待收款确权联动
@@ -1302,7 +1306,7 @@ const Auditing: React.FC<AuditingProps> = ({
                                     <button
                                       disabled
                                       className="px-4 py-1.5 bg-slate-100 text-slate-400 text-[9px] font-black uppercase rounded-lg cursor-not-allowed"
-                                      title="产值确权由收款联动自动执行"
+                                      title="联动确权由收款联动自动执行"
                                     >
                                       联动中
                                     </button>
@@ -1310,7 +1314,7 @@ const Auditing: React.FC<AuditingProps> = ({
                                 </div>
                                 ) : (
                                   <div className="flex flex-col items-end gap-1.5 w-24">
-                                    {isNpcxie && log.dynamicCost > 0 ? (
+                                    {isNpcxie && isDynamicCostLog(log) ? (
                                       <button
                                         onClick={() => setConfirmingLog(log)}
                                         disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
@@ -1323,13 +1327,13 @@ const Auditing: React.FC<AuditingProps> = ({
                                         onClick={() => handleAction(log, "approve")}
                                         disabled={processingLogIds.has(log.id) || !(log.miningId === 'SYSTEM_DEDUCTION' || log.costCategory === 'D' || log.type === RefineType.NonEffectiveHours || isProjectWritable(resources.find(r => r.id === log.miningId)))}
                                         title={
-                                          log.dynamicCost > 0
-                                            ? "确认审核该笔消耗申报"
-                                            : "确认确权，待确权资产将转为已确权"
+                                          isDynamicCostLog(log)
+                                            ? "消耗确权"
+                                            : "收款确权，待确权资产将转为已确权"
                                         }
                                         className="w-full px-2 py-1.5 bg-slate-900 text-white text-[9px] font-black uppercase rounded-lg hover:bg-blue-600 shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                                       >
-                                        {log.dynamicCost > 0 ? "确认审核" : "确认确权"}
+                                        {isDynamicCostLog(log) ? "消耗确权" : "收款确权"}
                                       </button>
                                     )}
                                     <button
@@ -1358,7 +1362,7 @@ const Auditing: React.FC<AuditingProps> = ({
                               </Badge>
                               {log.status === AuditStatus.Confirmed && (
                                 <span className="text-[8px] font-black text-slate-400 uppercase mt-1 tracking-tighter">
-                                  {log.confirmationType || "收款确权"}
+                                  {formatConfirmationType(log)}
                                 </span>
                               )}
                             </div>

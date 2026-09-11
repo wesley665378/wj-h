@@ -20,7 +20,7 @@ import { canExportExcel, getExportButtonTitle, EXPORT_DISABLED_TOOLTIP } from '.
 import { toast } from 'sonner';
 import { BusinessDateFilter } from './BusinessDateFilter';
 import { isLogInFilter, getLocalMonthString } from '../utils/dateUtils';
-import { formatMoney } from '../utils/formatMoney';
+import { formatMoney, formatConfirmationType } from '../utils/formatters';
 import { isVirtualDeductionMiningId } from '../utils/virtualDeduction';
 import { UI_LABELS } from '../constants/uiLabels';
 import { formatCollectorDisplay } from '../utils/collector';
@@ -219,7 +219,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
       return {
         '类别': isRev ? '收款' : '产值',
         '状态': l.status,
-        '确权类型': l.confirmationType || '自动确权',
+        '确权类型': formatConfirmationType(l),
         '业务日期': l.businessDate || (l.timestamp ? new Date(l.timestamp).toLocaleDateString() : '—'),
         '采集主体': formatExpertCategoryDisplay(l.recordedCollectorId || l.rankId, managedUsers),
         '注入积分': rawInj,
@@ -624,7 +624,7 @@ export const MiningResourceQueryView: React.FC<MiningResourceQueryViewProps> = (
                           {l.status}
                         </span>
                       </td>
-                      <td className="py-2 px-3 text-slate-500">{l.confirmationType || '自动确权'}</td>
+                      <td className="py-2 px-3 text-slate-500">{formatConfirmationType(l)}</td>
                       <td className="py-2 px-3 font-mono text-slate-500">
                         {l.businessDate || (l.timestamp ? new Date(l.timestamp).toLocaleDateString() : '—')}
                       </td>

@@ -11,6 +11,7 @@ import { resolveLogBusinessMonth, isLogInFilter } from './dateUtils';
 import { isNonEffectiveHoursEffective, isSalaryActiveForMonth } from './employmentStatus';
 import { getNonEffectiveHoursDeduction } from './nonEffectiveHours';
 import { centerMatch } from './centerScope';
+import { isDynamicCostLog, isCreationCategoryLog } from './costCategory';
 
 export interface UserMetricsResult {
   revenuePackage: number;
@@ -137,7 +138,7 @@ export function calculateUserDCost(
 
   // 筛选该月份/时间段内所有 D 类流水
   const dLogs = logs.filter(l => {
-    if (l.costCategory !== 'D') return false;
+    if (!isDynamicCostLog(l) || l.costCategory !== 'D') return false;
     if (!isStatusMatch(l.status, statusFilter)) return false;
     if (startDate || endDate) {
       return isLogInFilter(l, month, startDate, endDate);
@@ -216,19 +217,23 @@ export function aggregateUserMonthMetrics(
   );
 
   userLogs.forEach((l) => {
-    if (l.category === RefineCategory.Revenue || (l.category as string) === '收款') {
-      revenuePackage += calculateHistoricalNetValue(l, resources, users);
-    } else if (l.category === RefineCategory.Value || (l.category as string) === '产值') {
-      productionPackage += calculateHistoricalNetValue(l, resources, users);
+    if (isCreationCategoryLog(l)) {
+      if (l.category === RefineCategory.Revenue || (l.category as string) === '收款') {
+        revenuePackage += calculateHistoricalNetValue(l, resources, users);
+      } else if (l.category === RefineCategory.Value || (l.category as string) === '产值') {
+        productionPackage += calculateHistoricalNetValue(l, resources, users);
+      }
     }
 
-    if (l.costCategory === 'A') {
-      aCost += l.dynamicCost || 0;
-    } else if (l.costCategory === 'B') {
-      if (l.valueConsumptionMode === 'B1') b1Cost += l.dynamicCost || 0;
-      else if (l.valueConsumptionMode === 'B2') b2Cost += l.dynamicCost || 0;
-    } else if (l.costCategory === 'C') {
-      cCost += l.dynamicCost || 0;
+    if (isDynamicCostLog(l)) {
+      if (l.costCategory === 'A') {
+        aCost += l.dynamicCost || 0;
+      } else if (l.costCategory === 'B') {
+        if (l.valueConsumptionMode === 'B1') b1Cost += l.dynamicCost || 0;
+        else if (l.valueConsumptionMode === 'B2') b2Cost += l.dynamicCost || 0;
+      } else if (l.costCategory === 'C') {
+        cCost += l.dynamicCost || 0;
+      }
     }
   });
 
