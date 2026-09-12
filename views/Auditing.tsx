@@ -1023,6 +1023,7 @@ const Auditing: React.FC<AuditingProps> = ({
                     <th className="px-4 py-2 whitespace-nowrap min-w-[72px]">提炼类型</th>
                     <th className="px-4 py-2 text-center whitespace-nowrap min-w-[88px]">{TERMINOLOGY.BUSINESS_UNIT}</th>
                     <th className="px-4 py-2 font-bold whitespace-nowrap min-w-[100px]">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
+                    <th className="px-4 py-2 font-bold whitespace-nowrap min-w-[88px]">项目类型</th>
                     <th className="px-3 py-2 text-right whitespace-nowrap min-w-[72px]">非效对冲</th>
                     <th className="px-3 py-2 text-right whitespace-nowrap min-w-[44px]">A</th>
                     <th className="px-3 py-2 text-right whitespace-nowrap min-w-[64px]">C积分</th>
@@ -1063,7 +1064,10 @@ const Auditing: React.FC<AuditingProps> = ({
                     if (!log) return null;
                     const { cWeightValue, b2WeightValue, revLimitStr, valLimitCStr, valLimitB2Str } = calculateConsumptionMirrorFields(log, resources, logs);
                     
-                    const collectorDisplay = formatCollectorDisplay(log.recordedCollectorId, users);
+                    const collectorUser = users.find((u) => u.id === log.recordedCollectorId);
+                    const collectorDisplay = collectorUser
+                      ? `${collectorUser.name} | ${collectorUser.category || ""}`
+                      : formatCollectorDisplay(log.recordedCollectorId, users);
                     const isTouched = lastTouchedLogIds.has(log.id);
 
                     return (
@@ -1094,6 +1098,7 @@ const Auditing: React.FC<AuditingProps> = ({
                             </span>
                         </td>
                         <td className="px-4 py-2 font-bold text-slate-900 text-xs">{collectorDisplay}</td>
+                        <td className="px-4 py-2 text-xs font-semibold text-slate-600">{log.type}</td>
                         <td className="px-3 py-2 text-right font-mono font-bold text-indigo-600 text-xs">
                           {(log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? maskMoney(Math.round(getNonEffectiveHoursDeduction(log))) : '-'}
                         </td>
@@ -1166,7 +1171,7 @@ const Auditing: React.FC<AuditingProps> = ({
                   })}
                   {(activeTab === "history" ? historyTasks.length : consumptionTasks.length) === 0 && (
                     <tr>
-                      <td colSpan={activeTab === "consumption" ? 19 : 17} className="px-6 py-16 text-center">
+                      <td colSpan={activeTab === "consumption" ? 20 : 18} className="px-6 py-16 text-center">
                         <div className="max-w-md mx-auto bg-slate-50/90 rounded-xl p-4 border border-dashed border-slate-200 shadow-sm">
                           <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-3 font-bold text-base">
                             ✓

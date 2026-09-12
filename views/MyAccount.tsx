@@ -334,7 +334,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
   };
 
   return (
-    <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-8">
+    <div className="py-6 w-full max-w-none space-y-8">
       {/* 顶部标题区 */}
       <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-6 ${UI_TOKENS.RADIUS_PANEL} border border-slate-100 shadow-sm`}>
         <div>
@@ -353,7 +353,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
       </div>
 
       {/* 1. 总览区：价值包汇总与月度财务分配指标 (数值整数展示) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-5">
         {/* 收款包 */}
         <div className="bg-gradient-to-br from-blue-50 to-indigo-50/50 p-5 rounded-3xl border border-blue-100/80 shadow-2xs flex flex-col justify-between">
           <div>
@@ -454,7 +454,7 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
           {(['A', 'B1', 'B2', 'C', 'D'] as DynamicCostCategory[]).map((catKey) => {
             const meta = DYNAMIC_COST_CATEGORY_META[catKey];
             const amount = dynamicCostFiveTiers.totals[catKey];
@@ -724,7 +724,18 @@ const MyAccount: React.FC<MyAccountProps> = ({ currentUser, logs, transactions, 
                   <tr key={l.id} className="hover:bg-slate-50/60 transition-colors">
                     <td className="p-4 font-mono font-bold text-slate-800 whitespace-nowrap">{l.resolvedDate}</td>
                     <td className="p-4 font-mono text-slate-500 whitespace-nowrap">
-                      {formatSubmissionDate(l.timestamp)} <span className="text-[10px] text-slate-400">{formatSubmissionTime(l.timestamp)}</span>
+                      {(() => {
+                        const fullStr = formatSubmissionTime(l.timestamp);
+                        if (fullStr === '-' || !fullStr) return '-';
+                        const parts = fullStr.split(' ');
+                        const datePart = parts[0] || '';
+                        const timePart = parts[1] || '';
+                        return (
+                          <>
+                            {datePart} {timePart && <span className="text-[10px] text-slate-400">{timePart}</span>}
+                          </>
+                        );
+                      })()}
                     </td>
                     <td className="p-4">
                       <span className={`inline-flex px-2.5 py-1 rounded-lg text-[10px] font-bold ${

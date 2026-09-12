@@ -1481,7 +1481,11 @@ const App: React.FC = () => {
         </header>
 
         <div className="flex-1 overflow-auto custom-scrollbar relative z-10 flex flex-col justify-between">
-          <div className="w-full px-2.5 py-3 sm:px-3.5 sm:py-4 md:px-4 md:py-4 lg:px-4 lg:py-5 space-y-3 md:space-y-4 flex-1">
+          <div className={`w-full py-3 sm:py-4 md:py-4 lg:py-5 space-y-3 md:space-y-4 flex-1 ${
+            activeTab === 'account' 
+              ? 'px-4 lg:px-6' 
+              : 'px-2.5 sm:px-3.5 md:px-4 lg:px-4'
+          }`}>
             <ErrorBoundary>
               {renderContent()}
             </ErrorBoundary>

@@ -1468,7 +1468,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
               }
               /* 交互反馈：微缩向内塌陷（scale 0.97）+ 内阴影向心加深 */
               .water-pool:hover {
-                transform: translate(-50%, -50%) scale(0.97) !important;
+                transform: scale(0.97) !important;
                 box-shadow: 
                   inset 0 8px 22px 2px rgba(0, 0, 0, 0.62),
                   inset 0 -6px 16px 2px rgba(0, 0, 0, 0.48),
@@ -1515,8 +1515,9 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
               }
             `}</style>
             
-            <div className="relative w-full h-[477px] sm:h-[495px] md:h-[513px] sandtable-canvas rounded-2xl md:rounded-[1.5rem] border border-slate-200/90 shadow-sm overflow-hidden mb-3 select-none">
-              {/* Sandtable Header */}
+            <div className="relative w-full overflow-x-auto overflow-y-hidden rounded-2xl md:rounded-[1.5rem] border border-slate-200/90 shadow-sm mb-3 select-none custom-scrollbar bg-slate-50">
+              <div className="relative w-[1200px] h-[520px] min-w-[1200px] sandtable-canvas">
+                {/* Sandtable Header */}
               <div className="absolute top-0 left-0 right-0 h-11 px-4 flex items-center justify-between z-30 border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
@@ -1538,7 +1539,7 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
 
               {/* SVG Pipes Background */}
               <svg 
-                viewBox="0 0 1000 500" 
+                viewBox="0 0 1200 520" 
                 preserveAspectRatio="none" 
                 className="absolute inset-0 w-full h-full z-0 pointer-events-none"
               >
@@ -1549,92 +1550,76 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                   </filter>
 
                   {/* Markers for Inflow & Outflow */}
-                  <marker id="arrow-blue" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-                    <path d="M 1 1.5 L 9 5 L 1 8.5 Z" fill="#2563eb" />
+                  <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+                    <path d="M 1 1.5 L 9 5 L 1 8.5 Z" fill="#3b82f6" />
                   </marker>
-                  <marker id="arrow-red" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-                    <path d="M 1 1.5 L 9 5 L 1 8.5 Z" fill="#e11d48" />
+                  <marker id="arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+                    <path d="M 1 1.5 L 9 5 L 1 8.5 Z" fill="#ef4444" />
                   </marker>
-                  <marker id="arrow-green" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-                    <path d="M 1 1.5 L 9 5 L 1 8.5 Z" fill="#059669" />
+                  <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+                    <path d="M 1 1.5 L 9 5 L 1 8.5 Z" fill="#10b981" />
                   </marker>
-                  <marker id="arrow-purple" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-                    <path d="M 1 1.5 L 9 5 L 1 8.5 Z" fill="#7c3aed" />
+                  <marker id="arrow-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+                    <path d="M 1 1.5 L 9 5 L 1 8.5 Z" fill="#8b5cf6" />
                   </marker>
-                  <marker id="arrow-yellow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-                    <path d="M 1 1.5 L 9 5 L 1 8.5 Z" fill="#d97706" />
+                  <marker id="arrow-orange" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+                    <path d="M 1 1.5 L 9 5 L 1 8.5 Z" fill="#f97316" />
                   </marker>
                 </defs>
 
-                {/* 1. 收产包 -> 刚性池 (日常运维消耗) */}
+                {/* 1. 收产包 -> 刚性池 (日常运维) */}
                 <g className="pipe-group">
-                  <line x1="280" y1="110" x2="720" y2="110" stroke="#e2e8f0" strokeWidth="6" strokeLinecap="round" />
-                  <line x1="280" y1="110" x2="720" y2="110" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-blue)" />
-                  {/* Outflow Arrow (流出箭头) */}
-                  <polygon points="315,106 325,110 315,114" fill="#2563eb" />
+                  <path d="M 274 102 H 483" fill="none" stroke="#e2e8f0" strokeWidth="6" strokeDasharray="12 8" strokeLinecap="round" />
+                  <path d="M 274 102 H 483" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-blue)" />
                 </g>
 
-                {/* 2. 收产包(收款包) -> 统筹池 (20% 确权收款后台) */}
+                {/* 2. 收产包 -> 统筹池 (收款后台) */}
                 <g className="pipe-group">
-                  <path d="M 185 150 L 185 265 L 400 265" fill="none" stroke="#e2e8f0" strokeWidth="6" strokeLinejoin="round" strokeLinecap="round" />
-                  <path d="M 185 150 L 185 265 L 400 265" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-blue)" />
-                  {/* Outflow Arrow (流出箭头) */}
-                  <polygon points="181,175 185,185 189,175" fill="#2563eb" />
+                  <path d="M 157 165 V 275 H 483" fill="none" stroke="#e2e8f0" strokeWidth="6" strokeDasharray="12 8" strokeLinejoin="round" strokeLinecap="round" />
+                  <path d="M 157 165 V 275 H 483" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-blue)" />
                 </g>
 
-                {/* 3. 刚性池 -> 奖金池 (理论分配) */}
+                {/* 3. 分红池 -> 统筹池 (分红后台) */}
                 <g className="pipe-group">
-                  <line x1="815" y1="150" x2="815" y2="240" stroke="#e2e8f0" strokeWidth="6" strokeLinecap="round" />
-                  <line x1="815" y1="150" x2="815" y2="240" stroke="#f43f5e" strokeWidth="2.5" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-red)" />
-                  {/* Outflow Arrow (流出箭头) */}
-                  <polygon points="811,165 815,175 819,165" fill="#e11d48" />
+                  <path d="M 157 360 V 295 H 483" fill="none" stroke="#e2e8f0" strokeWidth="6" strokeDasharray="12 8" strokeLinejoin="round" strokeLinecap="round" />
+                  <path d="M 157 360 V 295 H 483" fill="none" stroke="#8b5cf6" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-purple)" />
                 </g>
 
-                {/* 4. 奖金池 -> 承兑池 (计提承兑) */}
+                {/* 4. 统筹池 -> 刚性池 (统筹补足) */}
                 <g className="pipe-group">
-                  <line x1="815" y1="310" x2="815" y2="395" stroke="#e2e8f0" strokeWidth="6" strokeLinecap="round" />
-                  <line x1="815" y1="310" x2="815" y2="395" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-green)" />
-                  {/* Outflow Arrow (流出箭头) */}
-                  <polygon points="811,325 815,335 819,325" fill="#059669" />
+                  <path d="M 600 220 V 165" fill="none" stroke="#e2e8f0" strokeWidth="6" strokeDasharray="12 8" strokeLinejoin="round" strokeLinecap="round" />
+                  <path d="M 600 220 V 165" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-red)" />
                 </g>
 
-                {/* 5. 承兑池 -> 分红池 (沉淀盈余) */}
+                {/* 5. 刚性池 -> 奖金池 (理论分配) */}
                 <g className="pipe-group">
-                  <line x1="720" y1="430" x2="280" y2="430" stroke="#e2e8f0" strokeWidth="6" strokeLinecap="round" />
-                  <line x1="720" y1="430" x2="280" y2="430" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-yellow)" />
-                  {/* Outflow Arrow (流出箭头) */}
-                  <polygon points="685,426 675,430 685,434" fill="#d97706" />
+                  <path d="M 717 102 H 920" fill="none" stroke="#e2e8f0" strokeWidth="6" strokeDasharray="12 8" strokeLinecap="round" />
+                  <path d="M 717 102 H 920" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-red)" />
                 </g>
 
-                {/* 6. 分红池 -> 统筹池 (20% 分红后台) */}
+                {/* 6. 奖金池 -> 承兑池 (计提承兑) */}
                 <g className="pipe-group">
-                  <path d="M 185 390 L 185 290 L 400 290" fill="none" stroke="#e2e8f0" strokeWidth="6" strokeLinejoin="round" strokeLinecap="round" />
-                  <path d="M 185 390 L 185 290 L 400 290" fill="none" stroke="#8b5cf6" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-purple)" />
-                  {/* Outflow Arrow (流出箭头) */}
-                  <polygon points="181,370 185,360 189,370" fill="#7c3aed" />
+                  <path d="M 1037 165 V 360" fill="none" stroke="#e2e8f0" strokeWidth="6" strokeDasharray="12 8" strokeLinecap="round" />
+                  <path d="M 1037 165 V 360" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-green)" />
                 </g>
 
-                {/* 7. 统筹池 -> 刚性池 (统筹补足) */}
+                {/* 7. 分红池 -> 承兑池 (盈余分配) */}
                 <g className="pipe-group">
-                  <path d="M 500 235 L 500 130 L 720 130" fill="none" stroke="#e2e8f0" strokeWidth="6" strokeLinejoin="round" strokeLinecap="round" />
-                  <path d="M 500 235 L 500 130 L 720 130" fill="none" stroke="#f43f5e" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-red)" />
-                  {/* Outflow Arrow (流出箭头) */}
-                  <polygon points="496,215 500,205 504,215" fill="#e11d48" />
+                  <path d="M 274 400 H 920" fill="none" stroke="#e2e8f0" strokeWidth="6" strokeDasharray="12 8" strokeLinecap="round" />
+                  <path d="M 274 400 H 920" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-green)" />
                 </g>
 
-                {/* 8. 分红池 -> 奖金池 (80% 盈余二次分配) */}
+                {/* 8. 承兑池 -> 分红池 (沉淀盈余) */}
                 <g className="pipe-group">
-                  <path d="M 280 415 L 670 415 L 670 275 L 720 275" fill="none" stroke="#e2e8f0" strokeWidth="6" strokeLinejoin="round" strokeLinecap="round" />
-                  <path d="M 280 415 L 670 415 L 670 275 L 720 275" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-green)" />
-                  {/* Outflow Arrow (流出箭头) */}
-                  <polygon points="310,411 320,415 310,419" fill="#059669" />
+                  <path d="M 920 440 H 274" fill="none" stroke="#e2e8f0" strokeWidth="6" strokeDasharray="12 8" strokeLinecap="round" />
+                  <path d="M 920 440 H 274" fill="none" stroke="#f97316" strokeWidth="2.5" strokeLinecap="round" className="flow-line" markerEnd="url(#arrow-orange)" />
                 </g>
               </svg>
 
-              {/* 3. 统筹池 (Center, Row 2) */}
+              {/* 3. 统筹池 */}
               <div 
-                className="water-pool pool-tongchou text-white shadow-md w-fit min-w-[220px] max-w-[370px] min-h-[86px] p-3 sm:p-3.5 cursor-pointer group flex flex-col items-center justify-center" 
-                style={{ left: '50%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-1s' }}
+                className="water-pool pool-tongchou text-white shadow-md cursor-pointer group flex flex-col items-center justify-center p-3" 
+                style={{ left: '483px', top: '220px', width: '234px', height: '110px', position: 'absolute', animationDelay: '-1s' }}
                 onClick={handleTriggerCoordinationAdjustment}
                 title="统筹池：点击可执行统筹兜底资金注入（须弹窗确认）"
               >
@@ -1643,10 +1628,10 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                 <div className="text-[9px] font-bold text-purple-200 bg-black/30 px-2.5 py-0.5 rounded-full border border-white/20 mt-1.5 tracking-tight group-hover:bg-white group-hover:text-purple-700 transition-colors whitespace-nowrap">点击兜底注入</div>
               </div>
 
-              {/* 1. 收产包 (Top Left, Row 1) */}
+              {/* 1. 收产包 */}
               <div 
-                className="water-pool pool-shouchan text-white shadow-md w-fit min-w-[220px] max-w-[400px] min-h-[86px] p-3 sm:p-3.5 flex flex-col items-center justify-center" 
-                style={{ left: '18.5%', top: '22%', transform: 'translate(-50%, -50%)', animationDelay: '0s' }}
+                className="water-pool pool-shouchan text-white shadow-md flex flex-col items-center justify-center p-3" 
+                style={{ left: '40px', top: '40px', width: '234px', height: '125px', position: 'absolute', animationDelay: '0s' }}
               >
                 <h4 className="text-xs md:text-sm font-black mb-1 relative z-10 drop-shadow-xs leading-tight whitespace-nowrap text-blue-100 uppercase tracking-wide">收产包</h4>
                 <div className="text-sm md:text-base font-black font-mono relative z-10 drop-shadow-xs border-b border-white/20 pb-1 mb-1.5 w-full leading-tight text-center whitespace-nowrap">{formatMoney(displayIncomeWaterPool)}</div>
@@ -1662,14 +1647,14 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                 </div>
               </div>
 
-              {/* 2. 刚性池 (Top Right, Row 1) */}
+              {/* 2. 刚性池 */}
               {(() => {
                 const operatingLoss = displayOperatingLoss;
                 const totalRigid = displayTotalRigidExpenses + operatingLoss;
                 return (
                   <div 
-                    className="water-pool pool-gangxing text-white shadow-md w-fit min-w-[235px] max-w-[415px] min-h-[86px] p-3 sm:p-3.5 cursor-pointer group flex flex-col items-center justify-center" 
-                    style={{ left: '81.5%', top: '22%', transform: 'translate(-50%, -50%)', animationDelay: '-2s' }}
+                    className="water-pool pool-gangxing text-white shadow-md cursor-pointer group flex flex-col items-center justify-center p-3" 
+                    style={{ left: '483px', top: '40px', width: '234px', height: '125px', position: 'absolute', animationDelay: '-2s' }}
                     onClick={() => onSwitchTab?.('consumption')}
                   >
                     <h4 className="text-xs md:text-sm font-black mb-1 relative z-10 drop-shadow-xs leading-tight whitespace-nowrap text-rose-100 uppercase tracking-wide">刚性池</h4>
@@ -1699,28 +1684,28 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
                 );
               })()}
 
-              {/* 4. 奖金池 (Middle Right, Row 2) */}
+              {/* 4. 奖金池 */}
               <div 
-                className="water-pool pool-jiangjin text-white shadow-md w-fit min-w-[220px] max-w-[370px] min-h-[86px] p-3 sm:p-3.5 flex flex-col items-center justify-center" 
-                style={{ left: '81.5%', top: '55%', transform: 'translate(-50%, -50%)', animationDelay: '-3s' }}
+                className="water-pool pool-jiangjin text-white shadow-md flex flex-col items-center justify-center p-3" 
+                style={{ left: '920px', top: '40px', width: '234px', height: '125px', position: 'absolute', animationDelay: '-3s' }}
               >
                 <h4 className="text-xs md:text-sm font-black mb-1 relative z-10 drop-shadow-xs leading-tight whitespace-nowrap text-emerald-100 uppercase tracking-wide">奖金池</h4>
                 <div className="text-sm md:text-base font-black font-mono relative z-10 drop-shadow-xs leading-tight whitespace-nowrap">{formatMoney(displayTotalBonusPool)}</div>
               </div>
 
-              {/* 5. 承兑池 (Bottom Right, Row 3) */}
+              {/* 5. 承兑池 */}
               <div 
-                className="water-pool pool-chengdui text-white shadow-md w-fit min-w-[220px] max-w-[370px] min-h-[86px] p-3 sm:p-3.5 flex flex-col items-center justify-center" 
-                style={{ left: '81.5%', top: '86%', transform: 'translate(-50%, -50%)', animationDelay: '-4s' }}
+                className="water-pool pool-chengdui text-white shadow-md flex flex-col items-center justify-center p-3" 
+                style={{ left: '920px', top: '360px', width: '234px', height: '125px', position: 'absolute', animationDelay: '-4s' }}
               >
                 <h4 className="text-xs md:text-sm font-black mb-1 relative z-10 drop-shadow-xs leading-tight whitespace-nowrap text-amber-100 uppercase tracking-wide">承兑池</h4>
                 <div className="text-sm md:text-base font-black font-mono relative z-10 drop-shadow-xs leading-tight whitespace-nowrap">{formatMoney(displayTotalBonusPool)}</div>
               </div>
 
-              {/* 6. 分红池 (Bottom Left, Row 3) */}
+              {/* 6. 分红池 */}
               <div 
-                className="water-pool pool-fenhong text-white shadow-md w-fit min-w-[220px] max-w-[370px] min-h-[86px] p-3 sm:p-3.5 flex flex-col items-center justify-center" 
-                style={{ left: '18.5%', top: '86%', transform: 'translate(-50%, -50%)', animationDelay: '-6s' }}
+                className="water-pool pool-fenhong text-white shadow-md flex flex-col items-center justify-center p-3" 
+                style={{ left: '40px', top: '360px', width: '234px', height: '125px', position: 'absolute', animationDelay: '-6s' }}
               >
                 <h4 className="text-xs md:text-sm font-black mb-1 relative z-10 drop-shadow-xs leading-tight whitespace-nowrap text-indigo-100 uppercase tracking-wide">分红池</h4>
                 <div className="text-sm md:text-base font-black font-mono relative z-10 drop-shadow-xs leading-tight text-center whitespace-nowrap">
@@ -1735,51 +1720,52 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
 
               {/* SVG Labels Badges (Overlay with crisp background pills & drop shadows) */}
               <svg 
-                viewBox="0 0 1000 500" 
+                viewBox="0 0 1200 520" 
                 preserveAspectRatio="none" 
                 className="absolute inset-0 w-full h-full z-20 pointer-events-none"
               >
-                {/* 1. 日常运维消耗 */}
+                {/* 1. 日常运维 */}
                 <g filter="url(#badge-shadow)">
-                  <rect x="425" y="70" width="140" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#93c5fd" strokeWidth="1" />
-                  <text x="495" y="85" fill="#2563eb" fontSize="9.5" fontWeight="bold" textAnchor="middle">日常运维消耗</text>
+                  <rect x="330" y="60" width="130" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#93c5fd" strokeWidth="1" />
+                  <text x="395" y="75" fill="#2563eb" fontSize="9.5" fontWeight="bold" textAnchor="middle">日常运维</text>
                 </g>
-                {/* 2. 收款包 -> 统筹池 (20% 确权收款) - 上移至蓝色管线上方 */}
+                {/* 2. 收款后台 */}
                 <g filter="url(#badge-shadow)">
-                  <rect x="245" y="235" width="135" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#93c5fd" strokeWidth="1" />
-                  <text x="312.5" y="250" fill="#2563eb" fontSize="9.5" fontWeight="bold" textAnchor="middle">收款包（20%）后台</text>
+                  <rect x="220" y="235" width="130" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#93c5fd" strokeWidth="1" />
+                  <text x="285" y="250" fill="#2563eb" fontSize="9.5" fontWeight="bold" textAnchor="middle">收款后台</text>
                 </g>
-                {/* 奖金理论分配 */}
+                {/* 3. 理论分配 */}
                 <g filter="url(#badge-shadow)">
-                  <rect x="770" y="184" width="120" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#fecdd3" strokeWidth="1" />
-                  <text x="830" y="199" fill="#e11d48" fontSize="9.5" fontWeight="bold" textAnchor="middle">理论分配</text>
+                  <rect x="770" y="60" width="120" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#fecdd3" strokeWidth="1" />
+                  <text x="830" y="75" fill="#e11d48" fontSize="9.5" fontWeight="bold" textAnchor="middle">理论分配</text>
                 </g>
-                {/* 计提承兑 */}
+                {/* 4. 计提交兑 */}
                 <g filter="url(#badge-shadow)">
-                  <rect x="770" y="341" width="120" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#a7f3d0" strokeWidth="1" />
-                  <text x="830" y="356" fill="#059669" fontSize="9.5" fontWeight="bold" textAnchor="middle">计提承兑</text>
+                  <rect x="1055" y="250" width="120" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#a7f3d0" strokeWidth="1" />
+                  <text x="1115" y="265" fill="#059669" fontSize="9.5" fontWeight="bold" textAnchor="middle">计提承兑</text>
                 </g>
-                {/* 统筹补足 */}
+                {/* 5. 统筹补足 */}
                 <g filter="url(#badge-shadow)">
-                  <rect x="545" y="142" width="140" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#fecdd3" strokeWidth="1" />
-                  <text x="615" y="157" fill="#e11d48" fontSize="9.5" fontWeight="bold" textAnchor="middle">统筹补足注入</text>
+                  <rect x="610" y="170" width="130" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#fecdd3" strokeWidth="1" />
+                  <text x="675" y="185" fill="#e11d48" fontSize="9.5" fontWeight="bold" textAnchor="middle">统筹补足</text>
                 </g>
-                {/* 沉淀盈余 */}
+                {/* 6. 沉淀盈余 */}
                 <g filter="url(#badge-shadow)">
-                  <rect x="435" y="444" width="130" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#fde68a" strokeWidth="1" />
-                  <text x="500" y="459" fill="#d97706" fontSize="9.5" fontWeight="bold" textAnchor="middle">沉淀盈余</text>
+                  <rect x="570" y="455" width="130" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#fde68a" strokeWidth="1" />
+                  <text x="635" y="470" fill="#d97706" fontSize="9.5" fontWeight="bold" textAnchor="middle">沉淀盈余</text>
                 </g>
-                {/* 20% 分红后台 (统筹池左侧 紫色SVG管线下方) */}
+                {/* 7. 分红后台 */}
                 <g filter="url(#badge-shadow)">
-                  <rect x="250" y="302" width="125" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#ddd6fe" strokeWidth="1" />
-                  <text x="312.5" y="317" fill="#7c3aed" fontSize="9.5" fontWeight="bold" textAnchor="middle">20%分红后台</text>
+                  <rect x="220" y="310" width="130" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#ddd6fe" strokeWidth="1" />
+                  <text x="285" y="317" fill="#7c3aed" fontSize="9.5" fontWeight="bold" textAnchor="middle">分红后台</text>
                 </g>
-                {/* 80% 盈余二次分配 */}
+                {/* 8. 盈余分配 */}
                 <g filter="url(#badge-shadow)">
-                  <rect x="370" y="379" width="160" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#a7f3d0" strokeWidth="1" />
-                  <text x="450" y="394" fill="#059669" fontSize="9.5" fontWeight="bold" textAnchor="middle">80% 盈余二次分配</text>
+                  <rect x="535" y="355" width="130" height="22" rx="11" fill="white" fillOpacity="0.97" stroke="#a7f3d0" strokeWidth="1" />
+                  <text x="600" y="370" fill="#059669" fontSize="9.5" fontWeight="bold" textAnchor="middle">盈余分配</text>
                 </g>
               </svg>
+              </div>
             </div>
 
             <div className="mt-2.5 p-2.5 md:p-3 bg-slate-50 rounded-2xl border border-slate-100">
